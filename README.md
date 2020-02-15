@@ -1,7 +1,5 @@
-# Technical Portfolio
+# Portfolio or Resume or CV
 
-This repository hosts a technical portfolio built using [TechFolio](http://techfolios.github.io). 
+This repo contains a portfolio resume that showcases examples of my work along with the usual resume information about my work experience. 
 
-See the quick start guide for instructions on how to tailor the template to your own needs.
-
-
+To view a live demo, [click here](https://morleyd.github.io)
