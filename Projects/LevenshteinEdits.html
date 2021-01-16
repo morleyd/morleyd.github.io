@@ -13074,6 +13074,13 @@ div#notebook {
   <div tabindex="-1" id="notebook" class="border-box-sizing">
     <div class="container" id="notebook-container">
 
+<div class="cell border-box-sizing text_cell rendered"><div class="prompt input_prompt">
+</div><div class="inner_cell">
+<div class="text_cell_render border-box-sizing rendered_html">
+<h3 id="My-implementation-of-the-Wagner&#8211;Fischer-algorithm-for-computing-the-Levenshtein-Distance:">My implementation of the Wagner&#8211;Fischer algorithm for computing the Levenshtein Distance:<a class="anchor-link" href="#My-implementation-of-the-Wagner&#8211;Fischer-algorithm-for-computing-the-Levenshtein-Distance:">&#182;</a></h3>
+</div>
+</div>
+</div>
 <div class="cell border-box-sizing code_cell rendered">
 <div class="input">
 <div class="prompt input_prompt">In&nbsp;[1]:</div>
@@ -13188,6 +13195,13 @@ div#notebook {
 </div>
 
 </div>
+<div class="cell border-box-sizing text_cell rendered"><div class="prompt input_prompt">
+</div><div class="inner_cell">
+<div class="text_cell_render border-box-sizing rendered_html">
+<h3 id="The-text-sample-to-compare:">The text sample to compare:<a class="anchor-link" href="#The-text-sample-to-compare:">&#182;</a></h3>
+</div>
+</div>
+</div>
 <div class="cell border-box-sizing code_cell rendered">
 <div class="input">
 <div class="prompt input_prompt">In&nbsp;[2]:</div>
@@ -13244,6 +13258,7 @@ div#notebook {
 <span class="s2">but he answered to both names. It was all the</span>
 <span class="s2">same to him.</span>
 <span class="s2">&quot;&quot;&quot;</span>
+<span class="c1"># Make arbitrary changes every 30 charaters</span>
 <span class="n">s2</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="n">s</span> <span class="k">if</span> <span class="n">i</span> <span class="o">%</span> <span class="mi">30</span> <span class="o">!=</span> <span class="mi">0</span> <span class="k">else</span> <span class="s1">&#39;a&#39;</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span><span class="n">s</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">s1</span><span class="p">)])</span>
 </pre></div>
 
@@ -13255,7 +13270,7 @@ div#notebook {
 <div class="cell border-box-sizing text_cell rendered"><div class="prompt input_prompt">
 </div><div class="inner_cell">
 <div class="text_cell_render border-box-sizing rendered_html">
-<h1 id="Compare-results">Compare results<a class="anchor-link" href="#Compare-results">&#182;</a></h1>
+<h1 id="Speed-test-between-my-code-and-the-edit_distance-package:">Speed test between my code and the edit_distance package:<a class="anchor-link" href="#Speed-test-between-my-code-and-the-edit_distance-package:">&#182;</a></h1>
 </div>
 </div>
 </div>
@@ -13289,6 +13304,57 @@ div#notebook {
 </div>
 </div>
 
+</div>
+<div class="cell border-box-sizing code_cell rendered">
+<div class="input">
+<div class="prompt input_prompt">In&nbsp;[6]:</div>
+<div class="inner_cell">
+    <div class="input_area">
+<div class=" highlight hl-ipython3"><pre><span></span><span class="kn">import</span> <span class="nn">edit_distance</span>  <span class="c1"># https://pypi.org/project/edit-distance/</span>
+</pre></div>
+
+    </div>
+</div>
+</div>
+
+</div>
+<div class="cell border-box-sizing code_cell rendered">
+<div class="input">
+<div class="prompt input_prompt">In&nbsp;[7]:</div>
+<div class="inner_cell">
+    <div class="input_area">
+<div class=" highlight hl-ipython3"><pre><span></span><span class="o">%</span><span class="k">timeit</span> edit_distance.edit_distance_backpointer(s1, s2)
+</pre></div>
+
+    </div>
+</div>
+</div>
+
+<div class="output_wrapper">
+<div class="output">
+
+
+<div class="output_area">
+
+    <div class="prompt"></div>
+
+
+<div class="output_subarea output_stream output_stdout output_text">
+<pre>10.9 s ± 1.13 s per loop (mean ± std. dev. of 7 runs, 1 loop each)
+</pre>
+</div>
+</div>
+
+</div>
+</div>
+
+</div>
+<div class="cell border-box-sizing text_cell rendered"><div class="prompt input_prompt">
+</div><div class="inner_cell">
+<div class="text_cell_render border-box-sizing rendered_html">
+<h1 id="The-output-of-both-function-calls:">The output of both function calls:<a class="anchor-link" href="#The-output-of-both-function-calls:">&#182;</a></h1>
+</div>
+</div>
 </div>
 <div class="cell border-box-sizing code_cell rendered">
 <div class="input">
@@ -14319,50 +14385,6 @@ div#notebook {
   ...])</pre>
 </div>
 
-</div>
-
-</div>
-</div>
-
-</div>
-<div class="cell border-box-sizing code_cell rendered">
-<div class="input">
-<div class="prompt input_prompt">In&nbsp;[6]:</div>
-<div class="inner_cell">
-    <div class="input_area">
-<div class=" highlight hl-ipython3"><pre><span></span><span class="kn">import</span> <span class="nn">edit_distance</span>
-</pre></div>
-
-    </div>
-</div>
-</div>
-
-</div>
-<div class="cell border-box-sizing code_cell rendered">
-<div class="input">
-<div class="prompt input_prompt">In&nbsp;[7]:</div>
-<div class="inner_cell">
-    <div class="input_area">
-<div class=" highlight hl-ipython3"><pre><span></span><span class="o">%</span><span class="k">timeit</span> edit_distance.edit_distance_backpointer(s1, s2)
-</pre></div>
-
-    </div>
-</div>
-</div>
-
-<div class="output_wrapper">
-<div class="output">
-
-
-<div class="output_area">
-
-    <div class="prompt"></div>
-
-
-<div class="output_subarea output_stream output_stdout output_text">
-<pre>10.9 s ± 1.13 s per loop (mean ± std. dev. of 7 runs, 1 loop each)
-</pre>
-</div>
 </div>
 
 </div>
