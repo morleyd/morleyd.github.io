@@ -40,6 +40,19 @@
 					<li data-filter=".ai">Machine Learning</li>
 				</ul>
 				<ul id="container" class="item-list">
+					<li class="item ai nlp">
+						<div class="image">
+							<img src="images/project/relation.png"  alt="" />
+							<div class="hover">
+								<a class="fancybox" rel="gallery1" href="#relation">
+									<div class="item-content">
+										<h4>Relation Extraction</h4>
+										<p>Model that uses NER to augment the power of relation extraction</p>
+									</div>
+								</a>
+							</div>
+						</div>
+					</li>
 					<li class="item ">
 						<div class="image">
 							<img src="images/project/wordle.png"  alt="" />
@@ -170,99 +183,6 @@
 							</div>
 						</div>
 					</li>
-<!--					<li class="item ">
-						<div class="image">
-							<img src="images/project/playground.png"  alt="" />
-							<div class="hover">
-								<a class="fancybox" rel="gallery1" href="#hide_seek">
-									<div class="item-content">
-										<h4>Optimal Hide and Seek</h4>
-										<p>Modeled the game of hide and seek as a optimal control problem</p>
-									</div>
-								</a>
-							</div>
-						</div>
-					</li>
-					<li class="item lab ai math" >
-						<div class="image">
-							<img src="images/face.png"  alt="" />
-							<div class="hover">
-								<a class="fancybox" rel="gallery1" href="#portfolio_1">
-									<div class="item-content">
-										<h4>Facial Recognition</h4>
-										<p>Uses Singular Value Decomposition to identity most similar faces in a database.</p>
-									</div>
-								</a>
-							</div>
-						</div>
-					</li>
-					<li class="item lab nlp">
-						<div class="image">
-							<img src="images/astro.png"  alt="" />
-							<div class="hover">
-								<a class="fancybox" rel="gallery1" href="#portfolio_2">
-									<div class="item-content">
-										<h4>Fourier Transform</h4>
-										<p>Experimentation with different properties and applications of the fourier transform</p>
-									</div>
-									</a>
-							</div>
-						</div>
-					</li>
-				<ul id="container" class="item-list">
-					<li class="item lab math ai">
-						<div class="image">
-							<img src="images/david_lander.png"  alt="" />
-							<div class="hover">
-								<a class="fancybox" rel="gallery1" href="#portfolio_6">
-									<div class="item-content">
-										<h4>Kalman Filter</h4>
-										<p>A walkthrough of the Kalman Filter, its algorithms and applications</p>
-									</div>
-								</a>
-							</div>
-						</div>
-					</li>
-					<li class="item math">
-						<div class="image">
-							<img src="images/ .jpg"  alt="" />
-							<div class="hover">
-								<a class="fancybox" rel="gallery1" href="#portfolio_10">
-									<div class="item-content">
-										<h4>Fill Me</h4>
-										<p>Hover Text</p>
-									</div>
-								</a>
-							</div>
-						</div>
-					</li>
-					<li class="item math">
-						<div class="image">
-							<img src="images/ .jpg"  alt="" />
-							<div class="hover">
-								<a class="fancybox" rel="gallery1" href="#portfolio_10">
-									<div class="item-content">
-										<h4>Fill Me</h4>
-										<p>Hover Text</p>
-									</div>
-								</a>
-							</div>
-						</div>
-					</li>
-					<li class="item math">
-						<div class="image">
-							<img src="images/ .jpg"  alt="" />
-							<div class="hover">
-								<a class="fancybox" rel="gallery1" href="#portfolio_10">
-									<div class="item-content">
-										<h4>Fill Me</h4>
-										<p>Hover Text</p>
-									</div>
-								</a>
-							</div>
-						</div>
-					</li>
--->                     
 				</ul>
 			</section>
 		</div>
@@ -344,33 +264,14 @@
 			<p>I was asked to create a tool that would compare two documents and return a score based on the edits required to transform the first text into the second. Also, the client wanted to see a list of each edit used. Responding to the first request, I coded up a version of the Wagner–Fischer algorithm for computing the Levenshtein Distance. This dynamic programming algorithm is efficient because it does not keep track of the specific edits, just that they happened. This script allowed me to solve the client's first problem, but not the second. Further, I couldn't find an algorithm or premade package that would efficiently keep track of each edit. I delivered the tool and apologized that I was unable to fulfill their second wish at that time. This failure bugged me for several months until I was asked to implement another algorithm for a class. The dots connected; I suddenly knew how to solve the client's problem.</p>
       <p><a href="Projects/LevenshteinEdits.html">Click Here for a notebook with my completed code and a time comparison with a similar package I found later.</a></p>
 		</div>  
-<!--	<div id="hide_seek" class="popup_portfolio">
+		<div id="relation" class="popup_portfolio">
 			<img src=""  alt="" />
-			<h3>Optimal Hide and Seek</h3>
-			<time datetime="2020-04-9">Made: April 9, 2020</time>
-			<p>We sought to find the path for a seeker to take to have a view of all hiding spots in the shortest time. We modeled the situation as a grid with a single obstacle and used differential equations and control theory to find a result. Our main method was to use Pontryagins Maximum Principle to provide simple variable definitions and then adapted a python based numerical solver. </p>
-      <p><a href="Projects/hide_and_seek.pdf">Click Here for the paper containing the full methodology and work.</a></p>
-		</div>
-		<div style="display:none;">
-		<div id="portfolio_1" class="popup_portfolio">
-			<img src="images/portfolio_1.png"  alt="" />
-			<h3>Facial Recognition</h3>
-			<time datetime="2018-11-27">Made: November 27, 2018</time>
-			<p> When I made this, I was quite proud of it. Looking back, it's quite a naive implementation. I used the singular value decomposition (SVD) to compress a database of images. I converted that database into a matrix where each row represented a different image. With that matrix in place, I can now take any test image and find its match using the Euclidean metric for distance. If I were to recreate it now, I would store the images in a KD-Tree for more efficient indexing of images and use a nearest neighbor search algorithm to retrieve matches. For a demo of the code and output, <a href="Projects/facial_recognition.html">Click Here</a>.</p>
-		</div>
-		<div id="portfolio_2" class="popup_portfolio">
-			<img src="images/portfolio_2.png"  alt="" />
-			<h3>Fourier Transform</h3>
-			<time datetime="2018-11-29">Made: November 29, 2018</time>
-			<p>The Fourier Transform is a method of decomposing a signal into its constituent frequencies. It has so many applications in any branch of signal processing that the Fast Fourier Transform (FFT) was named one of the top 10 algorithms of the 20th century. This notebook represents some of my preliminary experiments in implementing the different algorithms for computing the Fourier Transform. After that, I play with some of the different applications like convolutions and filtering.For a demo of the code and output, <a href="Projects/fourier_transform.html">Click Here</a>.</p>
-		</div>
-		<div id="portfolio_6" class="popup_portfolio">
-			<img src="images/david_pilot. jpg"  alt="" />
-			<h3>Kalman Filter</h3>
-			<time datetime="2020-01-18">Made: January 18, 2020</time>
-			<p>The Kalman Filter is an algorithm for making smooth functions out of noisy data. This algorithm has applications any time you are working with observational data with any amount of noise. For example, the Kalman Filter was used in the guidance systems for the Apollo missions to the moon back in the 1960s. The system would use the algorithm to incorporate new positional data into a working model so that the astronauts could accurately predict where on Earth (or the Moon) they would land. <a href="Projects/kalman_filter.html">Click Here</a> for a demo that displays some of my early learning and experimentation with this algorithm.</p>
-		</div>
--->    
+			<h3>Relation Extraction without Given Spans</h3>
+			<time datetime="2020-12-14">Made: June 6, 2022</time>
+			<p>I was asked to create a model that given a raw chunk of text would extract all the employee relations. For example, if it received the input, "i just bumped into my buddy phil who is the ceo of XYZ Company", the model would show that Phil is an employee of XYZ Company. I also wanted to be able to account for the case where there were multiple people and relations in a given sentence.</p>
+      <p>I was given the <a href="https://nlp.stanford.edu/projects/tacred/">TACRED relation classification dataset</a> reported in <a href="https://arxiv.org/abs/2010.01057">this paper</a>. My solution builds off pretrained models stored oh HuggingFace's Transformers. I selected LUKE, one of the best performing models on this dataset, as ranked by <a href="http://nlpprogress.com/english/relationship_extraction.html">NLP-Progress</a>. I use the <a href="https://huggingface.co/studio-ousia/luke-large-finetuned-tacred">fine-tuned model checkpoint</a> from Luke, <a href="https://aclanthology.org/2020.emnlp-main.523">"{LUKE}: Deep Contextualized Entity Representations with Entity-aware Self-attention"</a> for handling the relation extraction. However, this model requires the spans of the entities as inputs and only outputs one relation per utterance. To overcome these limitations, I used a Named Entity Recognition (NER) model to exctact all the entity spans relevant to my use case. The NER is handled by <a href="https://huggingface.co/dslim/bert-base-NER-uncased">BERT</a>. </p>
+      <p><a href="Projects/Relation_Extraction_without_Given_Spans.ipynb">Click Here for a notebook with my completed code and or go to Google Colab to try it for yourself.</a></p>
+		</div>  
 	</div>
 	<script src="https://code.jquery.com/jquery-1.11.1.min.js"></script>
 	<script src="js/isotope.pkgd.min.js"></script>
