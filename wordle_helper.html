@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta content="width=device-width, initial-scale=1.0, user-scalable=no" name="viewport"/>
+  <title>Wordle Helper</title>
+  <link href="css/helper_style.css" rel="stylesheet">
+
+<body onload=change_color("green")>
+<div class="container">
+  <h1>Wordle Helper</h1>
+
+  <div class="drop-targets">
+    <div class="box" id="0"></div>
+    <div class="box" id="1"></div>
+    <div class="box" id="2"></div>
+    <div class="box" id="3"></div>
+    <div class="box" id="4"></div>
+  </div>
+
+
+  <input id="badLetterField" type="text"/>
+  <div>
+    <input checked="checked" id="green" name="box_color" onclick="change_color(this.value)" type="radio" value="green">
+    <label for="green">Correct</label>
+    <input id="yellow" name="box_color" onclick="change_color(this.value)" type="radio" value="orange">
+    <label for="yellow">Wrong Spot</label>
+    <input id="red" name="box_color" onclick="change_color(this.value)" type="radio"
+           value="crimson">
+    <label for="red">Illegal Letter</label>
+  </div>
+
+  <div class="keyboard">
+    <!--  courtesy of https://codepen.io/gschier/pen/VKgyaY-->
+    <div class="keyboard__row">
+      <div class="item" data-color="0" draggable="true" id="Q">
+        <div class="key--letter">Q</div>
+      </div>
+      <div class="item" data-color="0" draggable="true" id="W">
+        <div class="key--letter">W</div>
+      </div>
+      <div class="item" data-color="0" draggable="true" id="E">
+        <div class="key--letter">E</div>
+      </div>
+      <div class="item" data-color="0" draggable="true" id="R">
+        <div class="key--letter">R</div>
+      </div>
+      <div class="item" data-color="0" draggable="true" id="T">
+        <div class="key--letter">T</div>
+      </div>
+      <div class="item" data-color="0" draggable="true" id="Y">
+        <div class="key--letter">Y</div>
+      </div>
+      <div class="item" data-color="0" draggable="true" id="U">
+        <div class="key--letter">U</div>
+      </div>
+      <div class="item" data-color="0" draggable="true" id="I">
+        <div class="key--letter">I</div>
+      </div>
+      <div class="item" data-color="0" draggable="true" id="O">
+        <div class="key--letter">O</div>
+      </div>
+      <div class="item" data-color="0" draggable="true" id="P">
+        <div class="key--letter">P</div>
+      </div>
+    </div> <br>
+    <div class="keyboard__row">
+      <div class="item" data-color="0" draggable="true" id="A">
+        <div class="key--letter">A</div>
+      </div>
+      <div class="item" data-color="0" draggable="true" id="S">
+        <div class="key--letter">S</div>
+      </div>
+      <div class="item" data-color="0" draggable="true" id="D">
+        <div class="key--letter">D</div>
+      </div>
+      <div class="item" data-color="0" draggable="true" id="F">
+        <div class="key--letter">F</div>
+      </div>
+      <div class="item" data-color="0" draggable="true" id="G">
+        <div class="key--letter">G</div>
+      </div>
+      <div class="item" data-color="0" draggable="true" id="H">
+        <div class="key--letter">H</div>
+      </div>
+      <div class="item" data-color="0" draggable="true" id="J">
+        <div class="key--letter">J</div>
+      </div>
+      <div class="item" data-color="0" draggable="true" id="K">
+        <div class="key--letter">K</div>
+      </div>
+      <div class="item" data-color="0" draggable="true" id="L">
+        <div class="key--letter">L</div>
+      </div>
+    </div> <br>
+    <div class="keyboard__row">
+      <div class="key--special key--w5" data-key="13">
+        <span>RESET</span>
+      </div>
+      <div class="item" data-color="0" draggable="true" id="Z">
+        <div class="key--letter">Z</div>
+      </div>
+      <div class="item" data-color="0" draggable="true" id="X">
+        <div class="key--letter">X</div>
+      </div>
+      <div class="item" data-color="0" draggable="true" id="C">
+        <div class="key--letter">C</div>
+      </div>
+      <div class="item" data-color="0" draggable="true" id="V">
+        <div class="key--letter">V</div>
+      </div>
+      <div class="item" data-color="0" draggable="true" id="B">
+        <div class="key--letter">B</div>
+      </div>
+      <div class="item" data-color="0" draggable="true" id="N">
+        <div class="key--letter">N</div>
+      </div>
+      <div class="item" data-color="0" draggable="true" id="M">
+        <div class="key--letter">M</div>
+      </div>
+      <div class="key--special key--w5" onclick=filter_words()>
+        <span>RUN</span>
+      </div>
+    </div> <br>
+  </div>
+  <pre id="whereToPrint"></pre>
+</div>
+  <script src="js/helper_main.js"></script>
+</body>
+
+</html>
