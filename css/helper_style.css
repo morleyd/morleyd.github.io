@@ -115,7 +115,7 @@ body {
     background-color: #fff;
     height: 100vh;
     flex-direction: column;
-    justify-content: center;
+    justify-content: flex-start;
     align-items: center;
     margin: 20px;
     overflow: auto;
@@ -153,8 +153,8 @@ ul{
 
 .results-box {
     width: 24vw;
-    height: 110px;
-    overflow: auto;
+    height: 100vh;
+    overflow: auto
 }
 
 .ui-state-hover {

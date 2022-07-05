@@ -64,17 +64,17 @@ function getKnown(){
 }
 
 function formatWords(words){
-    let out;
+    let out = '<div>';
     if (words.length === 0) {
-        out = '<p style="text-align:center;"><b>no matching words</b></p>';
+        out = '<p style="text-align:center;"><br><b>no matching words</b></p>';
         document.getElementById("whereToPrint").innerHTML = out;
     } else {
-        out = "<ul>";
+        // out = "<ul>";
         words.forEach( word => {
-                out += "<li>" + word + "</li>"
+                out += "<p style=\"text-align:center;\">" + word + "</p>"
             }
         );
-        out += "</ul>";
+        out += "</div>";
         document.getElementById("whereToPrint").innerHTML = out;
     }
 }
