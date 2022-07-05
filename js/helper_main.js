@@ -1,58 +1,30 @@
-/* draggable element */
-const draggableElements = document.querySelectorAll('.item');
-
-for(let i = 0; i < draggableElements.length; i++){
-    dragElement(draggableElements[i]);
-}
-function  dragElement(item){
-    item.addEventListener('dragstart', dragStart);
-
-    function dragStart(e) {
-        e.dataTransfer.setData('text/plain', e.target.id);
-        setTimeout(() => {
-            e.target.classList.add('hide');
-        }, 0);
-    }
-    /* drop targets */
-    const boxes = document.querySelectorAll('.box');
-
-    boxes.forEach(box => {
-        box.addEventListener('dragenter', dragEnter)
-        box.addEventListener('dragover', dragOver);
-        box.addEventListener('dragleave', dragLeave);
-        box.addEventListener('drop', drop);
-    });
-
-    function dragEnter(e) {
-        e.preventDefault();
-        e.target.classList.add('drag-over');
-    }
-
-    function dragOver(e) {
-        e.preventDefault();
-        e.target.classList.add('drag-over');
-    }
-
-    function dragLeave(e) {
-        e.target.classList.remove('drag-over');
-    }
-
-    function drop(e) {
-        e.target.classList.remove('drag-over');
-
-        // get the draggable element
+$( ".box" ).droppable({
+    classes: {
+        "ui-droppable-hover": "ui-state-hover"
+    },
+    drop: function(event, ui) {
         const color = document.querySelector('input[name="box_color"]:checked').value;
-        const id = e.dataTransfer.getData('text/plain');
-        const draggable = document.getElementById(id);
-        draggable.setAttribute("data-color", color)
+        $(this).append($(ui.draggable).clone());
+        let boxID = event.target.id;
+        document.getElementById(boxID).firstElementChild.setAttribute("data-color", color);
+    },
+});
 
-        // add it to the drop target
-        e.target.appendChild(draggable);
-
-        // display the draggable element
-        draggable.classList.remove('hide');
-    }
-}
+$( ".item" ).draggable({
+    drag: function (event, ui) {
+        if ($(this).data('droppedin')) {
+            $(this).data('droppedin').droppable('enable');
+            $(this).data('droppedin', null)
+            $(this).removeClass('dropped')
+        }
+    },
+    snap: ".box",
+    snapMode: "inner",
+    helper: "clone", // create "copy" with original properties, but not a true clone
+    cursor: "move",
+    revert: "invalid",
+    revertDuration: 0 // immediate snap
+})
 
 function changeColor(color) {
     let boxes = document.querySelectorAll('[data-color="0"]');
@@ -79,54 +51,32 @@ function getKnown(){
     return out;
 }
 
-function formatWords(words){
-    let out;
-    if (words.length === 0) {
-        out = '<p style="text-align:center;"><b>no matching words</b></p>';
-        document.getElementById("whereToPrint").innerHTML = out;
-    } else {
-        out = "<ul>";
-        words.forEach( word => {
-                out += "<li>" + word + "</li>"
-            }
-        );
-        out += "</ul>";
-        document.getElementById("whereToPrint").innerHTML = out;
-    }
-}
-
-function filterWords(){
+function filterWords() {
     let goodWords = [];
     // let allWords = loadWords();
     let bad_letters = document.getElementById('badLetterField').value.toLowerCase();
     let known = getKnown();
     let letter;
-    // For all words
     for (let i = 0; i < allWords.length; i++) {
         let word = allWords[i];
         let isGoodWord = true;
-        // Check that don't contain any illegal letters
         for (let j = 0; j < bad_letters.length; j++) {
             letter = bad_letters.charAt(j)
             if (word.includes(letter)) {
                 isGoodWord = false;
             }
         }
-        // Now parse the info from the boxes
         for (let key in known) {
             let idx = parseInt(key);
             letter = known[key]['value'].toLowerCase();
-            // Red boxes contain letters that are in the word, just correctly placed
             if (known[key]['color'] === 'crimson') {
-                if (!word.includes(letter)) {
+                if (word.includes(letter)) {
                     isGoodWord = false;
                 }
-            // Orange boxes contain letters that are in the word somewhere
             } else if (known[key]['color'] === 'orange') {
                 if (!word.includes(letter) || word.charAt(idx) === letter) {
                     isGoodWord = false;
                 }
-            // Green boxes contain letters that have to be in that spot
             } else if (known[key]['color'] === 'green') {
                 if (word.charAt(idx) != letter) {
                     isGoodWord = false;
@@ -137,7 +87,7 @@ function filterWords(){
             goodWords.push(word)
         }
     }
-    formatWords(goodWords)
+    document.getElementById("whereToPrint").innerHTML = JSON.stringify(goodWords, null, 4);
 }
 
 const allWords = [
@@ -14109,4 +14059,4 @@ const allWords = [
     "zygon",
     "zymes",
     "zymic",
-    "false"]
+    "false"];
