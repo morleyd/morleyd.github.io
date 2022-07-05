@@ -54,14 +54,14 @@ function  dragElement(item){
     }
 }
 
-function change_color(color) {
+function changeColor(color) {
     let boxes = document.querySelectorAll('[data-color="0"]');
     boxes.forEach(box => {
         box.style.backgroundColor=color;
     })
 }
 
-function get_known(){
+function getKnown(){
     let out = {};
     for (let i=0; i<5; i++){
         let idx = i.toString();
@@ -80,20 +80,26 @@ function get_known(){
 }
 
 function formatWords(words){
-    let out = "<ul>";
-    words.forEach( word => {
-        out += "<li>" + word + "</li>"
-        }
-    );
-    out += "</ul>";
-    document.getElementById("whereToPrint").innerHTML = out;
+    let out;
+    if (words.length === 0) {
+        out = '<p style="text-align:center;"><b>no matching words</b></p>';
+        document.getElementById("whereToPrint").innerHTML = out;
+    } else {
+        out = "<ul>";
+        words.forEach( word => {
+                out += "<li>" + word + "</li>"
+            }
+        );
+        out += "</ul>";
+        document.getElementById("whereToPrint").innerHTML = out;
+    }
 }
 
 function filterWords(){
     let goodWords = [];
     // let allWords = loadWords();
     let bad_letters = document.getElementById('badLetterField').value.toLowerCase();
-    let known = get_known();
+    let known = getKnown();
     let letter;
     // For all words
     for (let i = 0; i < allWords.length; i++) {

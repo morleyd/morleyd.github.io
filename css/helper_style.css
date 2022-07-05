@@ -39,8 +39,8 @@ ul{
 }
 
 .box {
-    height: 45px;
-    width: 45px;
+    height: 52px;
+    width: 9vw;
     border: solid 3px #ccc;
     margin: 7px;
 
@@ -53,25 +53,30 @@ ul{
 }
 
 .results-box {
-    width: 90px;
+    width: 24vw;
     height: 110px;
     overflow: auto;
 }
 
-.drag-over {
+.ui-state-hover {
     border: dashed 3px red;
 }
 
 .item {
-    height: 45px;
-    width: 45px;
-    background-color: #F0DB4F;
+    text-align: center;
+    color: #eee;
+    font-size: 14px;
+    margin: 2px;
+    padding: 4px;
+    width: 8vw;
+    height: 43px;
+    border: 1px solid #444;
+    /*box-shadow: 0 0.2em 0 0.05em #222;*/
+    border-bottom-color: #555;
 }
 
-.item {
-    text-align: center;
-    font-size: 14px;
-}
+/*.item {*/
+/*}*/
 
 .hide {
     display: none;

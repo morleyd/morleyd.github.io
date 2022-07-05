@@ -6,8 +6,10 @@
   <meta content="width=device-width, initial-scale=1.0, user-scalable=no" name="viewport"/>
   <title>Wordle Helper</title>
   <link href="css/helper_style.css" rel="stylesheet">
-
-<body onload=change_color("green")>
+  <script src="https://code.jquery.com/jquery-3.6.0.js"></script>
+  <script src="https://code.jquery.com/ui/1.13.1/jquery-ui.js"></script>
+</head>
+<body onload=changeColor("green")>
 <div class="container">
   <div>
     <h1 style="text-align:center;">Wordle Helper</h1>
@@ -31,9 +33,9 @@
 
   <label for="badLetterField">Illegal Letters</label><input id="badLetterField" type="text"/>
   <div>
-    <input checked="checked" id="green" name="box_color" onclick="change_color(this.value)" type="radio" value="green">
+    <input checked="checked" id="green" name="box_color" onclick="changeColor(this.value)" type="radio" value="green">
     <label for="green">Correct</label>
-    <input id="yellow" name="box_color" onclick="change_color(this.value)" type="radio" value="orange">
+    <input id="yellow" name="box_color" onclick="changeColor(this.value)" type="radio" value="orange">
     <label for="yellow">Wrong Spot</label>
 <!--    <input id="red" name="box_color" onclick="change_color(this.value)" type="radio"-->
 <!--           value="crimson">-->
