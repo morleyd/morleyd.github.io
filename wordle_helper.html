@@ -9,8 +9,17 @@
 
 <body onload=change_color("green")>
 <div class="container">
-  <h1>Wordle Helper</h1>
-
+  <div>
+    <h1 style="text-align:center;">Wordle Helper</h1>
+    <h2 style="text-align:center;">Welcome to my Wordle Helper tool!</h2>
+    <p>Instructions: Simply drag the letters as you see them onto the wordle board.</p>
+    <ul>
+      <li>Toggle the "Correct" or green color for letters you know are correctly placed</li>
+      <li>Toggle the "Wrong Spot" or yellow color for letters contained in the word somewhere</li>
+      <li>Use the "Illegal Letters" text box for any letters that you know aren't in the word</li>
+    </ul>
+    <p style="text-align:center;">Enjoy!</p>
+  </div>
   <div class="drop-targets">
     <div class="box" id="0"></div>
     <div class="box" id="1"></div>
@@ -20,15 +29,15 @@
   </div>
 
 
-  <input id="badLetterField" type="text"/>
+  <label for="badLetterField">Illegal Letters</label><input id="badLetterField" type="text"/>
   <div>
     <input checked="checked" id="green" name="box_color" onclick="change_color(this.value)" type="radio" value="green">
     <label for="green">Correct</label>
     <input id="yellow" name="box_color" onclick="change_color(this.value)" type="radio" value="orange">
     <label for="yellow">Wrong Spot</label>
-    <input id="red" name="box_color" onclick="change_color(this.value)" type="radio"
-           value="crimson">
-    <label for="red">Illegal Letter</label>
+<!--    <input id="red" name="box_color" onclick="change_color(this.value)" type="radio"-->
+<!--           value="crimson">-->
+<!--    <label for="red">Illegal Letter</label>-->
   </div>
 
   <div class="keyboard">
@@ -119,12 +128,15 @@
       <div class="item" data-color="0" draggable="true" id="M">
         <div class="key--letter">M</div>
       </div>
-      <div class="key--special key--w5" onclick=filter_words()>
+      <div class="key--special key--w5" onclick=filterWords()>
         <span>RUN</span>
       </div>
     </div> <br>
   </div>
-  <pre id="whereToPrint"></pre>
+
+  <div class="results-box">
+    <pre id="whereToPrint"></pre>
+  </div>
 </div>
   <script src="js/helper_main.js"></script>
 </body>

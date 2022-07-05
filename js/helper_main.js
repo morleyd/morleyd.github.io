@@ -61,38 +61,6 @@ function change_color(color) {
     })
 }
 
-// function loadWords() {
-//     // let array = [];
-//     // let xmlhttp;
-//     // if (window.XMLHttpRequest) { // code for IE7+, Firefox, Chrome, Opera, Safari
-//     //     xmlhttp = new XMLHttpRequest();
-//     // } else { // code for IE6, IE5
-//     //     xmlhttp = new ActiveXObject("Microsoft.XMLHTTP");
-//     // }
-//     // xmlhttp.onreadystatechange = function() {
-//     //     if (xmlhttp.readyState == 4 && xmlhttp.status == 200) {
-//     //         let text = xmlhttp.responseText;
-//     //         // Now convert it into array using regex
-//     //         array = text.split(/\n|\r/g);
-//     //     }
-//     // }
-//     // xmlhttp.open("GET", "../data/five_letter_words.txt", true);
-//     // xmlhttp.send();
-//     // return array;
-//     let wordArray = [];
-//     // const contents = readFileSync("D:\\Users\\dcm96\\OneDrive\\Documents\\Projects\\JavaScript\\wordle\\data\\five_letter_words.txt", 'utf-8');
-//     //
-//     // wordArray = contents.split(/\r?\n/);
-//     const inputFile = "data/five_letter_words.txt"
-//
-//     const fileReader = new FileReader();
-//     fileReader.readAsText(inputFile, 'UTF-8');
-//     fileReader.addEventListener('load', (e) => {
-//         wordArray = e.target.result.split('\n');
-//     });
-//     return wordArray;
-// }
-
 function get_known(){
     let out = {};
     for (let i=0; i<5; i++){
@@ -111,32 +79,48 @@ function get_known(){
     return out;
 }
 
-function filter_words(){
+function formatWords(words){
+    let out = "<ul>";
+    words.forEach( word => {
+        out += "<li>" + word + "</li>"
+        }
+    );
+    out += "</ul>";
+    document.getElementById("whereToPrint").innerHTML = out;
+}
+
+function filterWords(){
     let goodWords = [];
     // let allWords = loadWords();
     let bad_letters = document.getElementById('badLetterField').value.toLowerCase();
     let known = get_known();
     let letter;
+    // For all words
     for (let i = 0; i < allWords.length; i++) {
         let word = allWords[i];
         let isGoodWord = true;
+        // Check that don't contain any illegal letters
         for (let j = 0; j < bad_letters.length; j++) {
             letter = bad_letters.charAt(j)
             if (word.includes(letter)) {
                 isGoodWord = false;
             }
         }
+        // Now parse the info from the boxes
         for (let key in known) {
             let idx = parseInt(key);
             letter = known[key]['value'].toLowerCase();
+            // Red boxes contain letters that are in the word, just correctly placed
             if (known[key]['color'] === 'crimson') {
-                if (word.includes(letter)) {
-                    isGoodWord = false;
-                }
-            } else if (known[key]['color'] === 'orange') {
                 if (!word.includes(letter)) {
                     isGoodWord = false;
                 }
+            // Orange boxes contain letters that are in the word somewhere
+            } else if (known[key]['color'] === 'orange') {
+                if (!word.includes(letter) || word.charAt(idx) === letter) {
+                    isGoodWord = false;
+                }
+            // Green boxes contain letters that have to be in that spot
             } else if (known[key]['color'] === 'green') {
                 if (word.charAt(idx) != letter) {
                     isGoodWord = false;
@@ -147,7 +131,7 @@ function filter_words(){
             goodWords.push(word)
         }
     }
-    document.getElementById("whereToPrint").innerHTML = JSON.stringify(goodWords, null, 4);
+    formatWords(goodWords)
 }
 
 const allWords = [

@@ -15,6 +15,10 @@ h1 {
     color: #323330;
 }
 
+ul{
+    margin-left:20px;
+}
+
 .container {
     height: 100vh;
     display: flex;
@@ -48,6 +52,11 @@ h1 {
 
 }
 
+.results-box {
+    width: 90px;
+    height: 110px;
+    overflow: auto;
+}
 
 .drag-over {
     border: dashed 3px red;
