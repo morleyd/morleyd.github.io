@@ -11,18 +11,46 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jqueryui-touch-punch/0.2.3/jquery.ui.touch-punch.min.js"></script>
 </head>
 <body onload=changeColor("green")>
-<div class="container">
-  <div>
-    <h1 style="text-align:center;">Wordle Helper</h1>
-    <h2 style="text-align:center;">Welcome to my Wordle Helper tool!</h2>
-    <p>Instructions: Simply drag the letters as you see them onto the wordle board.</p>
-    <ul>
-      <li>Toggle the "Correct" or green color for letters you know are correctly placed</li>
-      <li>Toggle the "Wrong Spot" or yellow color for letters contained in the word somewhere</li>
-      <li>Use the "Illegal Letters" text box for any letters that you know aren't in the word</li>
-    </ul>
-    <p style="text-align:center;">Enjoy!</p>
+
+<header>
+  <div class="header-left">
+    <!-- Hamburger Icon -->
+    <button id="menu" class="icon">
+      <img src="./images/menu_black_24dp.svg" />
+    </button>
   </div>
+
+  <div class="header-title">
+    Wordle Helper
+  </div>
+
+  <div class="header-right">
+    <button id="info" class="icon">
+      <img src="./images/info_black_24dp.svg"  alt=""/>
+    </button>
+  </div>
+</header>
+<!--  <h1>Wordle Helper</h1>-->
+  <div id="info-modal" class="modal">
+    <div class="info-modal-content">
+      <div class="modal-exit">&times;</div>
+      <div class="modal-title">
+        How to Use
+      </div>
+        <p style="text-align:center;"><b>Welcome to my Wordle Helper tool!</b></p>
+        <p>Instructions: Simply drag the letters as you see them onto the wordle board.</p>
+        <ul>
+          <li>Toggle the "Correct" or green color for letters you know are correctly placed</li>
+          <li>Toggle the "Wrong Spot" or yellow color for letters contained in the word somewhere</li>
+          <li>Use the "Illegal Letters" text box for any letters that you know aren't in the word</li>
+        </ul>
+<!--        <p style="text-align:center;">Enjoy!</p>-->
+      <p>
+        I hope this helps with the original  <a href="https://www.nytimes.com/games/wordle/index.html">Wordle</a> created by Josh Wardle.
+      </p>
+    </div>
+  </div>
+
 
   <div class="drop-targets">
     <div class="box" id="0"></div>
@@ -46,93 +74,93 @@
   <div class="keyboard">
     <!--  courtesy of https://codepen.io/gschier/pen/VKgyaY-->
     <div class="keyboard__row">
-      <div class="item" data-color="0" draggable="true" id="Q">
+      <div class="item" data-color="0" id="Q">
         <div class="key--letter">Q</div>
       </div>
-      <div class="item" data-color="0" draggable="true" id="W">
+      <div class="item" data-color="0" id="W">
         <div class="key--letter">W</div>
       </div>
-      <div class="item" data-color="0" draggable="true" id="E">
+      <div class="item" data-color="0" id="E">
         <div class="key--letter">E</div>
       </div>
-      <div class="item" data-color="0" draggable="true" id="R">
+      <div class="item" data-color="0" id="R">
         <div class="key--letter">R</div>
       </div>
-      <div class="item" data-color="0" draggable="true" id="T">
+      <div class="item" data-color="0" id="T">
         <div class="key--letter">T</div>
       </div>
-      <div class="item" data-color="0" draggable="true" id="Y">
+      <div class="item" data-color="0" id="Y">
         <div class="key--letter">Y</div>
       </div>
-      <div class="item" data-color="0" draggable="true" id="U">
+      <div class="item" data-color="0" id="U">
         <div class="key--letter">U</div>
       </div>
-      <div class="item" data-color="0" draggable="true" id="I">
+      <div class="item" data-color="0" id="I">
         <div class="key--letter">I</div>
       </div>
-      <div class="item" data-color="0" draggable="true" id="O">
+      <div class="item" data-color="0" id="O">
         <div class="key--letter">O</div>
       </div>
-      <div class="item" data-color="0" draggable="true" id="P">
+      <div class="item" data-color="0" id="P">
         <div class="key--letter">P</div>
       </div>
     </div> <br>
     <div class="keyboard__row">
-      <div class="item" data-color="0" draggable="true" id="A">
+      <div class="item" data-color="0" id="A">
         <div class="key--letter">A</div>
       </div>
-      <div class="item" data-color="0" draggable="true" id="S">
+      <div class="item" data-color="0" id="S">
         <div class="key--letter">S</div>
       </div>
-      <div class="item" data-color="0" draggable="true" id="D">
+      <div class="item" data-color="0" id="D">
         <div class="key--letter">D</div>
       </div>
-      <div class="item" data-color="0" draggable="true" id="F">
+      <div class="item" data-color="0" id="F">
         <div class="key--letter">F</div>
       </div>
-      <div class="item" data-color="0" draggable="true" id="G">
+      <div class="item" data-color="0" id="G">
         <div class="key--letter">G</div>
       </div>
-      <div class="item" data-color="0" draggable="true" id="H">
+      <div class="item" data-color="0" id="H">
         <div class="key--letter">H</div>
       </div>
-      <div class="item" data-color="0" draggable="true" id="J">
+      <div class="item" data-color="0" id="J">
         <div class="key--letter">J</div>
       </div>
-      <div class="item" data-color="0" draggable="true" id="K">
+      <div class="item" data-color="0" id="K">
         <div class="key--letter">K</div>
       </div>
-      <div class="item" data-color="0" draggable="true" id="L">
+      <div class="item" data-color="0" id="L">
         <div class="key--letter">L</div>
       </div>
     </div> <br>
     <div class="keyboard__row">
-      <div class="key--special key--w5" data-key="13">
+      <div class="key--special key--w5"  onclick=resetBoard()>
         <span>RESET</span>
       </div>
-      <div class="item" data-color="0" draggable="true" id="Z">
+      <div class="item" data-color="0" id="Z">
         <div class="key--letter">Z</div>
       </div>
-      <div class="item" data-color="0" draggable="true" id="X">
+      <div class="item" data-color="0" id="X">
         <div class="key--letter">X</div>
       </div>
-      <div class="item" data-color="0" draggable="true" id="C">
+      <div class="item" data-color="0" id="C">
         <div class="key--letter">C</div>
       </div>
-      <div class="item" data-color="0" draggable="true" id="V">
+      <div class="item" data-color="0" id="V">
         <div class="key--letter">V</div>
       </div>
-      <div class="item" data-color="0" draggable="true" id="B">
+      <div class="item" data-color="0" id="B">
         <div class="key--letter">B</div>
       </div>
-      <div class="item" data-color="0" draggable="true" id="N">
+      <div class="item" data-color="0" id="N">
         <div class="key--letter">N</div>
       </div>
-      <div class="item" data-color="0" draggable="true" id="M">
+      <div class="item" data-color="0" id="M">
         <div class="key--letter">M</div>
       </div>
       <div class="key--special key--w5" onclick=filterWords()>
-        <span>RUN</span>
+        <span>GO!</span>
       </div>
     </div> <br>
   </div>
@@ -140,7 +168,7 @@
   <div class="results-box">
     <pre id="whereToPrint"></pre>
   </div>
-</div>
+
   <script src="js/helper_main.js"></script>
 </body>
 

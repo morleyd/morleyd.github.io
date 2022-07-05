@@ -26,6 +26,18 @@ $( ".item" ).draggable({
     revertDuration: 0 // immediate snap
 })
 
+let infoModal = document.getElementById("info-modal");
+let infoButton = document.getElementById("info");
+let infoCloseButton = document.getElementsByClassName("modal-exit")[0];
+
+infoButton.onclick = function() {
+    infoModal.style.display = "block";
+};
+
+infoCloseButton.onclick = function() {
+    infoModal.style.display = "none";
+};
+
 function changeColor(color) {
     let boxes = document.querySelectorAll('[data-color="0"]');
     boxes.forEach(box => {
@@ -49,6 +61,22 @@ function getKnown(){
         }
     }
     return out;
+}
+
+function formatWords(words){
+    let out;
+    if (words.length === 0) {
+        out = '<p style="text-align:center;"><b>no matching words</b></p>';
+        document.getElementById("whereToPrint").innerHTML = out;
+    } else {
+        out = "<ul>";
+        words.forEach( word => {
+                out += "<li>" + word + "</li>"
+            }
+        );
+        out += "</ul>";
+        document.getElementById("whereToPrint").innerHTML = out;
+    }
 }
 
 function filterWords() {
@@ -87,7 +115,18 @@ function filterWords() {
             goodWords.push(word)
         }
     }
-    document.getElementById("whereToPrint").innerHTML = JSON.stringify(goodWords, null, 4);
+    formatWords(goodWords)
+}
+
+function resetBoard(){
+    for (let i=0; i<5; i++){
+        let idx = i.toString();
+        let box = document.getElementById(idx);
+        while (box.hasChildNodes()){
+            let child = box.firstElementChild;
+            box.removeChild(child);
+        }
+    }
 }
 
 const allWords = [
