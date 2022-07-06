@@ -224,12 +224,19 @@ ul{
     line-height: 2.8em;
 }
 
-.key--special > * {
-    position: absolute;
+.key--special {
+    font-size: 30px;
+    position: relative;
     text-align: center;
-    top: 0.8em;
-    right: 0.6em;
+    width: 60vw;
 }
-.key--w5 {
-    width: 4.5em;
+
+.big-button {
+    flex: 1.5;
+    width: 10vw;
 }
+
+.big-button img {
+    width: 6.5vw;;
+}
+

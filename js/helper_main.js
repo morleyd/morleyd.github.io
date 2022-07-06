@@ -46,20 +46,23 @@ function changeColor(color) {
 }
 
 function getKnown(){
-    let out = {};
+    let out = [];
+    let color;
     for (let i=0; i<5; i++){
         let idx = i.toString();
-        let letter = document.getElementById(idx).firstElementChild;
-        // This allows all boxes to not be filled
-        try {
-            out[idx] = {
-                "value": letter.id,
-                "color": letter.dataset.color
-            };
-        } catch (e) {
-            console.log(e);
+        let children = document.getElementById(idx).childNodes;
+        let numChildren = children.length;
+        for (let j=0; j<numChildren; j++)  {
+            let letter = children[j];
+            if (numChildren > 1) {
+                color = "orange";
+            } else {
+                color = letter.dataset.color;
+            }
+            out.push([idx, letter.id, color]);
         }
     }
+    console.log(out)
     return out;
 }
 
@@ -69,7 +72,6 @@ function formatWords(words){
         out = '<p style="text-align:center;"><br><b>no matching words</b></p>';
         document.getElementById("whereToPrint").innerHTML = out;
     } else {
-        // out = "<ul>";
         words.forEach( word => {
                 out += "<p style=\"text-align:center;\">" + word + "</p>"
             }
@@ -81,7 +83,6 @@ function formatWords(words){
 
 function filterWords() {
     let goodWords = [];
-    // let allWords = loadWords();
     let bad_letters = document.getElementById('badLetterField').value.toLowerCase();
     let known = getKnown();
     let letter;
@@ -94,18 +95,21 @@ function filterWords() {
                 isGoodWord = false;
             }
         }
-        for (let key in known) {
-            let idx = parseInt(key);
-            letter = known[key]['value'].toLowerCase();
-            if (known[key]['color'] === 'crimson') {
+        for (let k=0; k<known.length; k++) {
+            let key = known[k];
+
+            let idx = parseInt(key[0]);
+            letter = key[1].toLowerCase();
+            let color = key[2];
+            if (color === 'crimson') {
                 if (word.includes(letter)) {
                     isGoodWord = false;
                 }
-            } else if (known[key]['color'] === 'orange') {
+            } else if (color === 'orange') {
                 if (!word.includes(letter) || word.charAt(idx) === letter) {
                     isGoodWord = false;
                 }
-            } else if (known[key]['color'] === 'green') {
+            } else if (color === 'green') {
                 if (word.charAt(idx) != letter) {
                     isGoodWord = false;
                 }
@@ -120,6 +124,7 @@ function filterWords() {
 
 function resetBoard(){
     document.getElementById("whereToPrint").innerHTML = "";
+    document.getElementById("badLetterField").value = "";
     for (let i=0; i<5; i++){
         let idx = i.toString();
         let box = document.getElementById(idx);
@@ -128,6 +133,16 @@ function resetBoard(){
             box.removeChild(child);
         }
     }
+}
+
+function input(e) {
+    let tbInput = document.getElementById("badLetterField");
+    tbInput.value = tbInput.value + e.id;
+}
+
+function del() {
+    let tbInput = document.getElementById("badLetterField");
+    tbInput.value = tbInput.value.substr(0, tbInput.value.length - 1);
 }
 
 const allWords = [

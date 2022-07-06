@@ -39,7 +39,7 @@
         How to Use
       </div>
         <p style="text-align:center;"><b>Welcome to my Wordle Helper tool!</b></p>
-        <p style="text-align:center;">This is a tool I build to help me solve those expecially difficult Wordles. I didn't want  to have the answer given to me, I just wanted help remembering what words were possible. This tool allows you to put in the information you've figured out about the word and tells you the options from there.</p>
+        <p style="text-align:center;">This is a tool I build to help me solve those especially difficult Wordles. I didn't want  to have the answer given to me, I just wanted help remembering what words were possible. This tool allows you to put in the information you've figured out about the word and tells you the options from there.</p>
         <br>
       <p><b>Instructions:</b> Simply drag the letters as you see them onto the wordle board.</p>
         <ul>
@@ -74,95 +74,100 @@
   <div class="keyboard">
     <!--  courtesy of https://codepen.io/gschier/pen/VKgyaY-->
     <div class="keyboard__row">
-      <div class="item" data-color="0" id="Q">
+      <div class="item" data-color="0" id="Q" onclick="input(this);">
         <div class="key--letter">Q</div>
       </div>
-      <div class="item" data-color="0" id="W">
+      <div class="item" data-color="0" id="W" onclick="input(this);">
         <div class="key--letter">W</div>
       </div>
-      <div class="item" data-color="0" id="E">
+      <div class="item" data-color="0" id="E" onclick="input(this);">
         <div class="key--letter">E</div>
       </div>
-      <div class="item" data-color="0" id="R">
+      <div class="item" data-color="0" id="R" onclick="input(this);">
         <div class="key--letter">R</div>
       </div>
-      <div class="item" data-color="0" id="T">
+      <div class="item" data-color="0" id="T" onclick="input(this);">
         <div class="key--letter">T</div>
       </div>
-      <div class="item" data-color="0" id="Y">
+      <div class="item" data-color="0" id="Y" onclick="input(this);">
         <div class="key--letter">Y</div>
       </div>
-      <div class="item" data-color="0" id="U">
+      <div class="item" data-color="0" id="U" onclick="input(this);">
         <div class="key--letter">U</div>
       </div>
-      <div class="item" data-color="0" id="I">
+      <div class="item" data-color="0" id="I" onclick="input(this);">
         <div class="key--letter">I</div>
       </div>
-      <div class="item" data-color="0" id="O">
+      <div class="item" data-color="0" id="O" onclick="input(this);">
         <div class="key--letter">O</div>
       </div>
-      <div class="item" data-color="0" id="P">
+      <div class="item" data-color="0" id="P" onclick="input(this);">
         <div class="key--letter">P</div>
       </div>
     </div> <br>
     <div class="keyboard__row">
-      <div class="item" data-color="0" id="A">
+      <div class="item" data-color="0" id="A" onclick="input(this);">
         <div class="key--letter">A</div>
       </div>
-      <div class="item" data-color="0" id="S">
+      <div class="item" data-color="0" id="S" onclick="input(this);">
         <div class="key--letter">S</div>
       </div>
-      <div class="item" data-color="0" id="D">
+      <div class="item" data-color="0" id="D" onclick="input(this);">
         <div class="key--letter">D</div>
       </div>
-      <div class="item" data-color="0" id="F">
+      <div class="item" data-color="0" id="F" onclick="input(this);">
         <div class="key--letter">F</div>
       </div>
-      <div class="item" data-color="0" id="G">
+      <div class="item" data-color="0" id="G" onclick="input(this);">
         <div class="key--letter">G</div>
       </div>
-      <div class="item" data-color="0" id="H">
+      <div class="item" data-color="0" id="H" onclick="input(this);">
         <div class="key--letter">H</div>
       </div>
-      <div class="item" data-color="0" id="J">
+      <div class="item" data-color="0" id="J" onclick="input(this);">
         <div class="key--letter">J</div>
       </div>
-      <div class="item" data-color="0" id="K">
+      <div class="item" data-color="0" id="K" onclick="input(this);">
         <div class="key--letter">K</div>
       </div>
-      <div class="item" data-color="0" id="L">
+      <div class="item" data-color="0" id="L" onclick="input(this);">
         <div class="key--letter">L</div>
       </div>
     </div> <br>
     <div class="keyboard__row">
-      <div class="key--special key--w5"  onclick=resetBoard()>
-        <span>RESET</span>
+      <div class="big-button"  onclick=resetBoard()>
+        <img src="./images/refresh_white.png" />
       </div>
-      <div class="item" data-color="0" id="Z">
+      <div class="item" data-color="0" id="Z" onclick="input(this);">
         <div class="key--letter">Z</div>
       </div>
-      <div class="item" data-color="0" id="X">
+      <div class="item" data-color="0" id="X" onclick="input(this);">
         <div class="key--letter">X</div>
       </div>
-      <div class="item" data-color="0" id="C">
+      <div class="item" data-color="0" id="C" onclick="input(this);">
         <div class="key--letter">C</div>
       </div>
-      <div class="item" data-color="0" id="V">
+      <div class="item" data-color="0" id="V" onclick="input(this);">
         <div class="key--letter">V</div>
       </div>
-      <div class="item" data-color="0" id="B">
+      <div class="item" data-color="0" id="B" onclick="input(this);">
         <div class="key--letter">B</div>
       </div>
-      <div class="item" data-color="0" id="N">
+      <div class="item" data-color="0" id="N" onclick="input(this);">
         <div class="key--letter">N</div>
       </div>
-      <div class="item" data-color="0" id="M">
+      <div class="item" data-color="0" id="M" onclick="input(this);">
         <div class="key--letter">M</div>
       </div>
-      <div class="key--special key--w5" onclick=filterWords()>
-        <span>GO!</span>
+      <div class="big-button" onclick=del()>
+        <img src="./images/backspace_white.png" />
       </div>
     </div> <br>
+    <div class="keyboard__row">
+      <div class="key--special key--go" onclick=filterWords()>
+        <span>GO!</span>
+      </div>
+    </div>
   </div>
 
   <div class="results-box">
