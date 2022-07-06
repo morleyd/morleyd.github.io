@@ -6,7 +6,7 @@ $( ".box" ).droppable({
         const color = document.querySelector('input[name="box_color"]:checked').value;
         $(this).append($(ui.draggable).clone());
         let boxID = event.target.id;
-        document.getElementById(boxID).firstElementChild.setAttribute("data-color", color);
+        document.getElementById(boxID).lastElementChild.setAttribute("data-color", color);
     },
 });
 
@@ -47,19 +47,12 @@ function changeColor(color) {
 
 function getKnown(){
     let out = [];
-    let color;
     for (let i=0; i<5; i++){
         let idx = i.toString();
         let children = document.getElementById(idx).childNodes;
-        let numChildren = children.length;
-        for (let j=0; j<numChildren; j++)  {
+        for (let j=0; j<children.length; j++)  {
             let letter = children[j];
-            if (numChildren > 1) {
-                color = "orange";
-            } else {
-                color = letter.dataset.color;
-            }
-            out.push([idx, letter.id, color]);
+            out.push([idx, letter.id, letter.dataset.color]);
         }
     }
     console.log(out)
