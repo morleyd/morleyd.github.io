@@ -119,6 +119,7 @@ function filterWords() {
 }
 
 function resetBoard(){
+    document.getElementById("whereToPrint").innerHTML = "";
     for (let i=0; i<5; i++){
         let idx = i.toString();
         let box = document.getElementById(idx);
