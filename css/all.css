@@ -607,7 +607,10 @@ transition: all 0.5s ease-in-out;
 }
 /* begin add	 */
 .popup_portfolio{
+  min-width: 85vw;
 	max-width: 1132px;
+  background-color: #dedede;
+  border-color: #545454;
 }
 .popup_portfolio h3{
 	padding-top:26px;
@@ -625,6 +628,11 @@ transition: all 0.5s ease-in-out;
 	line-height: 12px;
 	text-transform: uppercase;
 }
+.popup_portfolio medium{
+	font-family: 'novecentosanswide';
+	color: #abacaf;
+	font-size: 12px;
+}
 .popup_portfolio p{
 	padding: 17px 0 8px;
 	color: #808286;
@@ -632,12 +640,13 @@ transition: all 0.5s ease-in-out;
 	line-height: 30px;
 }
 .popup_portfolio img {
-    display: block;
-	width: 50%;
+  display: block;
+	width: auto;
 	height: auto;
+  max-height: 450px;
 	border-radius: 8px;
-    margin-left: auto;
-    margin-right: auto;
+  margin-left: auto;
+  margin-right: auto;
 }
 .fancybox-close {
 	width: 46px;
@@ -646,9 +655,10 @@ transition: all 0.5s ease-in-out;
 	right: -20px;
 	background-image: url(../images/ico_btn-close.png);
 }
-.fancybox-opened .fancybox-skin{
+.fancybox-skin{
 	padding: 20px !important;
 	border-radius: 10px;
+  background: #545454;
 }
 .fancybox-nav {
 	display: none;

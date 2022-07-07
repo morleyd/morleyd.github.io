@@ -184,6 +184,19 @@
 							</div>
 						</div>
 					</li>
+					<li class="item">
+						<div class="image">
+							<img src="images/project/painter.png"  alt="" />
+							<div class="hover">
+								<a class="fancybox" rel="gallery1" href="./artwork.html">
+									<div class="item-content">
+										<h4>My Artwork</h4>
+										<p>Starting in 2021, I've found a new passion for using the other part of my brain to create</p>
+									</div>
+								</a>
+							</div>
+						</div>
+					</li>
 				</ul>
 			</section>
 		</div>
@@ -271,7 +284,7 @@
 			<h3>Relation Extraction without Given Spans</h3>
 			<time datetime="2020-12-14">Made: June 6, 2022</time>
 			<p>I was asked to create a model that given a raw chunk of text would extract all the employee relations. For example, if it received the input, "i just bumped into my buddy phil who is the ceo of XYZ Company", the model would show that Phil is an employee of XYZ Company. I also wanted to be able to account for the case where there were multiple people and relations in a given sentence.</p>
-      <p>I was given the <a href="https://nlp.stanford.edu/projects/tacred/">TACRED relation classification dataset</a> reported in <a href="https://arxiv.org/abs/2010.01057">this paper</a>. My solution builds off pretrained models stored oh HuggingFace's Transformers. I selected LUKE, one of the best performing models on this dataset, as ranked by <a href="http://nlpprogress.com/english/relationship_extraction.html">NLP-Progress</a>. I use the <a href="https://huggingface.co/studio-ousia/luke-large-finetuned-tacred">fine-tuned model checkpoint</a> from Luke, <a href="https://aclanthology.org/2020.emnlp-main.523">"{LUKE}: Deep Contextualized Entity Representations with Entity-aware Self-attention"</a> for handling the relation extraction. However, this model requires the spans of the entities as inputs and only outputs one relation per utterance. To overcome these limitations, I used a Named Entity Recognition (NER) model to exctact all the entity spans relevant to my use case. The NER is handled by <a href="https://huggingface.co/dslim/bert-base-NER-uncased">BERT</a>. </p>
+      <p>I was given the <a href="https://nlp.stanford.edu/projects/tacred/">TACRED relation classification dataset</a> reported in <a href="https://arxiv.org/abs/2010.01057">this paper</a>. My solution builds off pretrained models stored oh HuggingFace's Transformers. I selected LUKE, one of the best performing models on this dataset, as ranked by <a href="http://nlpprogress.com/english/relationship_extraction.html">NLP-Progress</a>. I used the <a href="https://huggingface.co/studio-ousia/luke-large-finetuned-tacred">fine-tuned model checkpoint</a> from Luke, <a href="https://aclanthology.org/2020.emnlp-main.523">"{LUKE}: Deep Contextualized Entity Representations with Entity-aware Self-attention"</a> for handling the relation extraction. However, this model requires the spans of the entities as inputs and only outputs one relation per utterance. To overcome these limitations, I used a Named Entity Recognition (NER) model to exctact all the entity spans relevant to my use case. The NER is handled by <a href="https://huggingface.co/dslim/bert-base-NER-uncased">BERT</a>. </p>
       <p><a href="https://github.com/morleyd/morleyd.github.io/blob/master/Projects/Relation_Extraction_without_Given_Spans.ipynb">Click Here for a notebook with my completed code and or go to Google Colab to try it for yourself.</a></p>
 		</div>  
 	</div>
