@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta content="width=device-width, initial-scale=1.0, user-scalable=no" name="viewport"/>
+    <title>Wordle Helper</title>
+<!--    <link rel="icon" href="./images/project/wordle.png" type="image/icon type">-->
+    <link href="css/overdrive_style.css" rel="stylesheet">
+    <script src="https://code.jquery.com/jquery-3.6.0.js"></script>
+    <script src="https://code.jquery.com/ui/1.13.1/jquery-ui.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jqueryui-touch-punch/0.2.3/jquery.ui.touch-punch.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet"/>
+</head>
+<body >
+<h1>Overdrive Helper!</h1>
+
+<!-- Checkboxes courtesy of Alex @ https://stackoverflow.com/a/69675987 -->
+<div class>
+    <label for="myMultiselect">Select Your Libraries</label>
+    <div id="myMultiselect" class="multiselect">
+        <div id="mySelectLabel" class="selectBox" onclick="toggleCheckboxArea()">
+            <select class="form-select">
+                <option>somevalue</option>
+            </select>
+            <div class="overSelect"></div>
+        </div>
+        <div id="mySelectOptions">
+            <label for="minuteman"><input type="checkbox" id="minuteman" onchange="checkboxStatusChange()" value="minuteman" /> Minuteman</label>
+            <label for="bpl"><input type="checkbox" id="bpl" onchange="checkboxStatusChange()" value="bpl" /> Boston Public Library</label>
+            <label for="clams"><input type="checkbox" id="clams" onchange="checkboxStatusChange()" value="clamsnet" /> CLAMS</label>
+            <label for="cwmars"><input type="checkbox" id="cwmars" onchange="checkboxStatusChange()" value="cwmars" /> CW MARS</label>
+            <label for="merrimack"><input type="checkbox" id="merrimack" onchange="checkboxStatusChange()" value="mvlc" /> Merrimack Valley</label>
+            <label for="noble"><input type="checkbox" id="noble" onchange="checkboxStatusChange()" value="noble" /> NOBLE</label>
+            <label for="OldColony"><input type="checkbox" id="OldColony" onchange="checkboxStatusChange()" value="ocln" /> Old Colony</label>
+            <label for="SAILS"><input type="checkbox" id="SAILS" onchange="checkboxStatusChange()" value="sails" /> SAILS</label>
+        </div>
+    </div>
+</div>
+
+<label for='opt1'>Available Now</label>
+<div class='switched off'>
+    <div class='overlay'></div>
+    <span class='switched'></span>
+    <input type='checkbox' name='opt1' id='opt1' value='1' class='toggleswitch' />
+</div>
+
+<div>
+    <label for="userInput">Search Query</label><br><input id="userInput" type="text"/>
+    <button onclick="findBooks()">Submit!</button>
+</div>
+
+<br>
+<div class="results-box">
+    <pre id="outputBox"></pre>
+</div>
+
+<script src="js/overdrive_main.js"></script>
+</body>
+
+</html>
