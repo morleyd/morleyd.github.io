@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta content="width=device-width, initial-scale=1.0, user-scalable=no" name="viewport"/>
+  <title>Wordle Helper</title>
+  <!-- <link rel="icon" href="./images/project/wordle.png" type="image/icon type"> -->
+  <link href="css/helper_style.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/add-to-calendar-button@1/assets/css/atcb.min.css">
+</head>
+<body onload=timeAgo()>
+  <h1>Time Since</h1>
+  <!-- <div> -->
+    <h2 id="days"></h2>
+    <h2 id="weeks"></h2>
+    <h2 id="months"></h2>
+    <h2 id="hours"></h2>
+    <h2 id="minutes"></h2>
+    <h2 id="seconds"></h2>
+  <!-- </div>   -->
+  <div> <br>
+    <h2>Compute Future Time</h2>
+    <input type="text" id="inputVal" value="">
+    <select id = "inputUnit">
+      <option> Seconds </option>
+      <option> Minutes </option>
+      <option> Days </option>
+      <option> Weeks </option>
+    </select>
+    <button type="button" onclick="computeTime()">Compute</button>
+  </div>
+  <div>
+    <p id="dateimeGoesHere"></p>
+    <div class="atcb" id="calendarButtonHere" style="display:none;"></div>
+  </div>
+  <script src="js/count_up_main.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/add-to-calendar-button@1" async defer></script>
+</body>
+
+</html>
