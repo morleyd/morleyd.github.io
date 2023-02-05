@@ -4,27 +4,34 @@
 <head>
   <meta charset="UTF-8">
   <meta content="width=device-width, initial-scale=1.0, user-scalable=no" name="viewport"/>
-  <title>Wordle Helper</title>
+  <title>Time Ago</title>
   <!-- <link rel="icon" href="./images/project/wordle.png" type="image/icon type"> -->
-  <link href="css/helper_style.css" rel="stylesheet">
+  <link href="css/counter_style.css" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/add-to-calendar-button@1/assets/css/atcb.min.css">
 </head>
 <body onload=timeAgo()>
   <h1>Time Since</h1>
+  <h3>Sept 2, 2022 at 11:07 AM MST</h3>
   <!-- <div> -->
-    <h2 id="days"></h2>
-    <h2 id="weeks"></h2>
-    <h2 id="months"></h2>
-    <h2 id="hours"></h2>
-    <h2 id="minutes"></h2>
-    <h2 id="seconds"></h2>
-  <!-- </div>   -->
+    <u><span>Months</span></u>
+    <p id="months"></p>
+    <u><span>Days</span></u>
+    <p id="days"></p>
+    <u><span>Weeks</span></u>
+    <p id="weeks"></p>
+    <u><span>Hours</span></u>
+    <p id="hours"></p>
+    <u><span>Minutes</span></u>
+    <p id="minutes"></p>
+    <u><span>Seconds</span></u>
+    <p id="seconds"></p>
   <div> <br>
     <h2>Compute Future Time</h2>
     <input type="text" id="inputVal" value="">
     <select id = "inputUnit">
       <option> Seconds </option>
       <option> Minutes </option>
+      <option> Hours </option>
       <option> Days </option>
       <option> Weeks </option>
     </select>
@@ -35,7 +42,7 @@
     <div class="atcb" id="calendarButtonHere" style="display:none;"></div>
   </div>
   <script src="js/count_up_main.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/add-to-calendar-button@1" async defer></script>
+  <script type = "text/JavaScript" src = " https://MomentJS.com/downloads/moment.js"></script>
 </body>
 
 </html>
