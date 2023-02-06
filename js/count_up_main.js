@@ -42,23 +42,48 @@ function formatWeeks(ms) {
 
 function formatMonths(today, wed) {
   yDelta = today.getFullYear() - wed.getFullYear()
-  mDelta = today.getMonth() - wed.getMonth()
+  monDelta = today.getMonth() - wed.getMonth()
   dDelta = today.getDate() - wed.getDate()
-  if (mDelta < 0) {
+  hDelta = today.getHours() -  wed.getHours()
+  minDelta = today.getMinutes() -  wed.getMinutes()
+  sDelta = today.getSeconds() -  wed.getSeconds()
+  // TODO: There are some off by one errors below!
+  if (sDelta < 0) {
+    minDelta = minDelta - 1
+    sDelta = sDelta + 60
+  }
+  if (minDelta < 0) {
+    hDelta = hDelta - 1
+    minDelta = minDelta + 60
+  }
+  if (hDelta < 0) {
+    if (minDelta < 0) { 
+      hDelta = hDelta + 24
+    } else {
+      hDelta = hDelta + 24 + 1
+    }
+    dDelta = dDelta - 1
+  }
+  // if (dDelta < 0) {
+  //   monDelta = monDelta - 1
+  //   dDelta = dDelta + // HOW MANY?
+  // }
+  if (monDelta < 0) {
     yDelta = yDelta - 1
-    mDelta = mDelta + 12
+    monDelta = monDelta + 12
   }
-  var out = '';
+  var monthsOut = '';
+  var remainderOut = hDelta + ' Hours ' + minDelta + ' Minutes ' + sDelta + " Seconds";
   if (yDelta > 0) {
-    out += (yDelta > 1) ? yDelta + ' Years ' : yDelta + ' Year ';
+    monthsOut += (yDelta > 1) ? yDelta + ' Years ' : yDelta + ' Year ';
   }
-  if (mDelta > 0) {
-    out += (mDelta > 1) ? mDelta + ' Months ' : mDelta + ' Month ';
+  if (monDelta > 0) {
+    monthsOut += (monDelta > 1) ? monDelta + ' Months ' : monDelta + ' Month ';
   }
   if (dDelta > 0) {
-    out += (dDelta > 1) ? dDelta + ' Days ' : dDelta + ' Day ';
+    monthsOut += (dDelta > 1) ? dDelta + ' Days ' : dDelta + ' Day ';
   }
-  return out
+  return [monthsOut, remainderOut]
 }
 
 const wedding = new Date("2022-09-02T11:07:22-06:00"); // Sept 2, 2022 at 11:07 AM Idaho Falls Time
@@ -67,7 +92,9 @@ function timeAgo() {
   const today = new Date();
   const delta = today - wedding;
   document.getElementById("days").innerHTML = formatDays(delta);
-  document.getElementById("months").innerHTML = formatMonths(today, wedding);
+  let [monthsText, remainder ]= formatMonths(today, wedding);
+  document.getElementById("months").innerHTML = monthsText;
+  document.getElementById("monthRemainder").innerHTML = remainder;
   document.getElementById("weeks").innerHTML = formatWeeks(delta);
   document.getElementById("seconds").innerHTML = formatSeconds(delta);
   document.getElementById("minutes").innerHTML = formatMinutes(delta);
