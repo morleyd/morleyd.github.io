@@ -1,0 +1,41 @@
+.table {
+    border-collapse: collapse;
+    border-bottom-style: none;
+}
+
+/* .table,
+.table th,
+.table td {
+    border: 1px solid #ccc;
+} */
+
+.table th,
+.table td {
+    padding: 0.5rem;
+}
+
+.table th {
+    position: relative;
+}
+
+.resizer {
+    border-right: 2px solid blue;
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 5px;
+    cursor: col-resize;
+    user-select: none;
+}
+
+.resizer:hover,
+.resizing {
+    border-right: 2px solid blue;
+}
+
+.resizable {
+    border: 1px solid gray;
+    height: 100px;
+    width: 100px;
+    position: relative;
+}
