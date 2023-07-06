@@ -49,16 +49,17 @@ document.addEventListener('DOMContentLoaded', function () {
 
     createResizableTable(document.getElementById('table'));
     ajaxGetJson('./small_eng.json')
-    printJSON()
+    
 });
 
-async function printJSON() {
-    const response = await fetch("small_eng.json");
+async function printJSON(fpath) {
+    const response = await fetch(fpath);
     const json = await response.json();
-    console.log(json);
+    console.log("printJSON", json);
+    return json
 }
 
-function ajaxGetJson(fpath) {
+async function ajaxGetJson(fpath) {
     var data
     // var xhr = new XMLHttpRequest();
     // xhr.open("GET", fpath, true);
@@ -70,9 +71,11 @@ function ajaxGetJson(fpath) {
     //     }
     // }
     // xhr.send(null);
-    fetch(fpath)
-        .then(response => response.json())
-        .then(jsonResponse => data = jsonResponse)
+    // fetch(fpath)
+    //     .then(response => response.json())
+    //     .then(jsonResponse => data = jsonResponse)
+    data = await printJSON(fpath)
+    console.log("ajaxGetJson data",data)
     var table = document.getElementById('table');
     data.forEach(function (object) {
         var tr = document.createElement('tr');
