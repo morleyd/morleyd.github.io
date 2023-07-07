@@ -41,8 +41,13 @@ function createResizableTable(table) {
     const resizer = document.createElement('div');
     resizer.classList.add('resizer');
 
+
     // Set the height
     resizer.style.height = `${table.offsetHeight}px`;
+    const icon = document.createElement('span')
+    icon.classList.add("icon")
+
+    resizer.append(icon)
 
     col.appendChild(resizer);
 
@@ -61,10 +66,31 @@ function createResizableColumn(col, resizer) {
 
         document.addEventListener('mousemove', mouseMoveHandler);
         document.addEventListener('mouseup', mouseUpHandler);
-        // document.addEventListener('touchmove', mouseMoveHandler);
-        // document.addEventListener('touchend', mouseUpHandler);
+        document.addEventListener('touchmove', touchMoveHandler);
+        document.addEventListener('touchend', touchEndHandler);
 
         resizer.classList.add('resizing');
+    };
+
+    const touchMoveHandler = function (e) {
+        const dx = e.touches[0].screenX - x;
+        const dw = w + dx
+        console.log("resizer x w dx dw", x, w, dx, dw)
+        col.style.width = `${dw}px`;
+        if (dw >= getWidth()) {
+            setColSize('col2', 0)
+        } else if (dw <= 0) {
+            setColSize('col1', 0)
+        } else {
+            setColSize('col1', 16)
+            setColSize('col2', 16)
+        }
+    };
+
+    const touchEndHandler = function () {
+        resizer.classList.remove('resizing');
+        document.removeEventListener('touchmove', touchMoveHandler);
+        document.removeEventListener('touchend', touchEndHandler);
     };
 
     const mouseMoveHandler = function (e) {

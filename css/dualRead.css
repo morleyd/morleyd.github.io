@@ -1,3 +1,7 @@
+@media (prefers-color-scheme: dark) {
+
+}
+
 .table {
     border-collapse: collapse;
     border-bottom-style: none;
@@ -9,10 +13,10 @@
     border: 1px solid #ccc;
 } */
 
-.table th,
+/* .table th,
 .table td {
     padding: 0.5rem;
-}
+} */
 
 .table th {
     position: relative;
@@ -38,4 +42,18 @@
     height: 100px;
     width: 100px;
     position: relative;
+}
+
+.icon {
+    background: url("../images/drag-vertical-variant.svg");
+    height: 20px;
+    width: 20px;
+    display: block;
+    position: fixed;
+    top: 50%;
+    margin: 0 auto;
+    border: 2px solid gray;
+    background-color: antiquewhite;
+    border-radius: 5px;
+    transform: translateX(-20%);
 }
