@@ -1,7 +1,6 @@
 document.addEventListener('DOMContentLoaded', async function () {
 
     await fillTable('./data/small_spa.json', './data/small_eng.json')
-    console.log(getWidth())
 
 });
 
@@ -56,70 +55,67 @@ function createResizableTable(table) {
 
 function createResizableColumn(col, resizer) {
     let x = 0;
+    let dx = 0;
     let w = 0;
 
     const mouseDownHandler = function (e) {
-        x = e.clientX;
+        if ("ontouchstart" in document.documentElement) {
+            x = e.touches[0].screenX;
+        } else {
+            x = e.clientX;
+        }
 
         const styles = window.getComputedStyle(col);
         w = parseInt(styles.width, 10);
 
-        document.addEventListener('mousemove', mouseMoveHandler);
-        document.addEventListener('mouseup', mouseUpHandler);
-        document.addEventListener('touchmove', touchMoveHandler);
-        document.addEventListener('touchend', touchEndHandler);
+        document.addEventListener('mousemove', (e) => {
+            dx = e.clientX - x;
+            moveHandler(dx)
+        }, false);
+        document.addEventListener('mouseup', endHandler);
+
+        document.addEventListener('touchmove', (e) => {
+            if (e.touches.length === 1) {
+                dx = e.touches[0].screenX - x;
+                moveHandler(dx)
+            }
+        }, false);
+        document.addEventListener('touchend', endHandler);
 
         resizer.classList.add('resizing');
     };
 
-    const touchMoveHandler = function (e) {
-        const dx = e.touches[0].screenX - x;
+
+    const moveHandler = function (dx) {
         const dw = w + dx
-        console.log("resizer x w dx dw", x, w, dx, dw)
-        col.style.width = `${dw}px`;
-        if (dw >= getWidth()) {
-            setColSize('col2', 0)
-        } else if (dw <= 0) {
-            setColSize('col1', 0)
+        const pageWidth = getWidth()
+
+        if (dw >= pageWidth * .85) {
+            setColSize('col2', 0, 0)
+        } else if (dw <= pageWidth * .15) {
+            setColSize('col1', 0, 0)
         } else {
-            setColSize('col1', 16)
-            setColSize('col2', 16)
+            setColSize('col1', 16, dw)
+            setColSize('col2', 16, pageWidth - dw)
         }
     };
 
-    const touchEndHandler = function () {
+    const endHandler = function () {
         resizer.classList.remove('resizing');
-        document.removeEventListener('touchmove', touchMoveHandler);
-        document.removeEventListener('touchend', touchEndHandler);
-    };
-
-    const mouseMoveHandler = function (e) {
-        const dx = e.clientX - x;
-        const dw = w + dx
-        console.log("resizer x w dx dw", x, w, dx, dw)
-        col.style.width = `${dw}px`;
-        if (dw >= getWidth()) {
-            setColSize('col2', 0)
-        } else if (dw <= 0) {
-            setColSize('col1', 0)
-        } else {
-            setColSize('col1', 16)
-            setColSize('col2', 16)
-        }
-    };
-
-    const mouseUpHandler = function () {
-        resizer.classList.remove('resizing');
-        document.removeEventListener('mousemove', mouseMoveHandler);
-        document.removeEventListener('mouseup', mouseUpHandler);
+        document.removeEventListener('mousemove', moveHandler);
+        document.removeEventListener('mouseup', endHandler);
+        document.removeEventListener('touchmove', moveHandler);
+        document.removeEventListener('touchend', endHandler);
     };
 
     resizer.addEventListener('mousedown', mouseDownHandler);
+    resizer.addEventListener('touchstart', mouseDownHandler);
 };
 
-function setColSize(col, size) {
+function setColSize(col, fontSize, width) {
     for (let element of Array.from(document.getElementsByClassName(col))) {
-        element.style.fontSize = `${size}px`
+        element.style.fontSize = `${fontSize}px`
+        element.style.width = `${width}px`
     }
 }
 
