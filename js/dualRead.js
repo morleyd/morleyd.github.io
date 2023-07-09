@@ -1,8 +1,8 @@
-document.addEventListener('DOMContentLoaded', async function () {
+// document.addEventListener('DOMContentLoaded', async function () {
 
-    await fillTable('./data/small_spa.json', './data/small_eng.json')
+//     await fillTable('./data/small_spa.json', './data/small_eng.json')
 
-});
+// });
 
 async function loadJSON(fpath) {
     const response = await fetch(fpath);
@@ -11,11 +11,15 @@ async function loadJSON(fpath) {
     return json
 }
 
-async function fillTable(fpathA, fpathB) {
-    var colA = await loadJSON(fpathA)
-    var colB = await loadJSON(fpathB)
+async function fillTable(fpath, langA, langB) {
+    console.log(fpath, langA, langB)
+    // fpath = 'data/Book_of_Mormon/1_Nephi_1.json'
+    var chapter = await loadJSON(fpath)
     var table = document.getElementById('tbody');
-    for (const row of zip(colA, colB)) {
+    while (table.childElementCount > 1) {
+        table.removeChild(table.lastChild);
+    }
+    for (const row of zip(chapter[langA], chapter[langB])) {
         var tr = document.createElement('tr');
         tr.innerHTML = '<td class="col1">' + row[0] + '</td>' +
             '<td class="col2">' + row[1] + '</td>';
@@ -44,7 +48,7 @@ function createResizableTable(table) {
     // Set the height
     resizer.style.height = `${table.offsetHeight}px`;
     const icon = document.createElement('span')
-    icon.classList.add("icon")
+    icon.classList.add("slider")
 
     resizer.append(icon)
 

@@ -1,29 +1,48 @@
-@media (prefers-color-scheme: dark) {
-
+html {
+    background-color: #1e1e1e;
+    color: #ce9178;
 }
+
+.header {
+    width: 100%;
+    padding: 0;
+    margin: 0;
+    position: relative;
+    left: 0;
+    right: 0;
+    top: 0;
+}
+
+html h1 {
+    display: inline-block;
+    text-align: center;
+    padding: 0;
+    margin: 0;
+    color: #daba7b;
+}
+
+/* html body {
+
+} */
 
 .table {
+    position: fixed;
+    margin-top: 65px;
     border-collapse: collapse;
     border-bottom-style: none;
+    border-color: #017575;
 }
-
-/* .table,
-.table th,
-.table td {
-    border: 1px solid #ccc;
-} */
-
-/* .table th,
-.table td {
-    padding: 0.5rem;
-} */
 
 .table th {
     position: relative;
 }
 
+.tabe td {
+    color: black;
+}
+
 .resizer {
-    border-right: 2px solid blue;
+    border-right: 4px solid #daba7b;
     position: absolute;
     top: 0;
     right: 0;
@@ -34,7 +53,7 @@
 
 .resizer:hover,
 .resizing {
-    border-right: 2px solid blue;
+    border-right: 4px solid #daba7b;
 }
 
 .resizable {
@@ -44,7 +63,7 @@
     position: relative;
 }
 
-.icon {
+.slider {
     background: url("../images/drag-vertical-variant.svg");
     height: 20px;
     width: 20px;
@@ -52,8 +71,68 @@
     position: fixed;
     top: 50%;
     margin: 0 auto;
-    border: 2px solid gray;
+    border: 2px solid #daba7b;
     background-color: antiquewhite;
     border-radius: 5px;
     transform: translateX(-20%);
+}
+
+/* Menu */
+.menu-btn {
+    background: url("../images/menu_black_24dp.svg");
+    height: 20px;
+    width: 20px;
+    /* background-color: #017575; */
+    color: #daba7b;
+    border: 10;
+
+    /* font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; */
+    border: none;
+    font-weight: bold;
+}
+
+.dropdown-menu {
+    position: relative;
+    display: inline-block;
+}
+
+.menu-content {
+    display: none;
+    position: absolute;
+    background-color: #211515;
+    min-width: 160px;
+    min-width: 90%;
+    z-index: 1;
+    border-radius: 10px;
+}
+
+.links,
+.links-hidden {
+    display: inline-block;
+    color: #daba7b;
+    text-decoration: none;
+    font-size: 18px;
+    white-space: nowrap;
+    tab-size: 0;
+}
+
+.links-hidden {
+    display: block;
+}
+
+.links {
+    display: inline-block;
+}
+
+.links-hidden:hover,
+.links:hover {
+    background-color: #ce9178;
+}
+
+.dropdown-menu:hover .menu-content {
+    display: block;
+}
+
+.dropdown-menu:hover .menu-btn {
+    background-color: #ce9178;
 }
