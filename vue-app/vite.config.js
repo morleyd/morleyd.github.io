@@ -9,7 +9,7 @@ const projectRoot = fileURLToPath(new URL('./', import.meta.url))
 // https://vite.dev/config/
 export default defineConfig({
   // For GitHub Pages, use root base path
-  base: '/',
+  base: 'https://morleyd.github.io/',
   plugins: [
     vue(),
     vuetify({
@@ -29,7 +29,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: '../dist',
+    outDir: './dist',
     emptyOutDir: true,
   },
   publicDir: 'public',
