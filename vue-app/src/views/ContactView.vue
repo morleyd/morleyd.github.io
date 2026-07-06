@@ -1,6 +1,5 @@
 <template>
-  <AppBar />
-  <v-card class="bg-blue-grey-darken-4 fill-height d-flex justify-center align-center">
+  <v-card class="bg-blue-grey-darken-4 fill-height d-flex flex-column flex-md-row justify-center align-center ga-6 pa-4">
     
     <div class="images_holder">
       <img src="/images/DMorley2021_lite.png" style="border-radius: 100%;" alt="David Morley" />
@@ -22,10 +21,7 @@
   </v-card>
 </template>
 
-<script setup lang="ts">
-import AppBar from '../components/AppBar.vue';
-
-</script>
+<script setup lang="ts"></script>
 
 <style scoped>
 .clear {

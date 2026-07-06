@@ -1,6 +1,5 @@
 <script setup>
 import { computed } from 'vue';
-import { RouterView } from 'vue-router'
 import { useRoute, useRouter } from 'vue-router'
 import { useDisplay } from 'vuetify';
 import logoSrc from '@/assets/DavidPixel192x192.png';
@@ -11,11 +10,17 @@ const { mobile } = useDisplay();
 
 const menuItems = [
   { title: 'Home', value: 'home', icon: 'mdi-home-outline' },
+  { title: 'Games', value: 'games', icon: 'mdi-gamepad-variant-outline' },
+  { title: 'Time Since', value: 'time-since', icon: 'mdi-clock-outline' },
   { title: 'Contact', value: 'contact', icon: 'mdi-message-fast-outline' }
 ];
 
+// Routes whose nav entry should highlight even when the exact route name differs
+// (e.g. the Wordle game and helper live under the "Games" section).
+const gamesRouteNames = new Set(['games', 'wordle', 'wordle-helper'])
+
 const activeTab = computed({
-  get: () => route.name,
+  get: () => (gamesRouteNames.has(route.name) ? 'games' : route.name),
   set: (value) => {
     router.push({ name: value })
   }

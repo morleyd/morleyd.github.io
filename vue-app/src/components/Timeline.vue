@@ -1,8 +1,17 @@
+<script setup>
+import { useDisplay } from 'vuetify'
+const { mobile } = useDisplay()
+</script>
+
 <template>
 
-  <v-card elevation="0" class="bg-transparent pa-12">
+  <v-card elevation="0" class="bg-transparent pa-6 pa-md-12">
     <v-card-title>Overview Timeline</v-card-title>
-    <v-timeline direction="horizontal" side="end" dot-color="purple-lighten-1">
+    <v-timeline
+      :direction="mobile ? 'vertical' : 'horizontal'"
+      side="end"
+      dot-color="purple-lighten-1"
+    >
     <v-timeline-item icon="mdi-map-marker">
       <div>
         <span>08/14</span>

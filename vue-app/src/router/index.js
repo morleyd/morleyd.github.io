@@ -14,9 +14,19 @@ const router = createRouter({
       component: () => import('../views/ContactView.vue'),
     },
     {
+      path: '/games',
+      name: 'games',
+      component: () => import('../views/GamesView.vue'),
+    },
+    {
       path: '/wordle/:hash?',
       name: 'wordle',
       component: () => import('../views/WordleView.vue'),
+    },
+    {
+      path: '/wordle-helper',
+      name: 'wordle-helper',
+      component: () => import('../views/WordleHelperView.vue'),
     },
     {
       path: '/time-since',

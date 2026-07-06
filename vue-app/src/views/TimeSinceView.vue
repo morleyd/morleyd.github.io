@@ -23,10 +23,10 @@
       </div>
     </v-card-text>
     <h2>Compute Future Time</h2>
-    <v-card-actions>
-      <v-text-field v-model="inputVal" type="number" label="Value"></v-text-field>
-      <v-select v-model="inputUnit" :items="['Seconds', 'Minutes', 'Hours', 'Days', 'Weeks']" label="Unit"></v-select>
-      <v-btn @click="computeTime">Compute</v-btn>
+    <v-card-actions class="flex-column flex-sm-row ga-2 px-4">
+      <v-text-field v-model="inputVal" type="number" label="Value" hide-details class="w-100"></v-text-field>
+      <v-select v-model="inputUnit" :items="['Seconds', 'Minutes', 'Hours', 'Days', 'Weeks']" label="Unit" hide-details class="w-100"></v-select>
+      <v-btn @click="computeTime" class="w-100 w-sm-auto">Compute</v-btn>
     </v-card-actions>
     <p v-if="computedDate">{{ computedDate }}</p>
   </v-card>

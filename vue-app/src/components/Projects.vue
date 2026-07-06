@@ -3,9 +3,8 @@
     <v-card-title>
       Past Projects
     </v-card-title>
-    <v-card-subtitle>
-      Click on each image to get a description of my efforts. Each blurb should countain a
-      <a href="">link</a> to a demo or more info.
+    <v-card-subtitle class="text-wrap">
+      Click on each image to get a description of my efforts. Most include a link to a demo or more info.
     </v-card-subtitle>
     <ul id="filters" class="sub_nav">
       <li :class="{ active: activeFilter === '*' }" @click="setFilter('*')">All works</li>
@@ -15,9 +14,10 @@
     <ul id="container" class="item-list">
       <li v-for="project in filteredProjects" :key="project.id" :class="`item ${project.classes}`"
         @mouseenter="hoveredProject = project.id" @mouseleave="hoveredProject = null">
-        <div class="image">
+        <div class="image" role="button" :aria-label="`View details for ${project.title}`"
+          @click="openDialog(project)">
           <img :src="project.image" :alt="project.title" />
-          <div v-if="hoveredProject === project.id" class="hover" @click="openDialog(project)">
+          <div class="hover" :class="{ 'hover--visible': hoveredProject === project.id }">
             <div class="item-content">
               <h4>{{ project.title }}</h4>
               <p>{{ project.description }}</p>
@@ -39,7 +39,7 @@
           <img :src="selectedProject.popupImage" alt="" class="popup-image" />
         </div>
         <time :datetime="selectedProject.date" class="popup-time">{{ selectedProject.dateLabel }}</time>
-        <div v-html="selectedProject.popupContent" class="popup-content"></div>
+        <div v-html="selectedProject.popupContent" class="popup-content" @click="handleContentClick"></div>
       </v-card-text>
     </v-card>
   </v-dialog>
@@ -47,11 +47,35 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
+
+const router = useRouter()
 
 const activeFilter = ref('*')
 const hoveredProject = ref<string | null>(null)
 const dialogOpen = ref(false)
 const selectedProject = ref<Project | null>(null)
+
+/**
+ * Intercept clicks on internal links inside v-html popup content so they use
+ * client-side routing (no full reload) and close the dialog.
+ */
+function handleContentClick(event: MouseEvent) {
+  const anchor = (event.target as HTMLElement | null)?.closest('a')
+  if (!anchor) {
+    return
+  }
+  const href = anchor.getAttribute('href') ?? ''
+  const lastSegment = href.split('/').pop() ?? ''
+  const looksLikeFile = lastSegment.includes('.') // e.g. /Projects/paper.pdf — let it download
+
+  // Route only same-origin app paths (e.g. /wordle); leave files and external links alone.
+  if (href.startsWith('/') && !looksLikeFile && anchor.target !== '_blank') {
+    event.preventDefault()
+    dialogOpen.value = false
+    router.push(href)
+  }
+}
 
 interface Project {
   id: string
@@ -307,6 +331,7 @@ function openDialog(project: Project) {
 
 .item .image {
   position: relative;
+  cursor: pointer;
 }
 
 .item .image img {
@@ -322,20 +347,17 @@ function openDialog(project: Project) {
   top: 0;
   width: 100%;
   background: #6abb84;
-  opacity: 0.9;
+  opacity: 0;
+  visibility: hidden;
   border-radius: 50%;
   cursor: pointer;
-  animation: fadeIn 0.6s;
+  transition: opacity 0.3s ease;
 }
 
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 0.9;
-  }
+/* Revealed on hover (desktop). On touch, tapping the image opens the dialog directly. */
+.item .hover--visible {
+  opacity: 0.9;
+  visibility: visible;
 }
 
 .item .item-content {
