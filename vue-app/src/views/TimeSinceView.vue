@@ -1,9 +1,9 @@
 <template>
-  <v-container class="fill-height w-100 bg-surface">
-  <v-card class="mx-auto text-center fill-height d-flex flex-column place-self-center bg-blue-grey-darken-4" width="500" max-width="100vw">
-    <v-card-title>
-      <h1>Time Since</h1>
-      <h3>Sept 2, 2022 at 11:07 AM MST</h3>
+  <v-container class="fill-height w-100">
+  <v-card class="mx-auto text-center fill-height d-flex flex-column place-self-center bg-surface" width="500" max-width="100vw">
+    <v-card-title class="d-block">
+      <h1 class="page-title">Time Since</h1>
+      <p class="text-body-2 text-medium-emphasis">Sept 2, 2022 at 11:07 AM MST</p>
     </v-card-title>
     <v-card-text>
       <div>
@@ -33,19 +33,20 @@
   </v-container>
 </template>
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
+import {
+  calendarDiff,
+  formatCalendar,
+  formatSeconds,
+  formatMinutes,
+  formatHours,
+  formatDays,
+  formatWeeks,
+  addToDate,
+} from '@/services/timeSince'
 
-// ============================================================================
-//  State
-// ============================================================================
-
-const SECOND = 1000;
-const MINUTE = SECOND * 60;
-const HOUR = MINUTE * 60;
-const DAY = HOUR * 24;
-const WEEK = DAY * 7;
-
-const wedding = new Date("2022-09-02T11:07:22-06:00"); // Sept 2, 2022 at 11:07 AM Idaho Falls Time
+// Sept 2, 2022 at 11:07 AM Idaho Falls (Mountain) time
+const anchor = new Date('2022-09-02T11:07:22-06:00')
 
 const months = ref('')
 const monthRemainder = ref('')
@@ -59,136 +60,37 @@ const inputVal = ref('')
 const inputUnit = ref('')
 const computedDate = ref('')
 
+let timer = null
 
-// ============================================================================
-// Lifecycle Hooks
-// ============================================================================
-onMounted(() => {
-  timeAgo();
-})
-
-// ============================================================================
-// Formating Functions
-// ============================================================================
-function numberWithCommas(x) {
-  return x.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-}
-
-function formatSeconds(ms) {
-  return numberWithCommas(Math.floor(ms / SECOND)) + " Seconds";
-}
-
-function formatMinutes(ms) {
-  const raw_minutes = ms / MINUTE;
-  const clean_minutes = Math.floor(raw_minutes);
-  const seconds = formatSeconds((raw_minutes - clean_minutes) * MINUTE);
-  return numberWithCommas(clean_minutes) + " Minutes " + seconds;
-}
-
-function formatHours(ms) {
-  const raw_hours = ms / HOUR;
-  const clean_hours = Math.floor(raw_hours);
-  const minutes = formatMinutes((raw_hours - clean_hours) * HOUR);
-  return numberWithCommas(clean_hours) + " Hours " + minutes;
-}
-
-function formatDays(ms) {
-  const raw_days = ms / DAY;
-  const clean_days = Math.floor(raw_days);
-  const hours = formatHours((raw_days - clean_days) * DAY);
-  return numberWithCommas(clean_days) + " Days " + hours;
-}
-
-function formatWeeks(ms) {
-  const raw_weeks = ms / WEEK;
-  const clean_weeks = Math.floor(raw_weeks);
-  const days = formatDays((raw_weeks - clean_weeks) * WEEK);
-  return numberWithCommas(clean_weeks) + " Weeks " + days;
-}
-
-function formatMonths(today, wed) {
-  let yDelta = today.getFullYear() - wed.getFullYear()
-  let monDelta = today.getMonth() - wed.getMonth()
-  let dDelta = today.getDate() - wed.getDate()
-  let hDelta = today.getHours() - wed.getHours()
-  let minDelta = today.getMinutes() - wed.getMinutes()
-  let sDelta = today.getSeconds() - wed.getSeconds()
-  // TODO: There are some off by one errors below!
-  if (sDelta < 0) {
-    minDelta = minDelta - 1
-    sDelta = sDelta + 60
-  }
-  if (minDelta < 0) {
-    hDelta = hDelta - 1
-    minDelta = minDelta + 60
-  }
-  if (hDelta < 0) {
-    if (minDelta < 0) {
-      hDelta = hDelta + 24
-    } else {
-      hDelta = hDelta + 24 + 1
-    }
-    dDelta = dDelta - 1
-  }
-  // if (dDelta < 0) {
-  //   monDelta = monDelta - 1
-  //   dDelta = dDelta + // HOW MANY?
-  // }
-  if (monDelta < 0) {
-    yDelta = yDelta - 1
-    monDelta = monDelta + 12
-  }
-  var monthsOut = '';
-  var remainderOut = hDelta + ' Hours ' + minDelta + ' Minutes ' + sDelta + " Seconds";
-  if (yDelta > 0) {
-    monthsOut += (yDelta > 1) ? yDelta + ' Years ' : yDelta + ' Year ';
-  }
-  if (monDelta > 0) {
-    monthsOut += (monDelta > 1) ? monDelta + ' Months ' : monDelta + ' Month ';
-  }
-  if (dDelta > 0) {
-    monthsOut += (dDelta > 1) ? dDelta + ' Days ' : dDelta + ' Day ';
-  }
-  return [monthsOut, remainderOut]
-}
-
-function getConversion(unit) {
-  if (unit === "Seconds") {
-    return SECOND;
-  } else if (unit === "Minutes") {
-    return MINUTE;
-  } else if (unit === "Hours") {
-    return HOUR;
-  } else if (unit === "Days") {
-    return DAY;
-  } else if (unit === "Weeks") {
-    return WEEK;
-  } else {
-    return 0;
-  }
-}
-
-// ============================================================================
-// Methods
-// ============================================================================
-function timeAgo() {
-  const today = new Date();
-  const delta = today - wedding;
-  let [monthsText, remainder] = formatMonths(today, wedding);
-  days.value = formatDays(delta);
-  months.value = monthsText || '';
-  monthRemainder.value = remainder || '';
-  weeks.value = formatWeeks(delta);
-  seconds.value = formatSeconds(delta);
-  minutes.value = formatMinutes(delta);
-  hours.value = formatHours(delta);
-  setTimeout(timeAgo, 1000);
+function tick() {
+  const now = new Date()
+  const delta = now.getTime() - anchor.getTime()
+  const cal = formatCalendar(calendarDiff(anchor, now))
+  months.value = cal.main
+  monthRemainder.value = cal.remainder
+  days.value = formatDays(delta)
+  weeks.value = formatWeeks(delta)
+  hours.value = formatHours(delta)
+  minutes.value = formatMinutes(delta)
+  seconds.value = formatSeconds(delta)
 }
 
 function computeTime() {
-  let unit = getConversion(inputUnit.value);
-  let x = parseInt(inputVal.value);
-  let new_date = new Date(wedding.getTime() + x * unit);
-  computedDate.value = new_date;
+  const x = parseInt(inputVal.value, 10)
+  if (Number.isNaN(x) || !inputUnit.value) {
+    return
+  }
+  computedDate.value = addToDate(anchor, x, inputUnit.value).toString()
 }
+
+onMounted(() => {
+  tick()
+  timer = setInterval(tick, 1000)
+})
+
+onBeforeUnmount(() => {
+  if (timer) {
+    clearInterval(timer)
+  }
+})
 </script>

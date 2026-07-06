@@ -670,6 +670,9 @@ onBeforeUnmount(() => {
             <v-divider />
             <v-card-text class="pa-0">
               <v-list density="compact" class="pa-0">
+                <!-- Back to the Games landing (app bar is hidden while playing) -->
+                <v-list-item prepend-icon="mdi-arrow-left" title="Back to Games" :to="{ name: 'games' }" />
+                <v-divider />
                 <!-- Hard Mode Toggle -->
                 <v-list-item>
                   <v-tooltip location="right">

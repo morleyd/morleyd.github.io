@@ -1,0 +1,14 @@
+/* Shared, cross-page conventions so headers and spacing feel unified */
+
+.page-title {
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1.25;
+  margin: 0 0 4px;
+}
+
+@media (max-width: 600px) {
+  .page-title {
+    font-size: 1.5rem;
+  }
+}

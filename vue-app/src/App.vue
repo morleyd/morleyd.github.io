@@ -1,7 +1,8 @@
 <script setup>
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import AppBar from '@/components/AppBar.vue'
 
+const route = useRoute()
 const router = useRouter()
 
 function navTo(value) {
@@ -10,8 +11,8 @@ function navTo(value) {
 </script>
 
 <template>
-  <v-app class="bg-grey-lighten-5">
-    <AppBar />
+  <v-app>
+    <AppBar v-if="!route.meta.hideAppBar" />
 
     <v-main>
       <router-view />

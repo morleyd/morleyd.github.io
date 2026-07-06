@@ -1,11 +1,9 @@
 <template>
-  <v-card elevation="0" class="bg-transparent pa-12">
-    <v-card-title>
-      Past Projects
-    </v-card-title>
-    <v-card-subtitle class="text-wrap">
+  <v-card elevation="0" class="bg-transparent pa-6 pa-md-12">
+    <h2 class="page-title">Past Projects</h2>
+    <p class="text-body-2 text-medium-emphasis mb-2">
       Click on each image to get a description of my efforts. Most include a link to a demo or more info.
-    </v-card-subtitle>
+    </p>
     <ul id="filters" class="sub_nav">
       <li :class="{ active: activeFilter === '*' }" @click="setFilter('*')">All works</li>
       <li :class="{ active: activeFilter === '.nlp' }" @click="setFilter('.nlp')">NLP</li>
@@ -21,6 +19,7 @@
             <div class="item-content">
               <h4>{{ project.title }}</h4>
               <p>{{ project.description }}</p>
+              <p v-if="project.date" class="item-year">{{ project.date.slice(0, 4) }}</p>
             </div>
           </div>
         </div>
@@ -389,6 +388,16 @@ function openDialog(project: Project) {
   display: block;
   font-size: 15px;
   line-height: 17px;
+}
+
+/* Year, visually separated from the description */
+.item .item-content .item-year {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.35);
+  font-size: 12px;
+  letter-spacing: 2px;
+  opacity: 0.9;
 }
 
 /* Dialog styles */

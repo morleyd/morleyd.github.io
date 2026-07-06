@@ -22,10 +22,11 @@ export const vuetify = createVuetify({
       dark: {
         dark: true,
         colors: {
-          background: '#0B1120',
-          surface: '#111827',
-          primary: '#6EE7B7',
-          secondary: '#93C5FD',
+          // Unified slate palette shared across every page (matches the Wordle board)
+          background: '#020617',
+          surface: '#0f172a',
+          primary: '#8e24aa', // purple, matches the app bar
+          secondary: '#a78bfa',
         },
       },
     },

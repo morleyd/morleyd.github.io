@@ -22,6 +22,7 @@ const router = createRouter({
       path: '/wordle/:hash?',
       name: 'wordle',
       component: () => import('../views/WordleView.vue'),
+      meta: { hideAppBar: true },
     },
     {
       path: '/wordle-helper',
@@ -32,6 +33,11 @@ const router = createRouter({
       path: '/time-since',
       name: 'time-since',
       component: () => import('../views/TimeSinceView.vue'),
+    },
+    {
+      path: '/gallery',
+      name: 'gallery',
+      component: () => import('../views/GalleryView.vue'),
     },
   ],
 })

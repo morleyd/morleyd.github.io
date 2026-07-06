@@ -1,18 +1,16 @@
 <template>
-  <v-card elevation="0" class="bg-transparent pa-12">
-    <v-card-title class="mb-6">
-      Awards and Acheivements
-    </v-card-title>
+  <v-card elevation="0" class="bg-transparent pa-6 pa-md-12">
+    <h2 class="page-title mb-6">Awards and Achievements</h2>
     <ul id="container" class="item-list">
       <li v-for="award in awards" :key="award.id" class="item ai nlp" @mouseenter="hoveredAward = award.id"
         @mouseleave="hoveredAward = null">
-        <div class="image">
+        <div class="image" role="button" :aria-label="`View details for ${award.title}`" @click="openDialog(award)">
           <img :src="award.image" :alt="award.title" />
-          <div v-if="hoveredAward === award.id" class="hover" @click="openDialog(award)">
+          <div class="hover" :class="{ 'hover--visible': hoveredAward === award.id }">
             <div class="item-content">
               <h4>{{ award.title }}</h4>
               <p>{{ award.description }}</p>
-              <p>{{ award.year }}</p>
+              <p class="item-year">{{ award.year }}</p>
             </div>
           </div>
         </div>
@@ -128,6 +126,7 @@ function openDialog(award: Award) {
 
 .item .image {
   position: relative;
+  cursor: pointer;
 }
 
 .item .image img {
@@ -143,20 +142,16 @@ function openDialog(award: Award) {
   top: 0;
   width: 100%;
   background: #6abb84;
-  opacity: 0.9;
+  opacity: 0;
+  visibility: hidden;
   border-radius: 50%;
   cursor: pointer;
-  animation: fadeIn 0.6s;
+  transition: opacity 0.3s ease;
 }
 
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 0.9;
-  }
+.item .hover--visible {
+  opacity: 0.9;
+  visibility: visible;
 }
 
 .item .item-content {
@@ -188,6 +183,16 @@ function openDialog(award: Award) {
   display: block;
   font-size: 15px;
   line-height: 17px;
+}
+
+/* Year, visually separated from the description */
+.item .item-content .item-year {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.35);
+  font-size: 12px;
+  letter-spacing: 2px;
+  opacity: 0.9;
 }
 
 /* Dialog styles */

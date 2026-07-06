@@ -6,7 +6,7 @@ const { mobile } = useDisplay()
 <template>
 
   <v-card elevation="0" class="bg-transparent pa-6 pa-md-12">
-    <v-card-title>Overview Timeline</v-card-title>
+    <h2 class="page-title mb-4">Overview Timeline</h2>
     <v-timeline
       :direction="mobile ? 'vertical' : 'horizontal'"
       side="end"
