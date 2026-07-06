@@ -29,6 +29,7 @@ const statusToEmoji = (status: LetterStatus): string => {
  * @param puzzleType - Type of puzzle (daily, custom, random)
  * @param puzzleNumber - Puzzle number for daily, undefined for others
  * @param shareLink - Optional link to share
+ * @param won - Whether the puzzle was solved (false renders "X/6" for a loss)
  * @returns Formatted share text
  */
 export function generateShareText(
@@ -36,6 +37,7 @@ export function generateShareText(
   puzzleType: 'daily' | 'custom' | 'random',
   puzzleNumber?: number,
   shareLink?: string,
+  won = true,
 ): string {
   const attempts = guesses.length
   const maxAttempts = MAX_ATTEMPTS
@@ -53,7 +55,7 @@ export function generateShareText(
     header = 'Wordle (Random)'
   }
 
-  const score = `${attempts}/${maxAttempts}`
+  const score = won ? `${attempts}/${maxAttempts}` : `X/${maxAttempts}`
 
   // Build share text
   let shareText = `${header} ${score}\n\n${emojiGrid}`

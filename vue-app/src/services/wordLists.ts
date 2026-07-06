@@ -72,6 +72,9 @@ export const getFormattedPuzzleDate = (date: Date): string =>
     month: 'short',
     day: '2-digit',
     year: 'numeric',
+    // The puzzle date is a UTC-midnight instant; format it in UTC so users
+    // west of UTC don't see the previous day.
+    timeZone: 'UTC',
   })
 
 /**

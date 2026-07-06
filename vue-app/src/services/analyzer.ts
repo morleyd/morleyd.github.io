@@ -80,8 +80,18 @@ export const filterCandidates = (
 // Main Analyzer
 // -----------------------------------------------------
 
-export const analyzeGame = (history: GuessHistoryEntry[]): GameAnalysis => {
-  let candidates = [...answerBank]
+export const analyzeGame = (
+  history: GuessHistoryEntry[],
+  extraCandidates: string[] = [],
+): GameAnalysis => {
+  // Seed with the official answer bank, plus any extra candidates (e.g. a custom
+  // or random target word that isn't in the bank) so filtering never eliminates
+  // the true answer and leaves an empty/incorrect remaining list.
+  const candidateSet = new Set<string>(answerBank)
+  for (const word of extraCandidates) {
+    candidateSet.add(word)
+  }
+  let candidates = [...candidateSet]
 
   const rows: GuessAnalysisRow[] = history.map((entry) => {
     const countBefore = candidates.length

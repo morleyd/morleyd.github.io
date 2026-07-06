@@ -31,6 +31,7 @@ import {
   loadGameState,
   saveGameState,
 } from '@/services/storage'
+import type { CachedGameState } from '@/services/storage'
 import { copyToClipboard, generateShareText } from '@/services/share'
 import type { LetterStatus } from '@/services/wordleLogic'
 
@@ -125,6 +126,7 @@ const analysisData = computed(() =>
       guess: entry.guess,
       statuses: entry.statuses,
     })),
+    [targetWord.value],
   ),
 )
 
@@ -174,6 +176,19 @@ function resetBoardForWord(word: string) {
 }
 
 /**
+ * Restores board/keyboard state from a cached game
+ */
+function restoreFromCache(cached: CachedGameState) {
+  targetWord.value = cached.targetWord
+  guesses.value = cached.guesses
+  currentGuess.value = cached.currentGuess
+  gameState.value = cached.gameState
+  letterStatuses.value = cached.letterStatuses
+  hardMode.value = cached.hardMode
+  showSnackbar('Game restored from previous session.', 'info')
+}
+
+/**
  * Applies the daily word puzzle
  */
 function applyDailyWord(resetBoard = true) {
@@ -188,15 +203,10 @@ function applyDailyWord(resetBoard = true) {
     const puzzleId = getDailyPuzzleId()
     const cached = loadGameState(puzzleId)
 
-    if (cached) {
-      // Restore from cache
-      targetWord.value = cached.targetWord
-      guesses.value = cached.guesses
-      currentGuess.value = cached.currentGuess
-      gameState.value = cached.gameState
-      letterStatuses.value = cached.letterStatuses
-      hardMode.value = cached.hardMode
-      showSnackbar('Game restored from previous session.', 'info')
+    // Only restore if the cached word still matches today's answer (guards against
+    // a UTC-midnight rollover or an answer-bank change producing a stale target).
+    if (cached && cached.targetWord === info.word) {
+      restoreFromCache(cached)
     } else {
       resetBoardForWord(info.word)
     }
@@ -226,15 +236,8 @@ function applyCustomHash(hash: string, { resetBoard = true }: { resetBoard?: boo
     const puzzleId = getCustomPuzzleId(hash)
     const cached = loadGameState(puzzleId)
 
-    if (cached) {
-      // Restore from cache
-      targetWord.value = cached.targetWord
-      guesses.value = cached.guesses
-      currentGuess.value = cached.currentGuess
-      gameState.value = cached.gameState
-      letterStatuses.value = cached.letterStatuses
-      hardMode.value = cached.hardMode
-      showSnackbar('Game restored from previous session.', 'info')
+    if (cached && cached.targetWord === decoded) {
+      restoreFromCache(cached)
     } else {
       resetBoardForWord(decoded)
     }
@@ -258,23 +261,14 @@ function startRandomWord() {
   activeCustomWord.value = null
   puzzleType.value = 'random'
 
-  const puzzleId = getRandomPuzzleId(word)
-  const cached = loadGameState(puzzleId)
-
-  if (cached) {
-    // Restore from cache
-    targetWord.value = cached.targetWord
-    guesses.value = cached.guesses
-    currentGuess.value = cached.currentGuess
-    gameState.value = cached.gameState
-    letterStatuses.value = cached.letterStatuses
-    hardMode.value = cached.hardMode
-    showSnackbar('Game restored from previous session.', 'info')
-  } else {
-    resetBoardForWord(word)
+  // Free Play always starts a fresh game. Clear any custom hash from the URL so a
+  // reload/share doesn't reload the previous custom puzzle. puzzleType is already
+  // 'random', so the route watcher won't override it with the daily word.
+  if (route.params.hash) {
+    router.push({ name: 'wordle' }).catch(() => {})
   }
 
-  saveCurrentGameState()
+  resetBoardForWord(word)
 }
 
 /**
@@ -303,6 +297,12 @@ function syncWordFromRoute(resetBoard = true) {
     return
   }
 
+  // No hash in route. A random (Free Play) game isn't encoded in the URL, so
+  // leave it in place rather than clobbering it with the daily word.
+  if (puzzleType.value === 'random') {
+    return
+  }
+
   // No hash in route - use daily word
   if (activeHash.value !== null || resetBoard) {
     applyDailyWord(resetBoard)
@@ -322,7 +322,6 @@ function handleKeyInput(key: string) {
   }
 
   if (gameState.value !== 'playing') {
-    showSnackbar('Game over. Reset to play again.', 'warning')
     return
   }
 
@@ -478,8 +477,12 @@ async function copyShareLink() {
 function returnToDailyPuzzle() {
   shareMenu.value = false
   helpMenu.value = false
-  router.push({ name: 'wordle' }).catch(() => { })
-  applyDailyWord(true)
+  if (route.params.hash) {
+    // Clearing the hash triggers the route watcher, which loads the daily word.
+    router.push({ name: 'wordle' }).catch(() => { })
+  } else {
+    applyDailyWord(true)
+  }
 }
 
 /**
@@ -548,6 +551,7 @@ async function shareScore() {
     puzzleType.value,
     puzzleType.value === 'daily' ? puzzleNumber.value : undefined,
     shareLink,
+    gameState.value === 'won',
   )
 
   const success = await copyToClipboard(shareText)
@@ -574,6 +578,15 @@ function showSnackbar(message: string, color: SnackbarColor = 'info') {
  * Handles physical keyboard input
  */
 function handlePhysicalKey(event: KeyboardEvent) {
+  // Ignore keyboard shortcuts (Cmd/Ctrl/Alt) so e.g. Cmd+C/Ctrl+R aren't typed
+  // into the board, and ignore all input once the game is over.
+  if (event.metaKey || event.ctrlKey || event.altKey) {
+    return
+  }
+  if (gameState.value !== 'playing') {
+    return
+  }
+
   const key = event.key.toUpperCase()
   if (key === 'ENTER' || key === 'BACKSPACE') {
     event.preventDefault()
@@ -738,7 +751,12 @@ onBeforeUnmount(() => {
             Guess the hidden {{ WORD_LENGTH }}-letter word in {{ MAX_ATTEMPTS }} tries.
           </p>
           <p class="text-caption text-grey-lighten-1">
-            {{ activeWordLabel }} · Daily #{{ puzzleNumber }} · {{ puzzleDateLabel }}
+            <template v-if="puzzleType === 'daily'">
+              {{ activeWordLabel }} · #{{ puzzleNumber }} · {{ puzzleDateLabel }}
+            </template>
+            <template v-else>
+              {{ activeWordLabel }}
+            </template>
           </p>
         </div>
 
