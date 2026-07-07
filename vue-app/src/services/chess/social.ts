@@ -10,6 +10,7 @@
  * randomness driven by a seeded RNG for reproducible casts.
  */
 import type { Chess } from 'chess.js'
+import { strToSeed } from '../seed'
 import { ROSTER, BELOVED, DISLIKED } from './profiles'
 import type { PieceSoul, GameEvent, Color, PieceType, Square, Persona } from './types'
 
@@ -35,39 +36,55 @@ function shuffled<T>(arr: T[], rng: Rng): T[] {
   return a
 }
 
-/** Build the cast from the current board, drawing seeded names per side. */
-export function createSociety(chess: Chess, rng: Rng): Society {
-  const pools: Record<string, Persona[]> = {}
-  const draw = (color: Color, type: PieceType): Persona => {
-    const key = color + type
-    if (!pools[key]) pools[key] = shuffled(ROSTER[type].personas, rng)
-    return (
-      pools[key].pop() ?? {
-        name: 'Nameless',
-        intro: "I don't seem to have a name yet.",
-      }
-    )
-  }
+/** The cast is CONSTANT across games (same characters, deterministic per
+ * colour+type from the roster) — only their board positions shuffle. So "the
+ * grouchy impatient pawn" is always the same soul; you just never know which
+ * square he'll be on. */
+function castFor(color: Color, type: PieceType, count: number): Persona[] {
+  const pool = ROSTER[type].personas
+  const offset = color === 'w' ? 0 : count // give the two armies distinct names
+  return Array.from({ length: count }, (_, i) => pool[(offset + i) % pool.length])
+}
+// A piece's fixed traits are hashed from its identity so the SAME character has
+// the same temperament every game, regardless of where it lands.
+function fixedSass(color: Color, type: PieceType, index: number): number {
+  const h = strToSeed(`sass:${color}${type}${index}`)
+  return 0.25 + (h % 1000) / 1000 * 0.6
+}
 
+export function createSociety(chess: Chess, rng: Rng): Society {
   const souls: Record<string, PieceSoul> = {}
   const bySquare: Record<Square, string> = {}
-  let counter = 0
+
+  // Group each side's squares by piece type, then shuffle only the positions and
+  // deal the fixed cast onto them.
+  const squaresByKey: Record<string, Square[]> = {}
   const board = chess.board()
   for (let r = 0; r < 8; r += 1) {
     for (let c = 0; c < 8; c += 1) {
       const cell = board[r][c]
       if (!cell) continue
-      const type = cell.type as PieceType
-      const color = cell.color as Color
+      const key = (cell.color as Color) + (cell.type as PieceType)
+      ;(squaresByKey[key] ||= []).push(cell.square)
+    }
+  }
+
+  let counter = 0
+  for (const key of Object.keys(squaresByKey)) {
+    const color = key[0] as Color
+    const type = key[1] as PieceType
+    const squares = shuffled(squaresByKey[key], rng) // positions shuffle each game
+    const cast = castFor(color, type, squares.length) // cast stays the same
+    squares.forEach((square, i) => {
       const id = `${color}${type}${counter++}`
       souls[id] = {
         id,
         type,
         color,
-        square: cell.square,
-        persona: draw(color, type),
+        square,
+        persona: cast[i],
         stamina: ROSTER[type].stamina,
-        sass: 0.25 + rng() * 0.6,
+        sass: fixedSass(color, type, i),
         captured: false,
         mood: { impatience: 0, fear: 0, anger: 0, confidence: 0.4, joy: 0.35 },
         idleFor: 0,
@@ -76,8 +93,8 @@ export function createSociety(chess: Chess, rng: Rng): Society {
         avenging: null,
         vengefulUntil: 0,
       }
-      bySquare[cell.square] = id
-    }
+      bySquare[square] = id
+    })
   }
   seedBonds(souls, rng)
   return { souls, bySquare, ply: 0 }

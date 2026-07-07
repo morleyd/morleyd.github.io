@@ -70,7 +70,7 @@ const bubbleTimers = new Map<number, ReturnType<typeof setTimeout>>()
 function enqueue(lines: Utterance[], delay = 0) {
   if (!lines.length) return
   queue.push(...lines)
-  if (queue.length > 5) queue.splice(0, queue.length - 5)
+  if (queue.length > 8) queue.splice(0, queue.length - 8)
   pump(delay)
 }
 function pump(delay: number) {
@@ -86,21 +86,35 @@ function pump(delay: number) {
   }
   pumpTimer = setTimeout(step, delay)
 }
+const lastSaidBy = new Map<string, number>() // soulId -> last reveal time (ms)
+let recentTexts: string[] = []
 function reveal(u: Utterance) {
+  const t = game.now()
+  // One line per piece at a time, and never repeat a recent line — this is what
+  // keeps a dawdling turn from becoming a wall of identical heckles.
+  if (t - (lastSaidBy.get(u.soulId) ?? -1e9) < 2600) return
+  if (recentTexts.includes(u.text)) return
+  lastSaidBy.set(u.soulId, t)
+  recentTexts.push(u.text)
+  if (recentTexts.length > 30) recentTexts.shift()
+
   if (u.square) {
+    // Replace any existing bubble from the same piece (no double-talk).
+    for (const old of bubbles.value.filter((x) => x.soulId === u.soulId)) clearBubbleTimer(old.bid)
+    bubbles.value = bubbles.value.filter((x) => x.soulId !== u.soulId)
     const b: Bubble = { ...u, bid: bubbleId++ }
     bubbles.value.push(b)
     if (bubbles.value.length > 2) {
       const dropped = bubbles.value.shift()
       if (dropped) clearBubbleTimer(dropped.bid)
     }
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       bubbles.value = bubbles.value.filter((x) => x.bid !== b.bid)
       bubbleTimers.delete(b.bid)
     }, 4400)
-    bubbleTimers.set(b.bid, t)
+    bubbleTimers.set(b.bid, timer)
   }
-  log.value.unshift({ ...u, ts: game.now() })
+  log.value.unshift({ ...u, ts: t })
   if (log.value.length > 40) log.value.length = 40
 }
 function clearBubbleTimer(id: number) {
@@ -118,6 +132,8 @@ function clearBanter() {
   bubbleTimers.clear()
   bubbles.value = []
   log.value = []
+  lastSaidBy.clear()
+  recentTexts = []
 }
 
 // ── One-shot resistance cues (shake / hop) ────────────────────────────────
@@ -140,15 +156,17 @@ function triggerCue(soulId: string, type: string) {
 const cueClass = (id: string) => (cueMap.value[id] ? 'cue-' + cueMap.value[id] : '')
 
 // ── Idle heckling ─────────────────────────────────────────────────────────
+// Fires at most ONCE per idle stretch: a real interaction re-arms it. (Previously
+// it re-armed itself every 16s, producing a wall of repeated heckles.)
 let idleTimer: ReturnType<typeof setTimeout> | null = null
 function armIdle() {
   if (idleTimer) clearTimeout(idleTimer)
   if (!game.canPlay) return
   idleTimer = setTimeout(() => {
+    idleTimer = null
     const u = game.idleHeckle()
     if (u) enqueue([u])
-    armIdle()
-  }, 16_000)
+  }, 22_000)
 }
 
 // ── Reactive, derived board ─────────────────────────────────────────────────
@@ -185,7 +203,7 @@ const selectedName = computed(() => {
 })
 const status = computed(() => {
   version.value
-  if (game.chess.isCheckmate()) return game.turn === 'w' ? 'Checkmate — your king has fallen.' : 'Checkmate! You win. 🎉'
+  if (game.chess.isCheckmate()) return game.turn === 'w' ? 'Checkmate — your king has fallen.' : 'Checkmate! You win.'
   if (game.chess.isStalemate()) return 'Stalemate — a stiff, awkward draw.'
   if (game.chess.isDraw()) return "It's a draw. Everyone lives to bicker another day."
   if (game.turn !== 'w' || game.aiThinking) return 'The enemy is plotting…'
@@ -244,8 +262,11 @@ const moveRows = computed(() => {
 })
 
 // Per-piece special states → a small icon badge on the piece.
-const STATE_ICON: Record<string, string> = { vengeful: '🔥', spooked: '😨' }
 const pieceStates = computed(() => (version.value, game.states()))
+const stateClass = (sq: Square) => {
+  const s = pieceStates.value[sq]
+  return s ? 'state-' + s : ''
+}
 const coaxSquare = computed(() => (version.value, game.coaxTarget()))
 
 // Team trust (persists across games): its opinion of your generalship.
@@ -369,7 +390,19 @@ function onSquare(square: Square) {
   enqueue(res.utterances, res.moved ? 650 : 0)
   bump()
   armIdle()
-  if (res.moved) window.setTimeout(runAi, 420)
+  if (res.moved) {
+    maybePostGame()
+    window.setTimeout(runAi, 420)
+  }
+}
+
+let postSaid = false
+function maybePostGame() {
+  if (game.gameOver && !postSaid) {
+    postSaid = true
+    enqueue(game.postGame(), 700)
+    bump()
+  }
 }
 
 async function runAi() {
@@ -400,6 +433,7 @@ async function runAi() {
     enqueue([sp], 400)
     bump()
   }
+  maybePostGame()
   armIdle()
 }
 
@@ -409,7 +443,9 @@ function start() {
   game.reset(code.value)
   clearBanter()
   cueMap.value = {}
+  postSaid = false
   bump()
+  enqueue(game.pregameChatter(), 500) // adjacent pieces get acquainted (forms bonds)
   armIdle()
 }
 function newGame() {
@@ -486,7 +522,7 @@ onBeforeUnmount(() => {
             <v-slider v-model="settings.agency" :min="0" :max="1" :step="0.1" hide-details density="compact" />
           </div>
           <div class="slider-wrap">
-            <label class="text-caption text-medium-emphasis">Chaos 🌀</label>
+            <label class="text-caption text-medium-emphasis">Chaos</label>
             <v-slider v-model="settings.chaos" :min="0" :max="1" :step="0.1" hide-details density="compact" color="secondary" />
           </div>
           <v-btn variant="tonal" color="primary" prepend-icon="mdi-refresh" @click="newGame">New game</v-btn>
@@ -580,8 +616,7 @@ onBeforeUnmount(() => {
               :class="cueClass(p.id)"
               :style="pieceStyle(p)"
             >
-              <span class="glyph" :class="[p.colorClass, animClass(p.square)]">{{ GLYPH[p.type] }}</span>
-              <span v-if="STATE_ICON[pieceStates[p.square]]" class="power-icon">{{ STATE_ICON[pieceStates[p.square]] }}</span>
+              <span class="glyph" :class="[p.colorClass, animClass(p.square), stateClass(p.square)]">{{ GLYPH[p.type] }}</span>
             </span>
           </TransitionGroup>
 
@@ -594,6 +629,22 @@ onBeforeUnmount(() => {
           >
             <span class="bubble-name">{{ b.name }}:</span> {{ b.text }}
           </div>
+        </div>
+
+        <!-- The box (graveyard) sits right under the board; the dragged-off fall here. -->
+        <div class="box box--rail">
+          <span class="box-label">The box</span>
+          <span
+            v-for="f in fallenList"
+            :key="f.id"
+            class="grave"
+            :class="f.color === 'w' ? 'ours' : 'theirs'"
+            :title="`${f.name} (${f.color === 'w' ? 'your' : 'enemy'} ${TYPE_NAME[f.type]})`"
+          >
+            <span class="grave-glyph">{{ GLYPH[f.type] }}</span>
+            <span class="grave-name">{{ f.name }}</span>
+          </span>
+          <span v-if="fallenList.length === 0" class="text-medium-emphasis text-caption">empty — no one's fallen</span>
         </div>
 
         <div class="d-flex justify-center ga-2 mt-3">
@@ -632,24 +683,11 @@ onBeforeUnmount(() => {
           <div v-for="(m, i) in moveRows" :key="i" class="move-row2" :class="{ chaos: m.chaos }">
             <span class="stamp">{{ m.time }}</span>
             <span class="move-dot" :class="m.side === 'w' ? 'ours' : 'theirs'"></span>
-            <span class="move-san">{{ m.chaos ? '🌀 ' : '' }}{{ m.san }}</span>
+            <span v-if="m.chaos" class="chaos-pip"></span>
+            <span class="move-san">{{ m.san }}</span>
           </div>
         </div>
 
-        <div class="text-overline text-medium-emphasis mb-1 mt-4">The box <span class="text-disabled">· fallen</span></div>
-        <div class="box">
-          <p v-if="fallenList.length === 0" class="text-medium-emphasis text-body-2 pa-2">Nobody's fallen yet.</p>
-          <span
-            v-for="f in fallenList"
-            :key="f.id"
-            class="grave"
-            :class="f.color === 'w' ? 'ours' : 'theirs'"
-            :title="`${f.name} (${f.color === 'w' ? 'your' : 'enemy'} ${TYPE_NAME[f.type]})`"
-          >
-            <span class="grave-glyph">{{ GLYPH[f.type] }}</span>
-            <span class="grave-name">{{ f.name }}</span>
-          </span>
-        </div>
       </div>
     </div>
 
@@ -809,15 +847,14 @@ onBeforeUnmount(() => {
   font-size: 9cqmin;
   line-height: 1;
 }
-/* Power-up state badge (vengeful 🔥, spooked 😨) in the piece's top corner. */
-.power-icon {
-  position: absolute;
-  top: 2%;
-  right: 2%;
-  font-size: 4.6cqmin;
-  line-height: 1;
-  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.6));
-  pointer-events: none;
+/* Power-up states shown with visual treatment, not emoji: vengeful pieces get a
+   red aura (reinforced by the anim-angry fume); the spooked look faded. */
+.glyph.state-vengeful {
+  filter: drop-shadow(0 0 5px rgba(239, 68, 68, 0.9));
+}
+.glyph.state-spooked {
+  opacity: 0.55;
+  filter: grayscale(0.6);
 }
 .glyph.white {
   color: #f8fafc;
@@ -832,14 +869,16 @@ onBeforeUnmount(() => {
 .pmove-move {
   transition: transform var(--move-ms, 300ms) cubic-bezier(0.22, 0.61, 0.36, 1);
 }
+/* Capture = dragged off the board (down toward the box), tumbling. */
 .pmove-leave-active {
   transition:
-    opacity 0.35s ease,
-    transform 0.35s ease;
+    opacity 0.5s ease-in,
+    transform 0.55s cubic-bezier(0.5, 0, 0.9, 0.35);
+  z-index: 3;
 }
 .pmove-leave-to {
   opacity: 0;
-  transform: scale(0.35);
+  transform: translateY(80%) rotate(42deg) scale(0.5);
 }
 
 /* Mood animations — capped to ~2 pieces by the controller, so rare by design.
@@ -1015,6 +1054,28 @@ onBeforeUnmount(() => {
   border-radius: 10px;
   background: rgba(2, 6, 23, 0.35);
   padding: 8px;
+}
+/* Box as a rail directly under the board — where dragged-off pieces land. */
+.box--rail {
+  align-items: center;
+  margin: 10px auto 0;
+  max-width: min(78vh, 560px);
+  min-height: 40px;
+}
+.box-label {
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(148, 163, 184, 0.7);
+  margin-right: 4px;
+}
+.chaos-pip {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: #c084fc;
+  transform: rotate(45deg);
 }
 .grave {
   display: inline-flex;

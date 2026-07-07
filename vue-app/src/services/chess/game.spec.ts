@@ -78,6 +78,30 @@ describe('WizardGame interaction', () => {
     expect(Object.keys(g.animations()).length).toBe(0)
   })
 
+  it('keeps a constant cast across games but shuffles positions', () => {
+    const names = (g: WizardGame): Record<string, string> => {
+      const out: Record<string, string> = {}
+      for (const f of 'abcdefgh') out[f + '2'] = g.soulAt(f + '2')!.persona.name
+      return out
+    }
+    const a = names(new WizardGame('game-a'))
+    const b = names(new WizardGame('game-b'))
+    // Same eight characters both games...
+    expect(new Set(Object.values(a))).toEqual(new Set(Object.values(b)))
+    // ...but not all on the same squares.
+    expect(a).not.toEqual(b)
+  })
+
+  it('pregame chatter forms friendships (mutual bonds)', () => {
+    const g = new WizardGame('chatter')
+    const lines = g.pregameChatter()
+    expect(lines.length).toBeGreaterThan(0)
+    const anyMutual = Object.values(g.society.souls).some((s) =>
+      Object.entries(s.bonds).some(([id, v]) => v >= 0.5 && (g.society.souls[id]?.bonds[s.id] ?? 0) >= 0.5),
+    )
+    expect(anyMutual).toBe(true)
+  })
+
   it('applies an AI move and keeps the turn flowing', () => {
     const g = new WizardGame('ai')
     g.playerTap('e2')

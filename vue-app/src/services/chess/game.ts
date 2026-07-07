@@ -10,7 +10,19 @@
 import { Chess } from 'chess.js'
 import { rngFromSeed } from '../seed'
 import { applyMove, createSociety, scanBoard, soulAt, type Society } from './social'
-import { badAdviceLine, createDialogueState, heckleLine, resistLine, speak, suggestLine, type DialogueState } from './dialogue'
+import {
+  badAdviceLine,
+  chatOpener,
+  chatReply,
+  createDialogueState,
+  heckleLine,
+  postGameLine,
+  resistLine,
+  smallTalkLine,
+  speak,
+  suggestLine,
+  type DialogueState,
+} from './dialogue'
 import { assessMove, bestOpportunity, PIECE_VALUE, worstBlunder } from './assess'
 import {
   adjacentSquares,
@@ -672,6 +684,58 @@ export class WizardGame {
       text: bad ? badAdviceLine(this.rng) : suggestLine(reckless, this.rng),
       tone: 'gloat',
     }
+  }
+
+  /**
+   * Pregame conversations between adjacent pieces — this is where friendships
+   * actually form (each exchange bonds the pair), so later grief is grounded in
+   * something you saw. Returns opener/reply lines for up to a few pairs.
+   */
+  pregameChatter(): Utterance[] {
+    const souls = Object.values(this.society.souls).filter((s) => !s.captured && s.square)
+    const pairs: [PieceSoul, PieceSoul][] = []
+    for (const a of souls) {
+      for (const nsq of adjacentSquares(a.square as Square)) {
+        const bId = this.society.bySquare[nsq]
+        if (!bId) continue
+        const b = this.society.souls[bId]
+        if (b.color === a.color && a.id < b.id) pairs.push([a, b]) // dedupe
+      }
+    }
+    pairs.sort(() => this.rng() - 0.5)
+    const used = new Set<string>()
+    const out: Utterance[] = []
+    for (const [a, b] of pairs) {
+      if (out.length >= 6) break
+      if (used.has(a.id) || used.has(b.id)) continue
+      used.add(a.id)
+      used.add(b.id)
+      // The conversation forms the friendship.
+      a.bonds[b.id] = Math.min(1, (a.bonds[b.id] ?? 0) + 0.5)
+      b.bonds[a.id] = Math.min(1, (b.bonds[a.id] ?? 0) + 0.5)
+      out.push({ soulId: a.id, square: a.square, color: a.color, name: a.persona.name, text: chatOpener(b.persona.name, this.rng), tone: 'calm' })
+      out.push({ soulId: b.id, square: b.square, color: b.color, name: b.persona.name, text: chatReply(a.persona.name, this.rng), tone: 'calm' })
+    }
+    return out
+  }
+
+  /** Off-duty chit-chat from a random living friendly piece (pre-game). */
+  smallTalk(): Utterance[] {
+    const mine = Object.values(this.society.souls).filter((s) => !s.captured && s.color === PLAYER && s.square)
+    if (!mine.length) return []
+    const s = this.pick(mine)
+    return [{ soulId: s.id, square: s.square, color: PLAYER, name: s.persona.name, text: smallTalkLine(this.rng), tone: 'calm' }]
+  }
+
+  /** A parting line once the game is over (win/loss aware). */
+  postGame(): Utterance[] {
+    const won = this.chess.isCheckmate() && this.turn !== PLAYER
+    const mine = Object.values(this.society.souls).filter((s) => !s.captured && s.color === PLAYER && s.square)
+    if (!mine.length) return []
+    const s = this.pick(mine)
+    return [
+      { soulId: s.id, square: s.square, color: PLAYER, name: s.persona.name, text: postGameLine(won, this.rng), tone: won ? 'gloat' : 'sad' },
+    ]
   }
 
   /** A prod from the most restless piece when the player dawdles. */

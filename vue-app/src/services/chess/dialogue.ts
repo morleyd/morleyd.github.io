@@ -394,8 +394,49 @@ const HECKLE = [
   'I could have conquered a kingdom in the time this is taking.',
 ]
 
+// Idle chit-chat before the first move / after the game — light, off-duty banter
+// (not "hurry up" heckling, which only fits mid-game when you're genuinely stalling).
+const SMALLTALK = [
+  "Lovely day for a battle, isn't it?",
+  'Good luck out there, everyone.',
+  "I hope I don't get sent out first.",
+  'Remember the plan? ...there is a plan, right?',
+  'Stretch those legs, team — long game ahead.',
+  'Whatever happens, it was an honour to serve on this rank.',
+  'Anyone else nervous, or just me?',
+]
+const POSTGAME_WIN = [
+  'Told you we had it!',
+  'A famous victory. Drinks are on the king.',
+  'Never doubted you for a second, general.',
+]
+const POSTGAME_LOSS = ["We'll get them next time.", 'Ah well — a good scrap all the same.', 'Regroup, everyone. Heads high.']
+
 export const resistLine = (kind: 'refuse' | 'sacrifice', rng: Rng): string =>
   pick(kind === 'sacrifice' ? RESIST_SACRIFICE : RESIST_REFUSE, rng)
+export const smallTalkLine = (rng: Rng): string => pick(SMALLTALK, rng)
+export const postGameLine = (won: boolean, rng: Rng): string => pick(won ? POSTGAME_WIN : POSTGAME_LOSS, rng)
+
+// Pregame conversations between adjacent pieces — this is how friendships form
+// (and thus why anyone grieves later). {target} = the other piece's name.
+const CHAT_OPENER = [
+  'Stick close today, {target}?',
+  'Nervous, {target}? I am.',
+  'We make a good team, {target}.',
+  '{target}, I watch your back, you watch mine.',
+  'Good to have you beside me, {target}.',
+  'Whatever happens out there, {target} — it was an honour.',
+]
+const CHAT_REPLY = [
+  'Always, {target}.',
+  "Right behind you, {target}.",
+  "Wouldn't stand anywhere else, {target}.",
+  "Don't you dare get taken, {target}.",
+  'To the end, {target}.',
+  'Count on it, {target}.',
+]
+export const chatOpener = (name: string, rng: Rng): string => pick(CHAT_OPENER, rng).replace(/\{target\}/g, name)
+export const chatReply = (name: string, rng: Rng): string => pick(CHAT_REPLY, rng).replace(/\{target\}/g, name)
 export const suggestLine = (reckless: boolean, rng: Rng): string => pick(reckless ? SUGGEST_RECKLESS : SUGGEST, rng)
 export const badAdviceLine = (rng: Rng): string => pick(BAD_ADVICE, rng)
 export const heckleLine = (rng: Rng): string => pick(HECKLE, rng)
