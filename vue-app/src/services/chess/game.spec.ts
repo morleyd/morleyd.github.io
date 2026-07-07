@@ -46,6 +46,32 @@ describe('WizardGame interaction', () => {
     expect(g.selected).toBeNull()
   })
 
+  it('makes a piece resist a sacrifice, then obey on the second tap', () => {
+    const g = new WizardGame('sac')
+    // White queen d2, black pawn e5: Qd4 is a sacrifice.
+    g.reset('sac', '4k3/8/8/4p3/8/8/3Q4/4K3 w - - 0 1')
+    g.playerTap('d2')
+    expect(g.selected).toBe('d2')
+
+    const first = g.playerTap('d4')
+    expect(first.moved).toBe(false)
+    expect(first.cue?.type).toBe('hop') // it flinches
+    expect(g.chess.get('d4')).toBeFalsy()
+    expect(g.selected).toBe('d2') // still held
+
+    const second = g.playerTap('d4')
+    expect(second.moved).toBe(true)
+    expect(g.chess.get('d4')?.type).toBe('q')
+  })
+
+  it('caps mood animations at two pieces', () => {
+    const g = new WizardGame('anim')
+    g.reset('anim')
+    // Force everyone into an angry mood; the controller must still surface ≤2.
+    for (const s of Object.values(g.society.souls)) s.mood.anger = 1
+    expect(Object.keys(g.animations()).length).toBeLessThanOrEqual(2)
+  })
+
   it('applies an AI move and keeps the turn flowing', () => {
     const g = new WizardGame('ai')
     g.playerTap('e2')

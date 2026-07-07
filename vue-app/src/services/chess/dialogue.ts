@@ -16,9 +16,10 @@ type Rng = () => number
 export interface DialogueState {
   recent: string[] // ring buffer of recently spoken lines
   lastSpoke: Record<string, number> // soulId -> ply
+  lastAmbient: number // ply of the last low-priority (ambient) line
 }
 
-export const createDialogueState = (): DialogueState => ({ recent: [], lastSpoke: {} })
+export const createDialogueState = (): DialogueState => ({ recent: [], lastSpoke: {}, lastAmbient: -99 })
 
 const RECENT_MAX = 40
 
@@ -240,6 +241,10 @@ function contextFor(event: GameEvent, society: Society): Ctx {
  * first; a soul that just spoke stays quiet unless the moment is dramatic, and
  * recently-heard lines are skipped.
  */
+// The dramatic beats that always deserve a line; everything else is "ambient"
+// chatter that must be spaced out and is usually skipped, to protect novelty.
+const PRIORITY = new Set<GameEvent['kind']>(['capture', 'captured', 'promotion', 'checkmate'])
+
 export function speak(
   society: Society,
   events: GameEvent[],
@@ -250,6 +255,7 @@ export function speak(
   const out: Utterance[] = []
   const spokenThisPly = new Set<string>()
   const ranked = [...events].sort((a, b) => b.salience - a.salience)
+  let ambientUsed = false
 
   for (const event of ranked) {
     if (out.length >= max) break
@@ -257,9 +263,18 @@ export function speak(
     if (!speaker) continue
     if (spokenThisPly.has(speaker.id)) continue
 
-    // Cooldown: don't let the same piece chatter every ply unless it's urgent.
+    const priority = PRIORITY.has(event.kind)
+    if (!priority) {
+      // Ambient banter: at most one per call, spaced several plies apart, and
+      // usually skipped even then. Silence is the norm.
+      if (ambientUsed) continue
+      if (society.ply - state.lastAmbient < 4) continue
+      if (rng() < 0.6) continue
+    }
+
+    // Per-piece cooldown so nobody monologues (looser for dramatic moments).
     const since = society.ply - (state.lastSpoke[speaker.id] ?? -99)
-    if (since < 3 && event.salience < 55) continue
+    if (since < (priority ? 2 : 4) && event.salience < 80) continue
 
     const pool = poolFor(event, speaker)
     if (pool.length === 0) continue
@@ -268,11 +283,8 @@ export function speak(
     let text = ''
     for (let attempt = 0; attempt < 4; attempt += 1) {
       const candidate = fill(pick(pool, rng), ctx)
-      if (!state.recent.includes(candidate)) {
-        text = candidate
-        break
-      }
       text = candidate // fall back to a repeat rather than staying silent
+      if (!state.recent.includes(candidate)) break
     }
 
     out.push({
@@ -287,9 +299,52 @@ export function speak(
     state.lastSpoke[speaker.id] = society.ply
     state.recent.push(text)
     if (state.recent.length > RECENT_MAX) state.recent.shift()
+    if (!priority) {
+      ambientUsed = true
+      state.lastAmbient = society.ply
+    }
   }
   return out
 }
+
+// ── Agency lines (piece opinions) ────────────────────────────────────────────
+
+const RESIST_REFUSE = [
+  'Absolutely not. That square is a death trap.',
+  'You want ME to go THERE? Have you lost your mind?',
+  'Nope. Nope nope nope. Pick someone braver.',
+  'I refuse. Tap all you like.',
+  "I'm not moving into that. Try again if you dare.",
+]
+const RESIST_SACRIFICE = [
+  "Wait — that's a sacrifice! Are you SURE?",
+  "You're throwing me away?! ...fine. Say it again and I'll go.",
+  "That's suicide! ...is that really the plan?",
+  'If I must be a martyr, you can tell me twice.',
+]
+const SUGGEST = [
+  "Psst — I've got a shot from here. Send me in.",
+  'I see an opening. Let me at it!',
+  'Pick me — I can make something happen right now.',
+  "There's material to be had, and I volunteer.",
+]
+const SUGGEST_RECKLESS = [
+  "Forget caution — I'm going in! Just point me!",
+  'Glory or nothing. Choose me, choose me!',
+  "Let's do something gloriously reckless. Me. Now.",
+]
+const HECKLE = [
+  "We don't have all day, you know.",
+  'Any... century now?',
+  'The enemy will die of old age at this rate.',
+  'Tap tap tap. Please. Anything.',
+  'I could have conquered a kingdom in the time this is taking.',
+]
+
+export const resistLine = (kind: 'refuse' | 'sacrifice', rng: Rng): string =>
+  pick(kind === 'sacrifice' ? RESIST_SACRIFICE : RESIST_REFUSE, rng)
+export const suggestLine = (reckless: boolean, rng: Rng): string => pick(reckless ? SUGGEST_RECKLESS : SUGGEST, rng)
+export const heckleLine = (rng: Rng): string => pick(HECKLE, rng)
 
 /** A piece's self-introduction (used on click / at game start). */
 export const introOf = (soul: PieceSoul): string => soul.persona.intro

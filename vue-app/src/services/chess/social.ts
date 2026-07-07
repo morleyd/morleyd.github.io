@@ -143,19 +143,21 @@ export function applyMove(society: Society, move: MoveInfo): GameEvent[] {
       if (moverId) {
         const mover = society.souls[moverId]
         mover.kills += 1
-        mover.mood.joy = clamp(mover.mood.joy + 0.35)
         mover.mood.confidence = clamp(mover.mood.confidence + 0.2)
         mover.mood.fear = clamp(mover.mood.fear - 0.2)
         mover.mood.anger = clamp(mover.mood.anger - 0.15)
+        // Joy only spikes into a visible celebration for a big scalp.
+        mover.mood.joy = clamp(mover.mood.joy + (VALUE[victim.type] >= 5 ? 0.7 : 0.3))
         events.push({ kind: 'capture', soulId: moverId, otherId: victimId, salience: 60 })
 
         // The victim's comrades take it personally — grudge + anger toward the
-        // killer's identity, sharpened by how fond they were of the fallen.
+        // killer's identity, sharpened by how fond they were of the fallen. Anger
+        // only crosses into a visible fume when a genuinely bonded friend falls.
         for (const s of Object.values(society.souls)) {
           if (s.captured || s.color !== victim.color || s.id === victimId) continue
           const fondness = Math.max(0, s.bonds[victimId] ?? 0.1)
           s.bonds[moverId] = clampBond((s.bonds[moverId] ?? 0) - 0.35 - fondness * 0.4)
-          s.mood.anger = clamp(s.mood.anger + 0.15 + fondness * 0.4)
+          s.mood.anger = clamp(s.mood.anger + 0.2 + fondness * 0.6)
         }
       }
     }
@@ -171,6 +173,7 @@ export function applyMove(society: Society, move: MoveInfo): GameEvent[] {
     mover.mood.impatience = 0
     if (flags.includes('p')) {
       mover.type = promotion ?? 'q'
+      mover.mood.joy = 1
       events.push({ kind: 'promotion', soulId: moverId, salience: 78 })
     }
   }
@@ -190,13 +193,14 @@ export function applyMove(society: Society, move: MoveInfo): GameEvent[] {
     if (moverId) events.push({ kind: 'castle', soulId: moverId, salience: 28 })
   }
 
-  // Everyone who stayed put grows a little more restless; moods relax slightly.
+  // Everyone who stayed put grows a little more restless; hot moods cool fast so
+  // anger/joy are fleeting reactions, not standing states. The mover keeps its
+  // freshly-set mood this ply (it just acted) and starts cooling next ply.
   for (const s of Object.values(society.souls)) {
-    if (s.captured) continue
-    s.mood.joy = clamp(s.mood.joy - 0.03)
-    s.mood.anger = clamp(s.mood.anger - 0.02)
-    if (s.id === moverId) continue
+    if (s.captured || s.id === moverId) continue
     s.idleFor += 1
+    s.mood.joy = clamp(s.mood.joy - 0.25)
+    s.mood.anger = clamp(s.mood.anger - 0.18)
     const restless = (1 - (s.persona.patience ?? 0.5)) * 0.5 + (s.persona.recklessness ?? 0.3) * 0.4
     s.mood.impatience = clamp(s.mood.impatience + restless * 0.14 * (1 - s.stamina * 0.4))
   }

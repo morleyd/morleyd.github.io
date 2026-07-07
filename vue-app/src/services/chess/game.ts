@@ -1,29 +1,48 @@
 /**
  * Headless game state machine for Wizard Chess — chess rules + the social sim +
- * dialogue, with turn/selection logic, but no Vue and no DOM. Keeping this out
- * of the component means the "can I move this piece" logic is plain and unit
- * testable, with no reactivity caching to go stale (the original move bug).
+ * dialogue, plus piece "agency" (resistance, self-suggestion, heckles) and the
+ * capped, situational animation decisions. No Vue, no DOM, so all of it is
+ * unit-testable with no reactivity caching to go stale.
  *
  * The Vue view is a thin renderer: it reads state, forwards taps, drives the
- * engine, and paces the returned utterances.
+ * engine, paces the utterances, and plays the animations this module chooses.
  */
 import { Chess } from 'chess.js'
 import { rngFromSeed } from '../seed'
-import { applyMove, createSociety, dominantMood, scanBoard, soulAt, type Society } from './social'
-import { createDialogueState, speak, type DialogueState } from './dialogue'
+import { applyMove, createSociety, scanBoard, soulAt, type Society } from './social'
+import { createDialogueState, heckleLine, resistLine, speak, suggestLine, type DialogueState } from './dialogue'
+import { assessMove, bestOpportunity, PIECE_VALUE } from './assess'
 import type { Color, GameEvent, PieceSoul, Square, Utterance } from './types'
 
 export const PLAYER: Color = 'w'
+const opp = (c: Color): Color => (c === 'w' ? 'b' : 'w')
 
+export type AnimClass = 'tremble' | 'bob' | 'angry' | 'joy'
+export interface Cue {
+  soulId: string
+  type: 'shake' | 'hop'
+}
 export interface TapResult {
-  /** True if a piece actually moved (the caller should then run the AI reply). */
   moved: boolean
   utterances: Utterance[]
-  /** A newly-selected piece meeting the player for the first time. */
   introSoul?: PieceSoul | null
+  cue?: Cue // a one-shot body-language reaction (resistance)
 }
 
-type ChessMove = ReturnType<Chess['move']>
+interface Resist {
+  from: Square
+  to: Square
+  count: number
+}
+
+/** How many taps a piece demands before it will make a given move. */
+export function requiredTaps(soul: PieceSoul, r: ReturnType<typeof assessMove>): number {
+  let n = 1
+  if (r.sacrifice) n = 2 // anyone balks at being thrown away — once
+  const timid = (soul.persona.bravery ?? 0.5) < 0.4
+  if (timid && (r.hanging || r.sacrifice)) n = 3 // a coward digs in
+  return n
+}
 
 export class WizardGame {
   chess: Chess
@@ -32,9 +51,13 @@ export class WizardGame {
   aiThinking = false
   lastFrom: Square | null = null
   lastTo: Square | null = null
+  lastMoverId: string | null = null
+  lastMoveRisky = false
   private dialogue: DialogueState
   private rng: () => number
   private introduced = new Set<string>()
+  private resist: Resist | null = null
+  private lastSuggestPly = -99
 
   constructor(public seed: string) {
     this.chess = new Chess()
@@ -43,9 +66,9 @@ export class WizardGame {
     this.dialogue = createDialogueState()
   }
 
-  reset(seed: string) {
+  reset(seed: string, fen?: string) {
     this.seed = seed
-    this.chess = new Chess()
+    this.chess = fen ? new Chess(fen) : new Chess()
     this.rng = rngFromSeed(seed)
     this.society = createSociety(this.chess, this.rng)
     this.dialogue = createDialogueState()
@@ -53,7 +76,11 @@ export class WizardGame {
     this.aiThinking = false
     this.lastFrom = null
     this.lastTo = null
+    this.lastMoverId = null
+    this.lastMoveRisky = false
     this.introduced.clear()
+    this.resist = null
+    this.lastSuggestPly = -99
   }
 
   get turn(): Color {
@@ -62,17 +89,12 @@ export class WizardGame {
   get gameOver(): boolean {
     return this.chess.isGameOver()
   }
-  /** May the human act right now? (Their turn, game live, engine idle.) */
   get canPlay(): boolean {
     return !this.gameOver && !this.aiThinking && this.turn === PLAYER
   }
 
   soulAt(square: Square): PieceSoul | null {
     return soulAt(this.society, square)
-  }
-  moodAt(square: Square): string {
-    const s = soulAt(this.society, square)
-    return s ? dominantMood(s) : 'calm'
   }
 
   legalTargets(): Set<Square> {
@@ -81,7 +103,56 @@ export class WizardGame {
     return new Set(moves.map((m) => m.to))
   }
 
-  private applyAndVoice(move: ChessMove): Utterance[] {
+  /**
+   * Which pieces should animate right now, and how — capped at 2 and gated by
+   * genuine, legible cause. This is where "restraint" is enforced centrally.
+   */
+  animations(): Record<Square, AnimClass> {
+    interface Cand {
+      square: Square
+      cls: AnimClass
+      prio: number
+    }
+    const cands: Cand[] = []
+    for (const s of Object.values(this.society.souls)) {
+      if (s.captured || !s.square) continue
+      const bravery = s.persona.bravery ?? 0.5
+      const reckless = (s.persona.recklessness ?? 0.3) > 0.6 || bravery > 0.65
+
+      // Anger: only a fresh, bonded-loss fume (decays within a ply or two).
+      if (s.mood.anger > 0.6) {
+        cands.push({ square: s.square, cls: 'angry', prio: 100 + s.mood.anger })
+        continue
+      }
+      // Tremble: under attack AND (cowardly, or completely exposed) — and never
+      // for the reckless/bold.
+      const attackers = this.chess.attackers(s.square, opp(s.color)).length
+      if (attackers > 0 && !reckless) {
+        const defenders = this.chess.attackers(s.square, s.color).length
+        const cowardly = bravery < 0.4
+        const hanging = defenders < attackers
+        if (cowardly || hanging) {
+          cands.push({ square: s.square, cls: 'tremble', prio: 80 + PIECE_VALUE[s.type] })
+          continue
+        }
+      }
+      // Joy: only real highs (a big scalp / promotion), and only for a beat.
+      if (s.mood.joy > 0.8) {
+        cands.push({ square: s.square, cls: 'joy', prio: 60 + s.mood.joy })
+        continue
+      }
+      // Bob: just the genuinely restless, and (via the cap) only one or two.
+      if (s.mood.impatience > 0.72 && s.idleFor >= 6) {
+        cands.push({ square: s.square, cls: 'bob', prio: 20 + s.mood.impatience })
+      }
+    }
+    cands.sort((a, b) => b.prio - a.prio)
+    const out: Record<Square, AnimClass> = {}
+    for (const c of cands.slice(0, 2)) out[c.square] = c.cls
+    return out
+  }
+
+  private applyAndVoice(move: ReturnType<Chess['move']>): Utterance[] {
     const events: GameEvent[] = applyMove(this.society, {
       from: move.from,
       to: move.to,
@@ -94,17 +165,26 @@ export class WizardGame {
     const moverId = this.society.bySquare[move.to]
     if (this.chess.isCheckmate() && moverId) events.push({ kind: 'checkmate', soulId: moverId, salience: 120 })
     else if (this.chess.isCheck() && moverId) events.push({ kind: 'check', soulId: moverId, salience: 54 })
+
+    // Record who moved and whether it looked risky, for the travel animation.
     this.lastFrom = move.from
     this.lastTo = move.to
+    this.lastMoverId = moverId ?? null
+    const mover = move.color as Color
+    const atk = this.chess.attackers(move.to, opp(mover)).length
+    const def = this.chess.attackers(move.to, mover).length
+    this.lastMoveRisky = atk > 0 && def < atk
+
     return speak(this.society, [...events, ...scanBoard(this.society, this.chess)], this.dialogue, this.rng, 2)
   }
 
-  /** Handle a tap on a square: select, deselect, or commit a move. */
+  /** Handle a tap on a square: select, deselect, resist, or commit a move. */
   playerTap(square: Square): TapResult {
     if (!this.canPlay) return { moved: false, utterances: [] }
 
     const piece = this.chess.get(square)
     if (piece && piece.color === PLAYER) {
+      this.resist = null
       if (this.selected === square) {
         this.selected = null
         return { moved: false, utterances: [] }
@@ -120,17 +200,47 @@ export class WizardGame {
     }
 
     if (this.selected && this.legalTargets().has(square)) {
+      const soul = this.soulAt(this.selected)
+      const risk = assessMove(this.chess.fen(), this.selected, square)
+      const need = soul ? requiredTaps(soul, risk) : 1
+
+      if (need > 1) {
+        if (!this.resist || this.resist.from !== this.selected || this.resist.to !== square) {
+          this.resist = { from: this.selected, to: square, count: 0 }
+        }
+        this.resist.count += 1
+        if (this.resist.count < need && soul) {
+          const kind = risk.sacrifice ? 'sacrifice' : 'refuse'
+          return {
+            moved: false,
+            utterances: [
+              {
+                soulId: soul.id,
+                square: this.selected,
+                color: soul.color,
+                name: soul.persona.name,
+                text: resistLine(kind, this.rng),
+                tone: kind === 'sacrifice' ? 'afraid' : 'angry',
+              },
+            ],
+            cue: { soulId: soul.id, type: kind === 'sacrifice' ? 'hop' : 'shake' },
+          }
+        }
+      }
+
+      this.resist = null
       try {
         const move = this.chess.move({ from: this.selected, to: square, promotion: 'q' })
         this.selected = null
         return { moved: true, utterances: this.applyAndVoice(move) }
       } catch {
         this.selected = null
+        return { moved: false, utterances: [] }
       }
-      return { moved: false, utterances: [] }
     }
 
     this.selected = null
+    this.resist = null
     return { moved: false, utterances: [] }
   }
 
@@ -141,6 +251,48 @@ export class WizardGame {
       return this.applyAndVoice(m)
     } catch {
       return []
+    }
+  }
+
+  /**
+   * Occasionally a piece pipes up to volunteer for a strong move, pre-selecting
+   * itself. Rare (cooldown + chance). Returns the line, or null.
+   */
+  suggest(): Utterance | null {
+    if (!this.canPlay || this.selected) return null
+    if (this.society.ply - this.lastSuggestPly < 8) return null
+    if (this.rng() > 0.28) return null
+    const opp = bestOpportunity(this.chess.fen(), PLAYER)
+    if (!opp) return null
+    const soul = this.soulAt(opp.from)
+    if (!soul) return null
+    this.selected = opp.from
+    this.lastSuggestPly = this.society.ply
+    const reckless = (soul.persona.recklessness ?? 0.3) > 0.6
+    return {
+      soulId: soul.id,
+      square: opp.from,
+      color: soul.color,
+      name: soul.persona.name,
+      text: suggestLine(reckless, this.rng),
+      tone: 'gloat',
+    }
+  }
+
+  /** A prod from the most restless piece when the player dawdles. */
+  idleHeckle(): Utterance | null {
+    if (!this.canPlay) return null
+    const mine = Object.values(this.society.souls).filter((s) => !s.captured && s.color === PLAYER && s.square)
+    if (!mine.length) return null
+    mine.sort((a, b) => b.mood.impatience - a.mood.impatience)
+    const s = mine[0]
+    return {
+      soulId: s.id,
+      square: s.square,
+      color: s.color,
+      name: s.persona.name,
+      text: heckleLine(this.rng),
+      tone: 'angry',
     }
   }
 

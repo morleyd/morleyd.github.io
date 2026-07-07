@@ -1,10 +1,11 @@
 <script setup lang="ts">
 /**
- * Wizard Chess — play a time-boxed negamax engine, but the real show is the
- * cast: every piece is a named character who banters, gloats, panics and holds
- * grudges. All game logic lives in the headless WizardGame controller; this
- * component renders it, drives the engine, and paces the chatter so it reads
- * like a conversation rather than a wall of text.
+ * Wizard Chess — renders the headless WizardGame: a squares layer (colours,
+ * highlights, move dots, clicks) and a separate, absolutely-positioned pieces
+ * layer that animates. Movement uses TransitionGroup FLIP; a piece's travel
+ * speed comes from its temperament and the move's risk. Mood animations are
+ * capped and situational (chosen by the controller), banter is paced and
+ * delayed, and idle-heckles nudge a dawdling player.
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -28,7 +29,7 @@ const game = new WizardGame(initialSeed)
 
 const code = ref(initialSeed)
 const level = ref(3)
-const version = ref(0) // bumped on every state change to re-derive the board
+const version = ref(0)
 const snackbar = ref(false)
 const bump = () => (version.value += 1)
 
@@ -43,13 +44,13 @@ let pumpTimer: ReturnType<typeof setTimeout> | null = null
 let bubbleId = 0
 const bubbleTimers = new Map<number, ReturnType<typeof setTimeout>>()
 
-function enqueue(lines: Utterance[]) {
+function enqueue(lines: Utterance[], delay = 0) {
   if (!lines.length) return
   queue.push(...lines)
-  if (queue.length > 6) queue.splice(0, queue.length - 6) // don't let banter pile up
-  pump()
+  if (queue.length > 5) queue.splice(0, queue.length - 5)
+  pump(delay)
 }
-function pump() {
+function pump(delay: number) {
   if (pumpTimer) return
   const step = () => {
     const u = queue.shift()
@@ -58,22 +59,22 @@ function pump() {
       return
     }
     reveal(u)
-    pumpTimer = setTimeout(step, 950)
+    pumpTimer = setTimeout(step, 1000)
   }
-  step()
+  pumpTimer = setTimeout(step, delay)
 }
 function reveal(u: Utterance) {
   if (u.square) {
     const b: Bubble = { ...u, bid: bubbleId++ }
     bubbles.value.push(b)
-    if (bubbles.value.length > 3) {
+    if (bubbles.value.length > 2) {
       const dropped = bubbles.value.shift()
       if (dropped) clearBubbleTimer(dropped.bid)
     }
     const t = setTimeout(() => {
       bubbles.value = bubbles.value.filter((x) => x.bid !== b.bid)
       bubbleTimers.delete(b.bid)
-    }, 4600)
+    }, 4400)
     bubbleTimers.set(b.bid, t)
   }
   log.value.unshift(u)
@@ -96,31 +97,51 @@ function clearBanter() {
   log.value = []
 }
 
-// ── Derived, reactive board ─────────────────────────────────────────────────
-interface Cell {
-  square: Square
-  type: PieceType
-  color: Color
-  name: string | null
-  mood: string
+// ── One-shot resistance cues (shake / hop) ────────────────────────────────
+const cueMap = ref<Record<string, string>>({})
+const cueTimers = new Map<string, ReturnType<typeof setTimeout>>()
+function triggerCue(soulId: string, type: string) {
+  cueMap.value = { ...cueMap.value, [soulId]: type }
+  const prev = cueTimers.get(soulId)
+  if (prev) clearTimeout(prev)
+  cueTimers.set(
+    soulId,
+    setTimeout(() => {
+      const next = { ...cueMap.value }
+      delete next[soulId]
+      cueMap.value = next
+      cueTimers.delete(soulId)
+    }, 480),
+  )
 }
-const cells = computed<(Cell | null)[]>(() => {
+const cueClass = (id: string) => (cueMap.value[id] ? 'cue-' + cueMap.value[id] : '')
+
+// ── Idle heckling ─────────────────────────────────────────────────────────
+let idleTimer: ReturnType<typeof setTimeout> | null = null
+function armIdle() {
+  if (idleTimer) clearTimeout(idleTimer)
+  if (!game.canPlay) return
+  idleTimer = setTimeout(() => {
+    const u = game.idleHeckle()
+    if (u) enqueue([u])
+    armIdle()
+  }, 16_000)
+}
+
+// ── Reactive, derived board ─────────────────────────────────────────────────
+interface PieceView {
+  id: string
+  type: PieceType
+  colorClass: 'white' | 'black'
+  square: Square
+}
+const piecesList = computed<PieceView[]>(() => {
   version.value
-  return game.chess
-    .board()
-    .flat()
-    .map((c) => {
-      if (!c) return null
-      const soul = game.soulAt(c.square)
-      return {
-        square: c.square,
-        type: c.type as PieceType,
-        color: c.color as Color,
-        name: soul?.persona.name ?? null,
-        mood: game.moodAt(c.square),
-      }
-    })
+  return Object.values(game.society.souls)
+    .filter((s) => !s.captured && s.square)
+    .map((s) => ({ id: s.id, type: s.type, colorClass: s.color === 'w' ? 'white' : 'black', square: s.square as Square }))
 })
+const animMap = computed(() => (version.value, game.animations()))
 const selectedSquare = computed(() => (version.value, game.selected))
 const legalTargets = computed(() => (version.value, game.legalTargets()))
 const canPlay = computed(() => (version.value, game.canPlay))
@@ -143,7 +164,6 @@ const status = computed(() => {
   if (game.chess.isCheckmate()) return game.turn === 'w' ? 'Checkmate — your king has fallen.' : 'Checkmate! You win. 🎉'
   if (game.chess.isStalemate()) return 'Stalemate — a stiff, awkward draw.'
   if (game.chess.isDraw()) return "It's a draw. Everyone lives to bicker another day."
-  // Black's turn (engine thinking, or the brief hand-off before it starts).
   if (game.turn !== 'w' || game.aiThinking) return 'The enemy is plotting…'
   if (selectedName.value) return `Holding ${selectedName.value} — pick a square.`
   if (game.chess.isCheck()) return 'You are in check!'
@@ -153,6 +173,23 @@ const status = computed(() => {
 const FILES = 'abcdefgh'
 const squareOf = (i: number): Square => FILES[i % 8] + (8 - Math.floor(i / 8))
 const rc = (sq: Square) => ({ col: sq.charCodeAt(0) - 97, row: 8 - Number(sq[1]) })
+
+const animClass = (square: Square) => {
+  const a = animMap.value[square]
+  return a ? 'anim-' + a : ''
+}
+// Travel speed: bold/reckless pieces dash, timid ones creep; risky moves drag.
+function moveMs(p: PieceView): number {
+  const s = game.society.souls[p.id]
+  const bold = Math.max(s.persona.bravery ?? 0.5, s.persona.recklessness ?? 0.3)
+  let ms = Math.round(500 - bold * 320) // ~180–500ms
+  if (p.id === game.lastMoverId && game.lastMoveRisky) ms = Math.round(ms * 1.7)
+  return ms
+}
+const pieceStyle = (p: PieceView) => {
+  const { col, row } = rc(p.square)
+  return { left: `${(col / 8) * 100}%`, top: `${(row / 8) * 100}%`, '--move-ms': `${moveMs(p)}ms` }
+}
 const bubbleStyle = (b: Bubble) => {
   const { col, row } = rc(b.square as Square)
   const tx = col <= 1 ? '0%' : col >= 6 ? '-100%' : '-50%'
@@ -178,8 +215,10 @@ function onSquare(square: Square) {
       tone: 'calm',
     })
   }
-  enqueue(res.utterances)
+  if (res.cue) triggerCue(res.cue.soulId, res.cue.type)
+  enqueue(res.utterances, res.moved ? 650 : 0)
   bump()
+  armIdle()
   if (res.moved) window.setTimeout(runAi, 420)
 }
 
@@ -189,8 +228,15 @@ async function runAi() {
   bump()
   const best = await engine.bestMove(game.chess.fen(), level.value)
   game.aiThinking = false
-  if (best && !game.gameOver) enqueue(game.aiApply(best))
+  if (best && !game.gameOver) enqueue(game.aiApply(best), 650)
   bump()
+  // Occasionally a piece volunteers for a strong move it spotted.
+  const s = game.suggest()
+  if (s) {
+    enqueue([s], 500)
+    bump()
+  }
+  armIdle()
 }
 
 // ── Setup ────────────────────────────────────────────────────────────────
@@ -198,7 +244,9 @@ const syncUrl = () => router.replace({ name: 'wizard-chess', params: { seed: `${
 function start() {
   game.reset(code.value)
   clearBanter()
+  cueMap.value = {}
   bump()
+  armIdle()
 }
 function newGame() {
   code.value = randomSeed()
@@ -231,6 +279,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   engine.dispose()
   clearBanter()
+  if (idleTimer) clearTimeout(idleTimer)
+  cueTimers.forEach((t) => clearTimeout(t))
 })
 </script>
 
@@ -239,7 +289,7 @@ onBeforeUnmount(() => {
     <GameToolbar title="Wizard Chess" shareable @share="share">
       <template #intro>
         Ordinary chess, extraordinary pieces. Every one of your soldiers has a name and a temper —
-        they cheer, gloat, panic and hold grudges as the battle unfolds.
+        and the occasional strong opinion about where it will and won't go.
       </template>
       <template #settings>
         <div class="d-flex flex-column ga-4">
@@ -265,8 +315,7 @@ onBeforeUnmount(() => {
         <h3>The idea</h3>
         <p>
           It's real chess under the hood — you play White, the engine plays Black. But your pieces
-          are <em>characters</em>. Each has a name, personality traits, moods and relationships that
-          shift as the game goes on.
+          are <em>characters</em> with names, temperaments, moods and relationships.
         </p>
         <h3>How to play</h3>
         <ul>
@@ -274,17 +323,17 @@ onBeforeUnmount(() => {
           <li>The first time you pick up a piece, it introduces itself in the table talk.</li>
           <li>Pawns always promote to a queen, for simplicity.</li>
         </ul>
-        <h3>The cast</h3>
+        <h3>Pieces with opinions</h3>
         <ul>
-          <li>Pieces <span class="k">gloat</span> when they capture and give <span class="k">last words</span> when they fall.</li>
-          <li>The timid <span class="k">panic</span> when threatened; the brave stand defiant.</li>
-          <li>Idle pieces grow <span class="k">impatient</span> — watch them fidget, and some rooks work themselves into a proper rage.</li>
-          <li>Lose a friend to an enemy piece and the survivors hold a <span class="k">grudge</span>.</li>
+          <li>A <span class="k">timid</span> piece may refuse a dangerous square — tap again to insist.</li>
+          <li>Send someone to their doom and they'll <span class="k">flinch</span> before obeying.</li>
+          <li>Now and then a bold piece <span class="k">volunteers</span> for a move it likes.</li>
+          <li>The cowardly <span class="k">tremble</span> when cornered; the restless <span class="k">fidget</span>; grudges <span class="k">smoulder</span>.</li>
         </ul>
         <h3>Difficulty</h3>
         <p>Higher levels search deeper and stop blundering. <span class="k">Ruthless</span> thinks the longest.</p>
         <h3>Sharing</h3>
-        <p>The share link carries a seed — your friend gets the exact same cast and personalities.</p>
+        <p>The share link carries a seed — your friend gets the exact same cast.</p>
       </template>
     </GameToolbar>
 
@@ -298,8 +347,9 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="board" :class="{ waiting: !canPlay }">
+          <!-- squares: colours, highlights, dots, clicks -->
           <div
-            v-for="(cell, i) in cells"
+            v-for="(cell, i) in 64"
             :key="i"
             class="sq"
             :data-square="squareOf(i)"
@@ -311,16 +361,24 @@ onBeforeUnmount(() => {
             }"
             @click="onSquare(squareOf(i))"
           >
-            <span
-              v-if="cell"
-              class="piece"
-              :class="[cell.color === 'w' ? 'white' : 'black', 'mood-' + cell.mood]"
-              :title="cell.name || ''"
-            >{{ GLYPH[cell.type] }}</span>
-            <span v-if="legalTargets.has(squareOf(i))" class="dot" :class="{ cap: !!cell }"></span>
+            <span v-if="legalTargets.has(squareOf(i))" class="dot"></span>
           </div>
 
           <span v-if="checkSquare" class="check-ring" :style="checkStyle"></span>
+
+          <!-- pieces: animated overlay -->
+          <TransitionGroup name="pmove" tag="div" class="pieces">
+            <span
+              v-for="p in piecesList"
+              :key="p.id"
+              class="piece-box"
+              :data-piece="p.square"
+              :class="cueClass(p.id)"
+              :style="pieceStyle(p)"
+            >
+              <span class="glyph" :class="[p.colorClass, animClass(p.square)]">{{ GLYPH[p.type] }}</span>
+            </span>
+          </TransitionGroup>
 
           <div
             v-for="b in bubbles"
@@ -390,9 +448,6 @@ onBeforeUnmount(() => {
   user-select: none;
   container-type: size;
 }
-.board.waiting {
-  cursor: default;
-}
 .sq {
   position: relative;
   display: flex;
@@ -411,75 +466,12 @@ onBeforeUnmount(() => {
 .sq.to {
   background-image: linear-gradient(rgba(250, 204, 21, 0.4), rgba(250, 204, 21, 0.4));
 }
-.piece {
-  font-size: 9cqmin;
-  line-height: 1;
-  pointer-events: none;
-  will-change: transform;
-}
-.piece.white {
-  color: #f8fafc;
-  text-shadow: 0 0 1px #0f172a, 0 1px 2px rgba(15, 23, 42, 0.9), 0 0 3px #1e293b;
-}
-.piece.black {
-  color: #1e293b;
-  text-shadow: 0 0 1px #000, 0 1px 2px rgba(0, 0, 0, 0.5);
-}
-/* Personality shows in body language. */
-.piece.mood-impatience {
-  animation: bob 0.85s ease-in-out infinite;
-}
-.piece.mood-anger {
-  animation: fume 0.5s ease-in-out infinite;
-  color: #fecaca;
-}
-.piece.mood-anger.black {
-  color: #7f1d1d;
-}
-.piece.mood-fear {
-  animation: tremble 0.12s linear infinite;
-}
-.piece.mood-joy {
-  animation: bounce 1.1s ease-in-out infinite;
-}
-@keyframes bob {
-  50% {
-    transform: translateY(-8%);
-  }
-}
-@keyframes bounce {
-  50% {
-    transform: translateY(-12%) scale(1.05);
-  }
-}
-@keyframes tremble {
-  25% {
-    transform: translateX(-4%) rotate(-3deg);
-  }
-  75% {
-    transform: translateX(4%) rotate(3deg);
-  }
-}
-@keyframes fume {
-  50% {
-    transform: scale(1.08);
-    filter: drop-shadow(0 0 3px #ef4444);
-  }
-}
 .dot {
-  position: absolute;
   width: 26%;
   height: 26%;
   border-radius: 50%;
   background: rgba(15, 23, 42, 0.4);
   pointer-events: none;
-}
-.dot.cap {
-  width: 84%;
-  height: 84%;
-  background: transparent;
-  border: 4px solid rgba(15, 23, 42, 0.4);
-  border-radius: 50%;
 }
 .check-ring {
   position: absolute;
@@ -489,6 +481,109 @@ onBeforeUnmount(() => {
   box-shadow: inset 0 0 0 3px #ef4444;
   background: radial-gradient(circle, rgba(239, 68, 68, 0.35), transparent 70%);
   pointer-events: none;
+  z-index: 1;
+}
+
+/* Pieces overlay */
+.pieces {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+.piece-box {
+  position: absolute;
+  width: 12.5%;
+  height: 12.5%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.glyph {
+  font-size: 9cqmin;
+  line-height: 1;
+}
+.glyph.white {
+  color: #f8fafc;
+  text-shadow: 0 0 1px #0f172a, 0 1px 2px rgba(15, 23, 42, 0.9), 0 0 3px #1e293b;
+}
+.glyph.black {
+  color: #1e293b;
+  text-shadow: 0 0 1px #000, 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+/* Movement (FLIP). Duration comes from the piece's temperament/risk. */
+.pmove-move {
+  transition: transform var(--move-ms, 300ms) cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.pmove-leave-active {
+  transition:
+    opacity 0.35s ease,
+    transform 0.35s ease;
+}
+.pmove-leave-to {
+  opacity: 0;
+  transform: scale(0.35);
+}
+
+/* Mood animations — capped to ~2 pieces by the controller, so rare by design.
+   Anger is expressed as a red aura, never by recolouring the glyph. */
+.glyph.anim-tremble {
+  animation: tremble 0.13s linear infinite;
+}
+.glyph.anim-bob {
+  animation: bob 0.9s ease-in-out infinite;
+}
+.glyph.anim-joy {
+  animation: bounce 0.75s ease-in-out 4;
+}
+.glyph.anim-angry {
+  animation: fume 0.5s ease-in-out infinite;
+}
+@keyframes tremble {
+  25% {
+    transform: translateX(-6%) rotate(-4deg);
+  }
+  75% {
+    transform: translateX(6%) rotate(4deg);
+  }
+}
+@keyframes bob {
+  50% {
+    transform: translateY(-14%);
+  }
+}
+@keyframes bounce {
+  50% {
+    transform: translateY(-16%) scale(1.06);
+  }
+}
+@keyframes fume {
+  50% {
+    transform: scale(1.08);
+    filter: drop-shadow(0 0 4px #ef4444) drop-shadow(0 0 2px #b91c1c);
+  }
+}
+
+/* One-shot resistance cues on the whole piece. */
+.piece-box.cue-shake {
+  animation: shakeNo 0.45s ease;
+}
+.piece-box.cue-hop {
+  animation: hopBack 0.48s ease;
+}
+@keyframes shakeNo {
+  20% {
+    transform: translateX(-16%) rotate(-6deg);
+  }
+  60% {
+    transform: translateX(16%) rotate(6deg);
+  }
+}
+@keyframes hopBack {
+  40% {
+    transform: translateY(-26%);
+  }
 }
 
 .bubble {
@@ -510,12 +605,11 @@ onBeforeUnmount(() => {
   font-weight: 700;
   opacity: 0.75;
 }
-/* Tone colours — same palette for bubbles and the log accent. */
 .tone-gloat { background: #fde68a; }
 .tone-sad { background: #cbd5e1; }
 .tone-afraid { background: #bfdbfe; }
 .tone-angry { background: #fecaca; }
-.tone-warm { background: #bbf7d0; }
+.tone-warm,
 .tone-joy { background: #bbf7d0; }
 @keyframes pop {
   from {
@@ -547,15 +641,9 @@ onBeforeUnmount(() => {
   font-weight: 700;
   margin-right: 6px;
 }
-.who.ours {
-  color: #fde68a;
-}
-.who.theirs {
-  color: #fca5a5;
-}
-.what {
-  color: #e2e8f0;
-}
+.who.ours { color: #fde68a; }
+.who.theirs { color: #fca5a5; }
+.what { color: #e2e8f0; }
 .spin {
   animation: spin 0.9s linear infinite;
 }
