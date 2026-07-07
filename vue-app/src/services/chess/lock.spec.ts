@@ -17,10 +17,16 @@ function aiTurn(g: WizardGame) {
   g.spontaneousChaos()
 }
 
-function tryWhiteMove(g: WizardGame, legal: { from: string; to: string }[]): boolean {
-  // Try legal moves until one actually commits (resistance needs a few taps;
-  // a spooked piece may divert a tap to a coax, so fall through to another move).
-  for (const mv of legal.slice(0, 8)) {
+function tryWhiteMove(g: WizardGame): boolean {
+  // Try legal moves until one actually commits (resistance needs a few taps; a
+  // spooked piece may divert a tap to a coax-back, which RELOCATES it without
+  // consuming the turn — so re-derive the legal list each attempt, like a human
+  // re-reading the board after it visibly changes).
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    if (g.gameOver || g.turn !== 'w') return true // an offered stunt may have spent the turn
+    const legal = g.chess.moves({ verbose: true }) as unknown as { from: string; to: string }[]
+    if (!legal.length) return true // nothing to play → game over; caller re-checks
+    const mv = legal[Math.min(attempt, legal.length - 1)]
     if (g.selected !== mv.from) g.playerTap(mv.from) // select (don't toggle off an already-selected piece)
     for (let i = 0; i < 5; i += 1) {
       if (g.playerTap(mv.to).moved) return true
@@ -47,8 +53,11 @@ describe('turn lock', () => {
         if (g.turn === 'w') {
           const legal = g.chess.moves({ verbose: true }) as unknown as { from: string; to: string }[]
           if (!legal.length) break // no moves → should be game over
-          const moved = tryWhiteMove(g, legal)
-          expect(moved, `seed ${seed} ply ${ply}: White had a legal move but could not play it`).toBe(true)
+          const moved = tryWhiteMove(g)
+          expect(
+            moved || g.gameOver,
+            `seed ${seed} ply ${ply}: White had a legal move but could not play it`,
+          ).toBe(true)
         } else {
           aiTurn(g)
           // The AI turn must always hand control back to White (or end the game);

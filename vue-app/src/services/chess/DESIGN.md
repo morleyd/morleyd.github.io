@@ -86,18 +86,29 @@ Gertrude — all at 8:57). The fixes, all in:
       twice in a game even with different names (recent ring tracks templates
       too).
 
-Big visual pass (needs the decision below, do as a focused effort):
-- [ ] **Migrate unicode glyphs → real piece images** (enabler). Lets us overlay
-      jetpack/glasses/flame accessories for clear stunt storytelling. Candidate
-      art: the Wikipedia SVG/PNG set already in `~/git/chess-ai/img/chesspieces/`.
-      **DECISION NEEDED from David: which piece art / style.**
-- [ ] **Capture "escort" animation**: the capturing piece accompanies the captured
-      one to the box and returns to its square (replace the tumble-and-vanish).
-      Best done after the image migration / with a JS-orchestrated flight overlay.
+### The visual pass — shipped
 
-Deferred canon: **smash/drag-off capture** (partly done via drag-off), pep-talk
-entourage (multi-piece turn), body swap, a **trust arc that visibly unlocks less
-back-talk**, a trust **reset** control.
+- [x] **Real piece art**: the Wikipedia/Cburnett set (80×80 transparent PNGs,
+      copied from `~/git/chess-ai/img/chesspieces/wikipedia/`, art by Colin M.L.
+      Burnett, CC-BY-SA/GFDL) replaces the unicode glyphs everywhere — board,
+      the box, table-talk badges, character sheet. Kills the iOS emoji hack;
+      drop-shadow auras and transform animations apply cleanly; a defector
+      literally changes colour.
+- [x] **Capture "escort"**: after the captor's travel slide, it dives down its
+      file past the board's bottom edge (to the box) alongside the victim's
+      drag-off exit, then climbs back to its post (`--exit-y` per-square, 2.5s
+      keyframes; suppressed for spiral deaths and cleared if the piece is moved
+      again).
+- [x] **Comic-book violence**: every capture bursts a starburst at the square —
+      POW! / WHAM! / SMASH! / THWACK! / CRUNCH! / BAM! / CLANG! (rage-strike is
+      always SMASH!, the trampled pawn gets SQUISH!). The panel conveys the
+      smashing the pieces can't act out — no cannon-and-rubble art needed.
+- [x] **Stunt accessories** (inline SVG, no sourcing needed): the jetpack knight
+      wears a flickering thruster flame, the disguised rook wears glasses, the
+      defector wears a black hat — for as long as the stunt FX lingers.
+
+Deferred canon: pep-talk entourage (multi-piece turn), body swap, a **trust arc
+that visibly unlocks less back-talk**, a trust **reset** control.
 
 ## Canon survey — what Wizard's Chess actually is (HP books/films)
 

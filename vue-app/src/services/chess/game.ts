@@ -109,6 +109,7 @@ export class WizardGame {
   graveyard: string[] = [] // soul ids in the order they fell ("the box")
   fx: StuntFx | null = null // lingering marker for the most recent stunt
   deathFx: 'drag' | 'spiral' = 'drag' // how the next capture leaves: dragged to the box, or (trample only) spiralling out
+  smack: { square: Square; word: string; seq: number } | null = null // comic burst on violence (POW!)
   trust = DEFAULT_TRUST // team's trust in the player (0–100); persists across games
   settings: WizardSettings = { ...DEFAULT_SETTINGS }
   private startTime = nowMs()
@@ -239,11 +240,24 @@ export class WizardGame {
     this.enrageSeen = {}
     this.fx = null
     this.deathFx = 'drag'
+    this.smack = null
   }
 
   private fxSeq = 0
   private setFx(kind: StuntFx['kind'], from: Square | null, to: Square) {
     this.fx = { kind, from, to, seq: ++this.fxSeq }
+  }
+
+  /** Comic-book violence: every capture bursts a "POW!" at the square. The word
+   * sells the smash the pieces can't act out (no cannon-and-rubble art needed). */
+  private static SMACK_WORDS = ['POW!', 'WHAM!', 'SMASH!', 'THWACK!', 'CRUNCH!', 'BAM!', 'CLANG!']
+  private smackSeq = 0
+  private setSmack(square: Square, word?: string) {
+    this.smack = {
+      square,
+      word: word ?? this.pick(WizardGame.SMACK_WORDS),
+      seq: ++this.smackSeq,
+    }
   }
 
   get turn(): Color {
@@ -341,6 +355,7 @@ export class WizardGame {
 
     this.logMove(move.san, move.color as Color, false)
     for (const e of events) if (e.kind === 'captured') this.graveyard.push(e.soulId)
+    if (events.some((e) => e.kind === 'captured')) this.setSmack(move.to)
     if (this.spooked && this.spooked.soulId === moverId) this.spooked = null // it left on its own
 
     // Record who moved and whether it looked risky, for the travel animation.
@@ -601,6 +616,7 @@ export class WizardGame {
       delete this.society.bySquare[target]
       this.graveyard.push(victimId)
     }
+    this.setSmack(target, 'SMASH!') // rage always smashes
     // The strike lands from `from`; the rager doesn't move, the victim vanishes.
     this.lastFrom = null
     this.lastTo = target
@@ -678,6 +694,7 @@ export class WizardGame {
           delete this.society.bySquare[pawnSq]
           this.graveyard.push(pawnId)
         }
+        this.setSmack(pawnSq, 'SQUISH!') // trampled underfoot
       } else {
         const k = 1 + Math.floor(this.rng() * runway) // charge 1..runway ranks
         dest = (file + (rank + k * dir)) as Square
@@ -773,6 +790,7 @@ export class WizardGame {
         delete this.society.bySquare[target]
         this.graveyard.push(victimId)
       }
+      this.setSmack(target)
       this.usedStunts.add('tantrum')
       this.lastFrom = null
       this.lastTo = target
@@ -910,6 +928,7 @@ export class WizardGame {
       }
       delete this.society.bySquare[to]
       this.graveyard.push(victimId)
+      this.setSmack(to) // an off-book capture still gets its comic burst
     }
     if (moverId) {
       delete this.society.bySquare[from]

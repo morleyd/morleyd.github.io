@@ -21,19 +21,27 @@ import type { Color, PieceType, Square, Utterance } from '@/services/chess/types
 const route = useRoute()
 const router = useRouter()
 
-// U+FE0E (text variation selector) forces monochrome text rendering. Without it,
-// iOS/Apple render the pawn (U+265F) as a colour emoji that ignores our `color`,
-// so pawns showed up as black images while every other piece was styled. Applied
-// to all glyphs so the whole set renders consistently as text we can colour.
-const VS = '\uFE0E'
-const GLYPH: Record<PieceType, string> = {
-  p: '♟' + VS,
-  n: '♞' + VS,
-  b: '♝' + VS,
-  r: '♜' + VS,
-  q: '♛' + VS,
-  k: '♚' + VS,
+// Real piece art: the classic Wikipedia (Cburnett) set — replaces the old
+// unicode glyphs (and their iOS emoji-rendering workaround). Transparent PNGs,
+// so drop-shadow auras and transform animations apply cleanly, and accessories
+// (flame, glasses) can be overlaid for stunt storytelling.
+import wP from '@/assets/chess/wP.png'
+import wN from '@/assets/chess/wN.png'
+import wB from '@/assets/chess/wB.png'
+import wR from '@/assets/chess/wR.png'
+import wQ from '@/assets/chess/wQ.png'
+import wK from '@/assets/chess/wK.png'
+import bP from '@/assets/chess/bP.png'
+import bN from '@/assets/chess/bN.png'
+import bB from '@/assets/chess/bB.png'
+import bR from '@/assets/chess/bR.png'
+import bQ from '@/assets/chess/bQ.png'
+import bK from '@/assets/chess/bK.png'
+const PIECE_IMG: Record<Color, Record<PieceType, string>> = {
+  w: { p: wP, n: wN, b: wB, r: wR, q: wQ, k: wK },
+  b: { p: bP, n: bN, b: bB, r: bR, q: bQ, k: bK },
 }
+const imgOf = (color: Color, type: PieceType): string => PIECE_IMG[color][type]
 const LEVEL_NAMES = ['', 'Novice', 'Casual', 'Steady', 'Sharp', 'Cunning', 'Ruthless']
 
 const engine = new Engine()
@@ -197,6 +205,66 @@ const fxLabelStyle = (sq: Square) => {
   return { left: `${((col + 0.5) / 8) * 100}%`, top: `${(row / 8) * 100}%`, '--tx': tx }
 }
 
+// ── Comic-book violence ────────────────────────────────────────────────────
+// Captures burst a POW!/WHAM! starburst at the square — the comic panel does
+// the smashing our pieces can't act out.
+const smack = ref<{ square: Square; word: string } | null>(null)
+let smackTimer: ReturnType<typeof setTimeout> | null = null
+let lastSmackSeq = -1
+watch(version, () => {
+  if (game.smack && game.smack.seq !== lastSmackSeq) {
+    lastSmackSeq = game.smack.seq
+    smack.value = { square: game.smack.square, word: game.smack.word }
+    if (smackTimer) clearTimeout(smackTimer)
+    smackTimer = setTimeout(() => (smack.value = null), 1300)
+    // A normal drag-off capture also sends the captor down as escort (canon:
+    // the victor drags the fallen to the box, then walks back to its post).
+    if (game.deathFx === 'drag' && game.lastMoverId && game.lastFrom) scheduleEscort(game.lastMoverId)
+  }
+})
+const smackStyle = (sq: Square) => {
+  const { col, row } = rc(sq)
+  return { left: `${((col + 0.5) / 8) * 100}%`, top: `${((row + 0.5) / 8) * 100}%` }
+}
+
+// ── Capture escort ─────────────────────────────────────────────────────────
+// After the captor's travel slide finishes, it dives down off the board (to the
+// box, along its own file) and climbs back to its square. The victim's leave
+// transition is already headed the same way, so the pair descend together.
+const escortId = ref<string | null>(null)
+let escortStartTimer: ReturnType<typeof setTimeout> | null = null
+let escortEndTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleEscort(moverId: string) {
+  if (escortStartTimer) clearTimeout(escortStartTimer)
+  if (escortEndTimer) clearTimeout(escortEndTimer)
+  escortId.value = null
+  // Wait out the FLIP travel slide first — the escort keyframes own `transform`
+  // and would otherwise cancel the slide mid-flight.
+  escortStartTimer = setTimeout(() => {
+    escortId.value = moverId
+    escortEndTimer = setTimeout(() => (escortId.value = null), 2500)
+  }, 850)
+}
+function clearEscort() {
+  if (escortStartTimer) clearTimeout(escortStartTimer)
+  if (escortEndTimer) clearTimeout(escortEndTimer)
+  escortId.value = null
+}
+
+// ── Stunt accessories ──────────────────────────────────────────────────────
+// While a stunt's FX lingers, the piece that pulled it wears the evidence:
+// jetpack flame, disguise glasses, a defector's black hat.
+type Accessory = 'flame' | 'glasses' | 'hat' | null
+function accessoryOf(p: PieceView): Accessory {
+  const f = stuntFx.value
+  if (!f) return null
+  if (f.kind === 'jetpack' && p.square === f.to) return 'flame'
+  if (f.kind === 'disguise' && p.square === f.to) return 'glasses'
+  if (f.kind === 'defect' && p.square === f.to) return 'hat'
+  if (f.kind === 'telegraph' && p.square === f.to) return null // the ring + label carry the telegraph
+  return null
+}
+
 // ── Idle heckling ─────────────────────────────────────────────────────────
 // Fires at most ONCE per idle stretch: a real interaction re-arms it. (Previously
 // it re-armed itself every 16s, producing a wall of repeated heckles.)
@@ -215,6 +283,7 @@ function armIdle(delay = 22_000) {
 interface PieceView {
   id: string
   type: PieceType
+  color: Color
   colorClass: 'white' | 'black'
   square: Square
 }
@@ -222,7 +291,13 @@ const piecesList = computed<PieceView[]>(() => {
   version.value
   return Object.values(game.society.souls)
     .filter((s) => !s.captured && s.square)
-    .map((s) => ({ id: s.id, type: s.type, colorClass: s.color === 'w' ? 'white' : 'black', square: s.square as Square }))
+    .map((s) => ({
+      id: s.id,
+      type: s.type,
+      color: s.color,
+      colorClass: s.color === 'w' ? 'white' : 'black',
+      square: s.square as Square,
+    }))
 })
 const animMap = computed(() => (version.value, game.animations()))
 const selectedSquare = computed(() => (version.value, game.selected))
@@ -284,7 +359,14 @@ function moveMs(p: PieceView): number {
 }
 const pieceStyle = (p: PieceView) => {
   const { col, row } = rc(p.square)
-  return { left: `${(col / 8) * 100}%`, top: `${(row / 8) * 100}%`, '--move-ms': `${moveMs(p)}ms` }
+  return {
+    left: `${(col / 8) * 100}%`,
+    top: `${(row / 8) * 100}%`,
+    '--move-ms': `${moveMs(p)}ms`,
+    // Distance (in own-heights) from this square down past the board's bottom
+    // edge — where the box sits. Drives both the drag-off exit and the escort.
+    '--exit-y': `${(8 - row) * 100 + 60}%`,
+  }
 }
 const bubbleStyle = (b: Bubble) => {
   const { col, row } = rc(b.square as Square)
@@ -294,10 +376,10 @@ const bubbleStyle = (b: Bubble) => {
   return { left: `${((col + 0.5) / 8) * 100}%`, top: `${(row / 8) * 100}%`, '--tx': tx, '--tail': tail }
 }
 
-// Table talk: resolve the speaker so each line can show its piece glyph + type.
-const GLYPH_FOR = (u: Utterance): string => {
+// Table talk: resolve the speaker so each line can show its piece image + type.
+const IMG_FOR = (u: Utterance): string => {
   const s = game.society.souls[u.soulId]
-  return s ? GLYPH[s.type] : '•'
+  return s ? imgOf(u.color, s.type) : imgOf('w', 'p')
 }
 const TYPE_FOR = (u: Utterance): string => {
   const s = game.society.souls[u.soulId]
@@ -444,6 +526,7 @@ function onSquare(square: Square) {
     })
   }
   if (res.cue) triggerCue(res.cue.soulId, res.cue.type)
+  if (res.moved && escortId.value) clearEscort() // don't fight the FLIP slide of a re-moved captor
   enqueue(res.utterances, res.moved ? 650 : 0)
   bump()
   armIdle()
@@ -539,6 +622,10 @@ function start(fen?: string) {
     followUpTimer = null
   }
   lastFxSeq = -1
+  smack.value = null
+  if (smackTimer) clearTimeout(smackTimer)
+  lastSmackSeq = -1
+  clearEscort()
   postSaid = false
   bump()
   // Adjacent pieces get properly acquainted (multi-turn conversations that form
@@ -584,6 +671,8 @@ onBeforeUnmount(() => {
   if (pressTimer) clearTimeout(pressTimer)
   if (fxTimer) clearTimeout(fxTimer)
   if (followUpTimer) clearTimeout(followUpTimer)
+  if (smackTimer) clearTimeout(smackTimer)
+  clearEscort()
   cueTimers.forEach((t) => clearTimeout(t))
 })
 </script>
@@ -725,12 +814,39 @@ onBeforeUnmount(() => {
               :key="p.id"
               class="piece-box"
               :data-piece="p.square"
-              :class="cueClass(p.id)"
+              :class="[cueClass(p.id), { escorting: p.id === escortId }]"
               :style="pieceStyle(p)"
             >
-              <span class="glyph" :class="[p.colorClass, animClass(p.square), stateClass(p.square)]">{{ GLYPH[p.type] }}</span>
+              <img
+                class="glyph"
+                :class="[p.colorClass, animClass(p.square), stateClass(p.square)]"
+                :src="imgOf(p.color, p.type)"
+                :alt="`${p.colorClass} ${TYPE_NAME[p.type]}`"
+                draggable="false"
+              />
+              <!-- stunt accessories: worn while the FX lingers -->
+              <svg v-if="accessoryOf(p) === 'flame'" class="acc acc-flame" viewBox="5.5 11 13 19.5" preserveAspectRatio="none" aria-hidden="true">
+                <path d="M12 30 C6 24 7 18 12 12 C17 18 18 24 12 30 Z" fill="#f97316" />
+                <path d="M12 28 C9 24 9.5 20 12 16 C14.5 20 15 24 12 28 Z" fill="#fbbf24" />
+                <path d="M12 26 C10.6 23.5 10.8 21 12 19 C13.2 21 13.4 23.5 12 26 Z" fill="#fef3c7" />
+              </svg>
+              <svg v-else-if="accessoryOf(p) === 'glasses'" class="acc acc-glasses" viewBox="0 0 40 14" aria-hidden="true">
+                <circle cx="10" cy="7" r="6" fill="rgba(30,41,59,0.35)" stroke="#0f172a" stroke-width="2.4" />
+                <circle cx="30" cy="7" r="6" fill="rgba(30,41,59,0.35)" stroke="#0f172a" stroke-width="2.4" />
+                <line x1="16" y1="7" x2="24" y2="7" stroke="#0f172a" stroke-width="2.4" />
+                <line x1="0" y1="5" x2="4" y2="6" stroke="#0f172a" stroke-width="2.4" />
+                <line x1="40" y1="5" x2="36" y2="6" stroke="#0f172a" stroke-width="2.4" />
+              </svg>
+              <svg v-else-if="accessoryOf(p) === 'hat'" class="acc acc-hat" viewBox="0 0 36 18" aria-hidden="true">
+                <ellipse cx="18" cy="15" rx="17" ry="3" fill="#0f172a" />
+                <rect x="9" y="2" width="18" height="13" rx="2" fill="#1e293b" />
+                <rect x="9" y="10" width="18" height="3" fill="#7f1d1d" />
+              </svg>
             </span>
           </TransitionGroup>
+
+          <!-- comic-book capture burst -->
+          <span v-if="smack" class="smack" :style="smackStyle(smack.square)">{{ smack.word }}</span>
 
           <div
             v-for="b in bubbles"
@@ -753,7 +869,7 @@ onBeforeUnmount(() => {
             :class="f.color === 'w' ? 'ours' : 'theirs'"
             :title="`${f.name} (${f.color === 'w' ? 'your' : 'enemy'} ${TYPE_NAME[f.type]})`"
           >
-            <span class="grave-glyph">{{ GLYPH[f.type] }}</span>
+            <img class="grave-glyph" :src="imgOf(f.color, f.type)" :alt="TYPE_NAME[f.type]" draggable="false" />
             <span class="grave-name">{{ f.name }}</span>
           </span>
           <span v-if="fallenList.length === 0" class="text-medium-emphasis text-caption">empty — no one's fallen</span>
@@ -779,7 +895,9 @@ onBeforeUnmount(() => {
             Tap one of your pieces — they have opinions. Long-press any piece for its character sheet.
           </p>
           <div v-for="(u, i) in log" :key="i" class="talk-line">
-            <span class="badge" :class="u.color === 'w' ? 'ours' : 'theirs'" :title="TYPE_FOR(u)">{{ GLYPH_FOR(u) }}</span>
+            <span class="badge" :class="u.color === 'w' ? 'ours' : 'theirs'" :title="TYPE_FOR(u)">
+              <img class="badge-img" :src="IMG_FOR(u)" :alt="TYPE_FOR(u)" draggable="false" />
+            </span>
             <div class="talk-body">
               <span class="who" :class="u.color === 'w' ? 'ours' : 'theirs'">{{ u.name }}</span>
               <span class="ty">{{ TYPE_FOR(u) }}</span>
@@ -807,7 +925,7 @@ onBeforeUnmount(() => {
     <v-dialog v-model="sheetOpen" max-width="420">
       <v-card v-if="sheet" color="surface" rounded="lg">
         <v-card-title class="d-flex align-center ga-3">
-          <span class="sheet-glyph" :class="sheet.color === 'w' ? 'ours' : 'theirs'">{{ GLYPH[sheet.type] }}</span>
+          <img class="sheet-glyph" :src="imgOf(sheet.color, sheet.type)" :alt="TYPE_NAME[sheet.type]" draggable="false" />
           <div>
             <div>{{ sheet.name }}</div>
             <div class="text-caption text-medium-emphasis">
@@ -1003,6 +1121,82 @@ onBeforeUnmount(() => {
     opacity: 0;
   }
 }
+
+/* Comic-book capture burst: a POW!/WHAM! starburst at the point of violence. */
+.smack {
+  position: absolute;
+  transform: translate(-50%, -50%) rotate(-7deg);
+  padding: 10px 16px;
+  font-size: clamp(0.9rem, 3.2vw, 1.5rem);
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 0.03em;
+  color: #7f1d1d;
+  background: #fbbf24;
+  border: 3px solid #dc2626;
+  clip-path: polygon(
+    50% 0%, 61% 12%, 76% 4%, 78% 20%, 95% 18%, 88% 33%, 100% 42%, 88% 53%,
+    97% 68%, 80% 68%, 80% 86%, 65% 78%, 55% 95%, 46% 79%, 30% 90%, 30% 72%,
+    12% 76%, 20% 60%, 0% 52%, 13% 40%, 3% 26%, 21% 26%, 20% 8%, 37% 15%
+  );
+  pointer-events: none;
+  z-index: 7;
+  animation: smackPop 1.3s cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+@keyframes smackPop {
+  0% {
+    transform: translate(-50%, -50%) rotate(-7deg) scale(0.2);
+    opacity: 0;
+  }
+  18% {
+    transform: translate(-50%, -50%) rotate(-7deg) scale(1.18);
+    opacity: 1;
+  }
+  30% {
+    transform: translate(-50%, -50%) rotate(-7deg) scale(1);
+  }
+  75% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -50%) rotate(-7deg) scale(1);
+    opacity: 0;
+  }
+}
+
+/* Stunt accessories — worn while the FX lingers, so the story is on the piece. */
+.acc {
+  position: absolute;
+  pointer-events: none;
+  z-index: 3;
+}
+.acc-flame {
+  width: 58%;
+  height: 68%;
+  left: 21%;
+  bottom: -44%;
+  transform-origin: 50% 0%;
+  filter: drop-shadow(0 0 6px rgba(251, 146, 60, 0.8));
+  animation: flicker 0.22s ease-in-out infinite alternate;
+}
+@keyframes flicker {
+  from {
+    transform: scaleY(1) scaleX(1);
+  }
+  to {
+    transform: scaleY(1.25) scaleX(0.88);
+  }
+}
+.acc-glasses {
+  width: 62%;
+  left: 19%;
+  top: 20%;
+}
+.acc-hat {
+  width: 66%;
+  left: 17%;
+  top: -16%;
+}
 .check-ring {
   position: absolute;
   width: 12.5%;
@@ -1030,42 +1224,59 @@ onBeforeUnmount(() => {
   justify-content: center;
 }
 .glyph {
-  font-size: 9cqmin;
-  line-height: 1;
+  width: 88%;
+  height: 88%;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+  filter: drop-shadow(0 2px 2px rgba(15, 23, 42, 0.4));
 }
 /* Power-up states shown with visual treatment, not emoji: vengeful pieces get a
    red aura (reinforced by the anim-angry fume); the spooked look faded. */
 .glyph.state-vengeful {
-  filter: drop-shadow(0 0 5px rgba(239, 68, 68, 0.9));
+  filter: drop-shadow(0 0 6px rgba(239, 68, 68, 0.95)) drop-shadow(0 2px 2px rgba(15, 23, 42, 0.4));
 }
 .glyph.state-spooked {
   opacity: 0.55;
-  filter: grayscale(0.6);
+  filter: grayscale(0.6) drop-shadow(0 2px 2px rgba(15, 23, 42, 0.4));
 }
-.glyph.white {
-  color: #f8fafc;
-  text-shadow: 0 0 1px #0f172a, 0 1px 2px rgba(15, 23, 42, 0.9), 0 0 3px #1e293b;
-}
-.glyph.black {
-  color: #1e293b;
-  text-shadow: 0 0 1px #000, 0 1px 2px rgba(0, 0, 0, 0.5);
-}
+/* .white / .black remain as selector hooks (e2e + future styling); the art
+   itself carries the colour now. */
 
 /* Movement (FLIP). Duration comes from the piece's temperament/risk. */
 .pmove-move {
   transition: transform var(--move-ms, 300ms) cubic-bezier(0.22, 0.61, 0.36, 1);
 }
-/* Capture = hauled off the board, down toward the box: slow, heavy, readable.
-   (Canon: the fallen are dragged off, not vanished.) */
+/* Capture = hauled off the board, all the way down past the bottom edge to the
+   box, slow and heavy. (Canon: the fallen are dragged off, not vanished.) */
 .pmove-leave-active {
   transition:
-    opacity 1.05s ease-in,
-    transform 1.15s cubic-bezier(0.45, 0.05, 0.8, 0.4);
+    opacity 1.4s ease-in,
+    transform 1.5s cubic-bezier(0.45, 0.05, 0.7, 0.5);
   z-index: 3;
 }
 .pmove-leave-to {
   opacity: 0;
-  transform: translateY(260%) rotate(12deg);
+  transform: translateY(var(--exit-y, 300%)) rotate(10deg);
+}
+/* The captor escorts the fallen down to the box, then climbs back to its post. */
+.piece-box.escorting {
+  z-index: 4;
+  animation: escort 2.5s cubic-bezier(0.45, 0.05, 0.55, 0.95) both;
+}
+@keyframes escort {
+  0% {
+    transform: translateY(0);
+  }
+  46% {
+    transform: translateY(var(--exit-y, 300%));
+  }
+  60% {
+    transform: translateY(var(--exit-y, 300%));
+  }
+  100% {
+    transform: translateY(0);
+  }
 }
 /* The ONE exception: a trampled pawn spirals out of existence underfoot. */
 .pieces.death-spiral .pmove-leave-active {
@@ -1215,6 +1426,11 @@ onBeforeUnmount(() => {
   background: rgba(252, 165, 165, 0.16);
   color: #fca5a5;
 }
+.badge-img {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
 .talk-body {
   min-width: 0;
 }
@@ -1284,16 +1500,10 @@ onBeforeUnmount(() => {
   background: rgba(148, 163, 184, 0.12);
 }
 .grave-glyph {
-  font-size: 15px;
-  line-height: 1;
-}
-.grave.ours .grave-glyph {
-  color: #f8fafc;
-  text-shadow: 0 0 1px #0f172a;
-}
-.grave.theirs .grave-glyph {
-  color: #1e293b;
-  text-shadow: 0 0 1px #94a3b8;
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  filter: grayscale(0.35) drop-shadow(0 1px 1px rgba(0, 0, 0, 0.4));
 }
 .grave.ours .grave-name {
   color: #fde68a;
@@ -1338,11 +1548,11 @@ onBeforeUnmount(() => {
   margin-left: 6px;
 }
 .sheet-glyph {
-  font-size: 30px;
-  line-height: 1;
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
 }
-.sheet-glyph.ours { color: #fde68a; }
-.sheet-glyph.theirs { color: #fca5a5; }
 .mood-row {
   display: flex;
   align-items: center;
@@ -1379,8 +1589,14 @@ onBeforeUnmount(() => {
   }
   .stunt-ring,
   .stunt-ring.fx-telegraph,
-  .stunt-label {
+  .stunt-label,
+  .piece-box.escorting,
+  .acc-flame {
     animation: none !important;
+  }
+  .smack {
+    animation: none !important;
+    opacity: 1;
   }
   .glyph.anim-angry {
     filter: drop-shadow(0 0 3px #ef4444);
