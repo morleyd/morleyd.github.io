@@ -10,8 +10,10 @@
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useDisplay } from 'vuetify'
 
-import { analyzeGame } from '@/services/analyzer'
+import { analyzeGame, remainingCandidatesFor } from '@/services/analyzer'
+import type { GameAnalysis } from '@/services/analyzer'
 import { MAX_ATTEMPTS, WORD_LENGTH, evaluateGuess, statusPriority } from '@/services/wordleLogic'
 import {
   allowedWordSet,
@@ -58,6 +60,10 @@ interface BoardRow {
 
 const route = useRoute()
 const router = useRouter()
+
+// Phone-sized screens (<600px) get a full-screen dialog and a stacked-card
+// analysis layout instead of the wide desktop table.
+const { xs } = useDisplay()
 
 /** QWERTY keyboard layout for on-screen keyboard */
 const keyboardRows = [
@@ -121,15 +127,36 @@ const activeWordLabel = computed(() => {
 })
 const canShareScore = computed(() => gameFinished.value && guesses.value.length > 0)
 
-const analysisData = computed(() =>
-  analyzeGame(
-    guesses.value.map((entry) => ({
-      guess: entry.guess,
-      statuses: entry.statuses,
-    })),
+// Cheap, live-safe list of answers still consistent with the clues so far.
+// Used by the "Remaining Words" menu, so it must stay light during play.
+const remainingCandidates = computed(() =>
+  remainingCandidatesFor(
+    guesses.value.map((entry) => ({ guess: entry.guess, statuses: entry.statuses })),
     [targetWord.value],
   ),
 )
+
+// Full skill/luck breakdown is expensive (it scores every guess against the
+// whole answer bank), so we only compute it when the analysis dialog opens.
+const analysis = ref<GameAnalysis | null>(null)
+const analyzing = ref(false)
+
+watch(analysisDialog, (open) => {
+  if (!open) {
+    return
+  }
+  // Defer the (heavy) scan a tick so the dialog paints its loading state and the
+  // open animation stays smooth instead of freezing on the main-thread compute.
+  analyzing.value = true
+  analysis.value = null
+  setTimeout(() => {
+    analysis.value = analyzeGame(
+      guesses.value.map((entry) => ({ guess: entry.guess, statuses: entry.statuses })),
+      [targetWord.value],
+    )
+    analyzing.value = false
+  }, 30)
+})
 
 /**
  * Builds the game board rows from guesses and current input
@@ -567,6 +594,26 @@ async function shareScore() {
 // Utility Functions
 // ============================================================================
 /**
+ * Maps a 1-100 score to a red→amber→green hue for skill/luck cells.
+ */
+function scoreColor(value: number): string {
+  const clamped = Math.max(0, Math.min(100, value))
+  const hue = Math.round((clamped / 100) * 130) // 0 = red, 130 = green
+  return `hsl(${hue}, 68%, 56%)`
+}
+
+/**
+ * A short verdict for a 1-100 score, used in the summary tiles.
+ */
+function scoreVerdict(value: number): string {
+  if (value >= 85) return 'excellent'
+  if (value >= 65) return 'strong'
+  if (value >= 45) return 'solid'
+  if (value >= 25) return 'shaky'
+  return 'rough'
+}
+
+/**
  * Shows a snackbar notification
  */
 function showSnackbar(message: string, color: SnackbarColor = 'info') {
@@ -824,7 +871,7 @@ onBeforeUnmount(() => {
             Remaining Words
           </v-card-title>
           <v-divider class="mb-2" />
-          <v-virtual-scroll height="500px" max-height="90vh" :items="analysisData.remainingCandidates">
+          <v-virtual-scroll height="500px" max-height="90vh" :items="remainingCandidates">
             <template v-slot:default="{ item, index }">
               {{ index + 1 }}. {{ item }}
             </template>
@@ -924,8 +971,8 @@ onBeforeUnmount(() => {
     </v-dialog>
 
 <!-- Analysis Dialog -->
-<v-dialog v-model="analysisDialog" width="900">
-  <v-card>
+<v-dialog v-model="analysisDialog" width="920" scrollable :fullscreen="xs">
+  <v-card v-if="analysis">
     <v-card-title class="d-flex align-center justify-space-between">
       <div>
         <p class="text-overline mb-1">Post-game insights</p>
@@ -933,46 +980,211 @@ onBeforeUnmount(() => {
       </div>
       <v-btn icon="mdi-close" variant="text" @click="analysisDialog = false" />
     </v-card-title>
+    <v-divider />
 
     <v-card-text>
-      <v-table density="compact" class="mb-4">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Guess</th>
-            <th>Remaining</th>
-            <th>Info</th>
-            <th>Luck</th>
-          </tr>
-        </thead>
+      <!-- Summary tiles: game-level skill & luck -->
+      <div class="d-flex ga-3 mb-5 flex-wrap">
+        <div class="summary-tile">
+          <div class="text-overline text-medium-emphasis">Skill</div>
+          <div class="summary-value" :style="{ color: scoreColor(analysis.averageSkill) }">
+            {{ Math.round(analysis.averageSkill) }}
+          </div>
+          <div class="text-caption text-medium-emphasis">
+            {{ scoreVerdict(analysis.averageSkill) }} · avg over {{ analysis.rows.length }}
+            {{ analysis.rows.length === 1 ? 'guess' : 'guesses' }}
+          </div>
+        </div>
+        <div class="summary-tile">
+          <div class="text-overline text-medium-emphasis">Luck</div>
+          <div class="summary-value" :style="{ color: scoreColor(analysis.averageLuck) }">
+            {{ Math.round(analysis.averageLuck) }}
+          </div>
+          <div class="text-caption text-medium-emphasis">
+            {{ scoreVerdict(analysis.averageLuck) }} · 50 is an average roll
+          </div>
+        </div>
+      </div>
 
-        <tbody>
-          <tr v-for="(row, index) in analysisData.rows" :key="row.guess + index">
-            <td>{{ index + 1 }}</td>
+      <p class="text-caption text-medium-emphasis mb-3">
+        <strong>Skill</strong> ranks your guess against the whole answer bank by expected
+        information — 100 = the best possible splitter, judged before the colors show.
+        <strong>Luck</strong> ranks the result you got against every result that same guess
+        could have given: 50 = a typical roll, and solving the word counts as the luckiest
+        outcome.
+      </p>
 
-            <td class="text-uppercase font-weight-medium">
+      <!-- Desktop / tablet: wide table -->
+      <div v-if="!xs" class="analysis-table-wrap">
+        <v-table density="comfortable" class="analysis-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Guess</th>
+              <th class="text-right">Left</th>
+              <th>Info</th>
+              <th>Skill</th>
+              <th>Luck</th>
+              <th>Best guess</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr v-for="(row, index) in analysis.rows" :key="row.guess + index">
+              <td class="text-medium-emphasis">{{ index + 1 }}</td>
+
+              <td>
+                <div class="d-flex align-center ga-2">
+                  <span class="text-uppercase font-weight-bold letter-spaced">{{ row.guess }}</span>
+                  <v-chip
+                    size="x-small"
+                    variant="tonal"
+                    :color="row.isPossibleAnswer ? 'green' : 'blue-grey'"
+                  >
+                    {{ row.isPossibleAnswer ? 'answer' : 'probe' }}
+                  </v-chip>
+                </div>
+              </td>
+
+              <td class="text-right">
+                <span class="font-weight-medium">{{ row.remaining }}</span>
+                <span class="text-caption text-medium-emphasis"> / {{ row.remainingBefore }}</span>
+              </td>
+
+              <td>
+                <div class="font-weight-medium">{{ row.actualInfo.toFixed(1) }} bits</div>
+                <div class="text-caption text-medium-emphasis">exp {{ row.expectedInfo.toFixed(1) }}</div>
+              </td>
+
+              <td>
+                <div class="score-cell">
+                  <span class="score-value" :style="{ color: scoreColor(row.skill) }">
+                    {{ Math.round(row.skill) }}
+                  </span>
+                  <div class="score-bar">
+                    <div
+                      class="score-bar__fill"
+                      :style="{ width: row.skill + '%', background: scoreColor(row.skill) }"
+                    />
+                  </div>
+                </div>
+              </td>
+
+              <td>
+                <div class="score-cell">
+                  <span class="score-value" :style="{ color: scoreColor(row.luck) }">
+                    {{ Math.round(row.luck) }}
+                  </span>
+                  <div class="score-bar">
+                    <div
+                      class="score-bar__fill"
+                      :style="{ width: row.luck + '%', background: scoreColor(row.luck) }"
+                    />
+                  </div>
+                </div>
+              </td>
+
+              <td>
+                <div v-if="row.isOptimal" class="d-flex align-center ga-1 text-green-accent-4">
+                  <v-icon icon="mdi-check-circle" size="small" />
+                  <span class="text-caption font-weight-medium">Optimal</span>
+                </div>
+                <div v-else>
+                  <span class="text-uppercase font-weight-medium letter-spaced">{{ row.bestGuess }}</span>
+                  <div class="text-caption text-medium-emphasis">
+                    {{ row.bestGuessInfo.toFixed(1) }} bits{{ row.bestGuessIsAnswer ? '' : ' · probe' }}
+                  </div>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </v-table>
+      </div>
+
+      <!-- Mobile: one stacked card per guess -->
+      <div v-else class="guess-cards">
+        <div v-for="(row, index) in analysis.rows" :key="row.guess + index" class="guess-card">
+          <div class="guess-card__head">
+            <span class="guess-card__num">#{{ index + 1 }}</span>
+            <span class="text-uppercase font-weight-bold letter-spaced guess-card__word">
               {{ row.guess }}
-            </td>
+            </span>
+            <v-chip
+              size="x-small"
+              variant="tonal"
+              :color="row.isPossibleAnswer ? 'green' : 'blue-grey'"
+            >
+              {{ row.isPossibleAnswer ? 'answer' : 'probe' }}
+            </v-chip>
+            <span class="guess-card__left text-caption text-medium-emphasis">
+              {{ row.remaining }} / {{ row.remainingBefore }} left
+            </span>
+          </div>
 
-            <td>{{ row.remaining }}</td>
+          <div class="guess-card__scores">
+            <div class="guess-card__metric">
+              <span class="guess-card__label">Skill</span>
+              <div class="score-cell">
+                <span class="score-value" :style="{ color: scoreColor(row.skill) }">
+                  {{ Math.round(row.skill) }}
+                </span>
+                <div class="score-bar">
+                  <div
+                    class="score-bar__fill"
+                    :style="{ width: row.skill + '%', background: scoreColor(row.skill) }"
+                  />
+                </div>
+              </div>
+            </div>
+            <div class="guess-card__metric">
+              <span class="guess-card__label">Luck</span>
+              <div class="score-cell">
+                <span class="score-value" :style="{ color: scoreColor(row.luck) }">
+                  {{ Math.round(row.luck) }}
+                </span>
+                <div class="score-bar">
+                  <div
+                    class="score-bar__fill"
+                    :style="{ width: row.luck + '%', background: scoreColor(row.luck) }"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
 
-            <td>{{ row.infoGainedPercent.toFixed(2) }}</td>
-
-            <td>
-              <span
-                :class="row.luck > 0 ? 'text-green-accent-4' : 'text-red-accent-2'"
-              >
-                {{ row.luck.toFixed(2) }}
+          <div class="guess-card__footer">
+            <div>
+              <span class="guess-card__label">Info</span>
+              <span class="font-weight-medium">{{ row.actualInfo.toFixed(1) }} bits</span>
+              <span class="text-caption text-medium-emphasis ml-1">exp {{ row.expectedInfo.toFixed(1) }}</span>
+            </div>
+            <div class="guess-card__best">
+              <span class="guess-card__label">Best</span>
+              <span v-if="row.isOptimal" class="d-inline-flex align-center ga-1 text-green-accent-4">
+                <v-icon icon="mdi-check-circle" size="x-small" />
+                <span class="text-caption font-weight-medium">Optimal</span>
               </span>
-            </td>
-          </tr>
-        </tbody>
-      </v-table>
+              <span v-else>
+                <span class="text-uppercase font-weight-medium letter-spaced">{{ row.bestGuess }}</span>
+                <span class="text-caption text-medium-emphasis">
+                  ({{ row.bestGuessInfo.toFixed(1) }} bits{{ row.bestGuessIsAnswer ? '' : ', probe' }})
+                </span>
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
     </v-card-text>
 
     <v-card-actions class="justify-end">
       <v-btn variant="text" @click="analysisDialog = false">Close</v-btn>
     </v-card-actions>
+  </v-card>
+
+  <!-- Loading state while the skill/luck scan runs -->
+  <v-card v-else class="pa-10 text-center">
+    <v-progress-circular indeterminate color="secondary" size="48" class="mb-4" />
+    <p class="text-body-1 text-medium-emphasis">Scoring your guesses…</p>
   </v-card>
 </v-dialog>
   </v-main>
@@ -1096,6 +1308,135 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 
+/* --- Analysis dialog --- */
+.summary-tile {
+  flex: 1 1 160px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 12px;
+  padding: 14px 18px;
+  background: rgba(148, 163, 184, 0.06);
+}
+
+.summary-value {
+  font-size: 2.4rem;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.letter-spaced {
+  letter-spacing: 0.08em;
+}
+
+.analysis-table-wrap {
+  overflow-x: auto;
+}
+
+.analysis-table {
+  min-width: 620px;
+}
+
+.score-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 56px;
+}
+
+.score-value {
+  font-size: 1.1rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.score-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(148, 163, 184, 0.2);
+  overflow: hidden;
+}
+
+.score-bar__fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+/* --- Analysis mobile cards --- */
+.guess-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.guess-card {
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: rgba(148, 163, 184, 0.06);
+}
+
+.guess-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.guess-card__num {
+  color: rgba(226, 232, 240, 0.5);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.guess-card__word {
+  font-size: 1.15rem;
+}
+
+.guess-card__left {
+  margin-left: auto;
+}
+
+.guess-card__scores {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.guess-card__metric {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.guess-card__label {
+  display: block;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(226, 232, 240, 0.5);
+  margin-right: 6px;
+}
+
+.guess-card__footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+  font-size: 0.9rem;
+}
+
+.guess-card__footer .guess-card__label {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.guess-card__best {
+  text-align: right;
+}
+
 .text-break {
   word-break: break-all;
 }
@@ -1132,6 +1473,15 @@ onBeforeUnmount(() => {
   .keyboard-key--action {
     width: 54px;
     min-width: 54px;
+  }
+
+  /* Analysis dialog: reclaim space on phones */
+  .summary-tile {
+    padding: 12px 14px;
+  }
+
+  .summary-value {
+    font-size: 2rem;
   }
 }
 </style>
