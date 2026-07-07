@@ -75,6 +75,15 @@ const games: GameCard[] = [
     gradient: 'linear-gradient(135deg, rgba(142, 36, 170, 0.42), rgba(251, 191, 36, 0.24))',
   },
   {
+    key: 'flood-it',
+    title: 'Flood It',
+    description:
+      'Flood the board from one corner, picking colors to grow your region until everything is a single color.',
+    icon: 'mdi-format-color-fill',
+    to: '/flood-it',
+    gradient: 'linear-gradient(135deg, rgba(59, 130, 246, 0.35), rgba(34, 197, 94, 0.28))',
+  },
+  {
     key: 'time-since',
     title: 'Time Since',
     description:

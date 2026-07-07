@@ -54,6 +54,12 @@ const router = createRouter({
       meta: { gamePage: true },
     },
     {
+      path: '/flood-it',
+      name: 'flood-it',
+      component: () => import('../views/FloodItView.vue'),
+      meta: { gamePage: true },
+    },
+    {
       path: '/time-since',
       name: 'time-since',
       component: () => import('../views/TimeSinceView.vue'),

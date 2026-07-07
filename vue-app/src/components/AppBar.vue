@@ -22,6 +22,7 @@ const gamesRouteNames = new Set([
   'snake',
   'minesweeper',
   'lights-out',
+  'flood-it',
   'time-since',
 ])
 
