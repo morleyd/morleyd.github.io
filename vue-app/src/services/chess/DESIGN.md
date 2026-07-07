@@ -48,74 +48,69 @@ the exceptions, not the ambient state.
 
 ## Checklist
 
+> Status (commit `a9ec421`): the restraint pass is in. Most items done; a few
+> agency refinements deliberately deferred (see notes). Tuning is by-feel and
+> ongoing.
+
 ### A. Dial back the current heavy-handedness
-- [ ] Remove ambient/persistent mood animations; nothing animates just because a
-      mood scalar is nonzero.
-- [ ] Global cap: at most ~2 pieces animating at once (rank by salience).
-- [ ] Cut message volume hard: most moves stay silent; add a global rate limit so
-      banter can't burst.
-- [ ] Re-tune mood decay so moods return to calm quickly instead of accumulating.
+- [x] Remove ambient/persistent mood animations; nothing animates just because a
+      mood scalar is nonzero. *(Animations chosen centrally in `game.animations()`.)*
+- [x] Global cap: at most ~2 pieces animating at once (ranked by salience).
+- [x] Cut message volume hard: most moves stay silent; ambient banter is spaced +
+      probabilistic + one-per-turn.
+- [x] Re-tune mood decay so moods return to calm quickly instead of accumulating.
 
 ### B. Mood animations — trait-gated + situational
-- [ ] **Tremble (fear):** only when a piece is *actually under attack this turn*
-      AND (it's **cowardly** — low bravery — OR it's **hanging** i.e. attacked and
-      inadequately defended / would be lost for nothing). Reckless & brave pieces
-      do **not** tremble under attack.
-- [ ] **Bob (anticipation):** only **one or two** pieces at a time, and only the
-      genuinely restless (high impatience trait + idled a while). Not a whole rank
-      of bobbing pawns.
-- [ ] **Anger:** fires only on a **legitimate proximal cause** — a bonded ally was
-      just captured, or a direct grudge/threat this ply — and **fades after a ply
-      or two**. No standing anger.
-- [ ] **Joy/bounce:** reserve for real highs (just promoted, just won a big
-      exchange) and only for a beat, then stop.
+- [x] **Tremble (fear):** under attack AND (cowardly OR hanging); reckless/bold
+      pieces never tremble.
+- [x] **Bob (anticipation):** only the genuinely restless, and (via the cap) only
+      one or two at a time.
+- [x] **Anger:** only on a fresh bonded-loss cause; decays within a ply or two.
+- [x] **Joy/bounce:** only on a big scalp / promotion, for a beat.
 
 ### C. Legibility
-- [ ] Anger must **not recolor the glyph**. White pieces stay white, black stay
-      black; express anger as a red aura/glow/outline around the piece so its base
-      color is unmistakable through the pulse.
-- [ ] Verify all effects keep type + color readable (light and dark squares).
+- [x] Anger is a red **aura** (drop-shadow), not a glyph recolor — base color stays
+      clear.
+- [x] Effects keep type + color readable on light and dark squares.
 
 ### D. Message pacing & heckles
-- [ ] Lines arrive on a **delay after the move** (not on the same frame), and
-      stagger when more than one is due.
-- [ ] Lower per-event probability so silence is normal and a line feels earned.
-- [ ] **Idle heckle:** if the *player* takes too long on their turn, an impatient
-      piece occasionally prods them ("We don't have all day…"). Rate-limited; only
-      from a piece with the temperament for it.
+- [x] Lines arrive on a **delay after the move** and stream one at a time.
+- [x] Lower per-event probability so silence is normal.
+- [x] **Idle heckle:** a restless piece prods the player if they dawdle
+      (rate-limited).
 
 ### E. Piece agency / opinions
-- [ ] **Cowardly refusal:** when the player targets a **dangerous** square for a
-      **timid** piece (moving into attack / hanging), the piece refuses the first
-      tap or two — snaps back with a complaint — and only goes on the ~3rd tap.
-      Resets per move; never permanently blocks a legal move.
-- [ ] **Reckless self-selection:** a reckless piece (e.g. a bold queen) will
-      occasionally **select itself** for a flashy/dangerous move, offering it up.
-- [ ] **Tactic suggestion:** when a genuinely strong move exists (fork, winning
-      capture, sound gambit), the piece involved may **select itself / highlight**
-      to suggest it. (Detect via engine eval or a light static check.)
-- [ ] **Sacrifice complaint:** if the player sends a piece into a losing capture,
-      it **complains and hops back once**, then obeys on the second confirm.
-- [ ] All agency respects legality and never soft-locks: after the allowed
-      resistance, the player's intent always wins.
+- [x] **Cowardly refusal:** a timid piece balks (shake) at a dangerous square and
+      only goes after ~3 taps; never soft-locks a legal move.
+- [x] **Sacrifice complaint:** any piece flinches once (hop) at an outright
+      sacrifice, then obeys on the second tap.
+- [x] **Self-suggestion:** occasionally a piece pre-selects itself for a strong
+      move (reckless pieces get a bolder line).
+- [~] **Tactic suggestion:** approximated by "clearly-winning capture"
+      (`bestOpportunity`). *Deferred: true fork/gambit detection.*
+- [~] **Reckless self-selection of a *dangerous* (not just winning) move.**
+      *Deferred: currently only winning captures are volunteered.*
+- [x] All agency respects legality; the player's intent always wins in the end.
 
 ### F. Movement animation
-- [ ] On move commit, **translate the piece** from origin → destination (currently
-      it teleports).
-- [ ] **Speed by temperament × risk:** brave/reckless → quick confident dash;
-      cowardly piece and/or risky move → slow, reluctant creep (maybe a small
-      hesitation before it commits).
-- [ ] Keep durations tasteful (~150–600ms); never so slow it feels laggy. Applies
-      to captures too (attacker slides in).
+- [x] Pieces **translate** origin → destination via TransitionGroup FLIP (dedicated
+      animated overlay), no more teleporting; captures slide in.
+- [x] **Speed by temperament × risk:** bold/reckless dash (~180ms), timid creep
+      (~500ms), risky moves ×1.7.
+- [~] Tasteful durations. *Deferred: an explicit hesitation pause before a timid
+      piece commits (currently just a longer duration).*
 
-### G. Supporting mechanics (enablers for the above)
-- [ ] Lightweight **move-risk assessment** (is the destination attacked by a
-      lesser/undefended piece? net material after the obvious recapture?) — reused
-      by refusal, sacrifice recoil, and tactic suggestion. Prefer a fast static
-      check via `chess.js` attackers; escalate to an engine eval only if needed.
-- [ ] **Player-idle timer** to drive heckles (reset on interaction).
-- [ ] Per-piece **interaction state** (e.g. refusal tap-count for the current
-      target) that resets cleanly on move / deselect / new game.
+### G. Supporting mechanics (enablers)
+- [x] Lightweight **move-risk assessment** via `chess.js` attackers (`assess.ts`) —
+      no engine round-trip; powers refusal, recoil, suggestion, travel speed.
+- [x] **Player-idle timer** driving heckles (reset on interaction).
+- [x] Per-piece **interaction state** (refusal tap-count) that resets on move /
+      deselect / new game.
+
+### Deferred (nice-to-have, not yet done)
+- True fork/tactic detection (beyond winning captures) for smarter suggestions.
+- Reckless pieces volunteering *risky* moves, not just winning ones.
+- A hesitation beat before a timid piece commits to a scary move.
 
 ---
 
