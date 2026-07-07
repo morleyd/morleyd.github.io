@@ -4,6 +4,52 @@
 > personality/animation vision and the punch-list of changes. Lives on the
 > `wizard-chess` branch.
 
+## STATUS / RESUME HERE (as of last session)
+
+**Shipped & deployed** to production (morleyd.github.io/wizard-chess): the game
+itself (native Vue board, negamax engine in a worker, now deterministic per
+position), the full social/personality layer (moods, bonds, dialogue with
+pacing + per-piece cooldown + dedup), chaos stunts (disguise/jetpack/cold-feet/
+tantrum/defector + enemy-initiated chaos), settings scalers (chatter/animation/
+hints/chaos + reduced-motion), team **trust meter** (persists), **good/bad advice**,
+the **box** (graveyard) under the board with a drag-off capture, **coax-back**,
+**vengeance** (a bonded friend's death → lasting vengeful state), timestamped
+chronological **move tracker**, **pregame conversations that form bonds**, a
+**constant cast with shuffled positions**, and the iOS pawn-glyph fix. No emojis.
+~38 unit + 4 Playwright e2e tests pass. Latest playtest bug fixed: pregame red
+glow (`vengefulUntil` default).
+
+### NEXT STEPS (from the latest playtest feedback — not yet done)
+
+Bounded logic/UX fixes (no new art needed) — do these first:
+- [ ] **Trust swings harder**: drop when the player loses a piece (bonded friends
+      voice losing faith), rise on captures and advancing pieces up the board;
+      bigger magnitudes. (Currently trust only scores the player's own move
+      quality; losing a piece isn't penalised.)
+- [ ] **Space out pregame banter** (it finishes in ~3s) — slower reveal cadence;
+      add an `interval` param to the view's `enqueue`/`pump`.
+- [ ] **Chaos offers only at dramatic moments**: offer jetpack/disguise only when
+      the stunt captures, gives check, or escapes an attack — not on any select.
+      (Edit `computeOffer` in `game.ts` to filter targets to "dramatic" ones.)
+- [ ] **Trapped back-row breakout**: a piece idle a very long time shoves past its
+      own pawn, swapping both (new spontaneous stunt in `game.ts`).
+- [ ] **Rage payoff**: a vengeful/raging piece can unleash a **rage-strike** on an
+      adjacent enemy (offered action, `offer.type: 'rage'` → `knockOff`), so the
+      red state actually does something.
+
+Big visual pass (needs the decision below, do as a focused effort):
+- [ ] **Migrate unicode glyphs → real piece images** (enabler). Lets us overlay
+      jetpack/glasses/flame accessories for clear stunt storytelling. Candidate
+      art: the Wikipedia SVG/PNG set already in `~/git/chess-ai/img/chesspieces/`.
+      **DECISION NEEDED from David: which piece art / style.**
+- [ ] **Capture "escort" animation**: the capturing piece accompanies the captured
+      one to the box and returns to its square (replace the tumble-and-vanish).
+      Best done after the image migration / with a JS-orchestrated flight overlay.
+
+Deferred canon: **smash/drag-off capture** (partly done via drag-off), pep-talk
+entourage (multi-piece turn), body swap, a **trust arc that visibly unlocks less
+back-talk**, a trust **reset** control.
+
 ## Canon survey — what Wizard's Chess actually is (HP books/films)
 
 The magical variant from Harry Potter, for grounding our feature choices:
