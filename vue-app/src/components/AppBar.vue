@@ -20,6 +20,7 @@ const gamesRouteNames = new Set([
   'wordle-helper',
   'gradient-sort',
   'snake',
+  'minesweeper',
   'time-since',
 ])
 

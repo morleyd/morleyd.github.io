@@ -42,6 +42,12 @@ const router = createRouter({
       meta: { gamePage: true },
     },
     {
+      path: '/minesweeper',
+      name: 'minesweeper',
+      component: () => import('../views/MinesweeperView.vue'),
+      meta: { gamePage: true },
+    },
+    {
       path: '/time-since',
       name: 'time-since',
       component: () => import('../views/TimeSinceView.vue'),

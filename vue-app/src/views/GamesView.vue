@@ -57,6 +57,15 @@ const games: GameCard[] = [
     gradient: 'linear-gradient(135deg, rgba(142, 36, 170, 0.42), rgba(52, 211, 153, 0.22))',
   },
   {
+    key: 'minesweeper',
+    title: 'Minesweeper',
+    description:
+      'Clear the board without detonating a mine. Use the number clues to deduce where the mines hide.',
+    icon: 'mdi-mine',
+    to: '/minesweeper',
+    gradient: 'linear-gradient(135deg, rgba(142, 36, 170, 0.42), rgba(248, 113, 113, 0.24))',
+  },
+  {
     key: 'time-since',
     title: 'Time Since',
     description:
