@@ -251,7 +251,7 @@ const projects: Project[] = [
     description: "Starting in 2021, I've found a new passion for using the other part of my brain to create",
     image: '/images/project/painter.png',
     classes: '',
-    link: '/artwork',
+    link: '/gallery',
   },
 ]
 
@@ -268,8 +268,12 @@ function setFilter(filter: string) {
 
 function openDialog(project: Project) {
   if (project.link) {
-    // Navigate to external link
-    window.location.href = project.link
+    // Internal app route → client-side nav; external → full navigation
+    if (project.link.startsWith('/')) {
+      router.push(project.link)
+    } else {
+      window.location.href = project.link
+    }
     return
   }
   selectedProject.value = project

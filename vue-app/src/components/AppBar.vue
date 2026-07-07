@@ -33,7 +33,7 @@ const activeTab = computed(() => (gamesRouteNames.has(route.name) ? 'games' : ro
     <!-- Desktop Tabs -->
     <v-tabs v-if="!mobile" :model-value="activeTab" bg-color="transparent" color="orange-lighten-3" align-tabs="end">
       <template v-for="item in menuItems" :key="item.value">
-        <v-tab :prepend-icon="item.icon" :value="item.value" :to="{ name: item.value }">
+        <v-tab :prepend-icon="item.icon" :value="item.value" :to="{ name: item.value }" :ripple="false">
           {{ item.title }}
         </v-tab>
       </template>

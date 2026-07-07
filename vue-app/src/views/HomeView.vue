@@ -2,7 +2,6 @@
 import Timeline from '@/components/Timeline.vue';
 import Projects from '../components/Projects.vue';
 import Awards from '../components/Awards.vue';
-import Artwork from '../components/Artwork.vue';
 
 </script>
 <template>
@@ -10,6 +9,5 @@ import Artwork from '../components/Artwork.vue';
     <Timeline />
     <Projects />
     <Awards />
-    <Artwork />
   </v-card>
 </template>
