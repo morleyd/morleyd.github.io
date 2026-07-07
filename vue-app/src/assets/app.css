@@ -66,6 +66,40 @@
   font-weight: 600;
 }
 
+/* Lights Out lookup table rows */
+.game-info .lookup-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 3px 0;
+}
+.game-info .lookup-head {
+  font-size: 0.72rem;
+  opacity: 0.65;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.game-info .mini {
+  display: inline-flex;
+  gap: 3px;
+}
+.game-info .mini i {
+  width: 15px;
+  height: 15px;
+  border-radius: 3px;
+  background: rgba(148, 163, 184, 0.18);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+}
+.game-info .mini i.on {
+  background: #fbbf24;
+  border-color: #fbbf24;
+}
+.game-info .mini i.press {
+  background: transparent;
+  border: 2px solid #c084fc;
+}
+
 @media (max-width: 600px) {
   .page-title {
     font-size: 1.5rem;

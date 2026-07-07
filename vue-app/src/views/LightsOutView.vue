@@ -119,6 +119,53 @@ const setSize = (v: number) => {
   newGame()
 }
 
+// Precompute the "light-chasing" lookup: after chasing top→bottom, which top-row
+// cells to press for each possible leftover bottom-row pattern.
+const chaseTable = (n: number) => {
+  const nb = (i: number) => {
+    const x = i % n
+    const y = Math.floor(i / n)
+    const o: number[] = []
+    if (x > 0) o.push(i - 1)
+    if (x < n - 1) o.push(i + 1)
+    if (y > 0) o.push(i - n)
+    if (y < n - 1) o.push(i + n)
+    return o
+  }
+  const pressAt = (b: number[], i: number) => {
+    b[i] ^= 1
+    for (const j of nb(i)) b[j] ^= 1
+  }
+  const map = new Map<string, number[]>()
+  for (let mask = 0; mask < 1 << n; mask += 1) {
+    const b = new Array(n * n).fill(0)
+    const cols: number[] = []
+    for (let c = 0; c < n; c += 1) {
+      if ((mask >> c) & 1) {
+        pressAt(b, c)
+        cols.push(c)
+      }
+    }
+    for (let r = 0; r < n - 1; r += 1) {
+      for (let c = 0; c < n; c += 1) {
+        const i = r * n + c
+        if (b[i]) pressAt(b, i + n)
+      }
+    }
+    let key = ''
+    for (let c = 0; c < n; c += 1) key += b[(n - 1) * n + c]
+    if (key === '0'.repeat(n)) continue
+    if (!map.has(key) || (map.get(key) as number[]).length > cols.length) map.set(key, cols)
+  }
+  return [...map.entries()]
+    .map(([key, cols]) => ({
+      leftover: key.split('').map(Number),
+      presses: Array.from({ length: n }, (_, c) => (cols.includes(c) ? 1 : 0)),
+    }))
+    .sort((a, b) => parseInt(a.leftover.join(''), 2) - parseInt(b.leftover.join(''), 2))
+}
+const lookupTables = [3, 4, 5].map((n) => ({ n, rows: chaseTable(n) }))
+
 const share = async () => {
   const url = window.location.origin + route.fullPath
   const line = solved.value
@@ -174,6 +221,27 @@ onMounted(() => {
           <li>Solving is just <span class="k">A x = b</span> over GF(2), where A is the toggle matrix and b is the lit pattern.</li>
           <li>The <span class="k">null space</span> of A gives the "quiet patterns" (presses that change nothing) — adding them yields all solutions. The one with the fewest presses is the optimal shown here.</li>
         </ul>
+
+        <h3>Bottom-row lookup tables</h3>
+        <p>After chasing top→bottom, match the lights left in the <em>bottom row</em>, press the marked <em>top-row</em> cells, and chase down once more.</p>
+        <v-expansion-panels variant="accordion" class="mt-1 mb-2">
+          <v-expansion-panel v-for="tbl in lookupTables" :key="tbl.n">
+            <v-expansion-panel-title>{{ tbl.n }}×{{ tbl.n }}</v-expansion-panel-title>
+            <v-expansion-panel-text>
+              <p v-if="tbl.rows.length === 0" class="text-body-2 mb-0">
+                Light-chasing alone always clears a {{ tbl.n }}×{{ tbl.n }} board — no top-row presses needed. 🎉
+              </p>
+              <template v-else>
+                <div class="lookup-row lookup-head"><span>Bottom row left</span><span>Press on top</span></div>
+                <div v-for="(row, ri) in tbl.rows" :key="ri" class="lookup-row">
+                  <span class="mini"><i v-for="(v, ci) in row.leftover" :key="ci" :class="{ on: v }"></i></span>
+                  <span class="mini"><i v-for="(v, ci) in row.presses" :key="ci" :class="{ press: v }"></i></span>
+                </div>
+              </template>
+            </v-expansion-panel-text>
+          </v-expansion-panel>
+        </v-expansion-panels>
+        <p class="text-caption">6×6 and 7×7 use the same idea, but their tables have 63 and 127 entries — lean on chasing plus the solver's optimal instead.</p>
       </template>
     </GameToolbar>
 

@@ -19,25 +19,33 @@ export function useSquareFit(reserveBottom = 80) {
     const cs = getComputedStyle(parent)
     const availW = parent.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
     const top = node.getBoundingClientRect().top
-    const availH = window.innerHeight - top - reserveBottom
+    // visualViewport is the most accurate "visible" height on iOS (accounts for
+    // the address bar); fall back to innerHeight elsewhere.
+    const viewportH = window.visualViewport?.height ?? window.innerHeight
+    const availH = viewportH - top - reserveBottom
     px.value = Math.max(140, Math.floor(Math.min(availW, availH)))
   }
 
   const onResize = () => recompute()
+  const vv = window.visualViewport
 
   onMounted(() => {
     recompute()
     // Re-measure after layout/fonts settle and after the address bar animates.
     requestAnimationFrame(recompute)
     setTimeout(recompute, 150)
+    setTimeout(recompute, 500)
     window.addEventListener('resize', onResize)
     window.addEventListener('orientationchange', onResize)
-    // orientation changes report the new size a beat later on some browsers
-    window.addEventListener('orientationchange', () => setTimeout(recompute, 250))
+    window.addEventListener('orientationchange', () => setTimeout(recompute, 300))
+    vv?.addEventListener('resize', onResize)
+    vv?.addEventListener('scroll', onResize)
   })
   onBeforeUnmount(() => {
     window.removeEventListener('resize', onResize)
     window.removeEventListener('orientationchange', onResize)
+    vv?.removeEventListener('resize', onResize)
+    vv?.removeEventListener('scroll', onResize)
   })
 
   return { el, px, recompute }
