@@ -91,7 +91,7 @@ export function createSociety(chess: Chess, rng: Rng): Society {
         kills: 0,
         bonds: {},
         avenging: null,
-        vengefulUntil: 0,
+        vengefulUntil: -1, // -1 = never; must be > 0 or ply-0 pieces all read "vengeful"
       }
       bySquare[square] = id
     })
