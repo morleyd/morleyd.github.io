@@ -30,6 +30,11 @@ const router = createRouter({
       component: () => import('../views/WordleHelperView.vue'),
     },
     {
+      path: '/gradient-sort',
+      name: 'gradient-sort',
+      component: () => import('../views/GradientSortView.vue'),
+    },
+    {
       path: '/time-since',
       name: 'time-since',
       component: () => import('../views/TimeSinceView.vue'),

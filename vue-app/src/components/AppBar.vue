@@ -14,7 +14,13 @@ const menuItems = [
 ];
 
 // Routes that live under the "Games" section, so that nav entry stays highlighted.
-const gamesRouteNames = new Set(['games', 'wordle', 'wordle-helper', 'time-since'])
+const gamesRouteNames = new Set([
+  'games',
+  'wordle',
+  'wordle-helper',
+  'gradient-sort',
+  'time-since',
+])
 
 // One-way highlight only. Navigation is handled by router-link (`to`) on each item,
 // which avoids v-tabs firing a spurious push to the first tab during mount.

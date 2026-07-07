@@ -39,6 +39,15 @@ const games: GameCard[] = [
     tiles: tiles('CHEAT', ['present', 'present', 'correct', 'correct', 'absent']),
   },
   {
+    key: 'gradient-sort',
+    title: 'Gradient Sort',
+    description:
+      'Rearrange a scrambled grid of colors back into a smooth gradient in as few swaps as possible.',
+    icon: 'mdi-view-grid-outline',
+    to: '/gradient-sort',
+    gradient: 'linear-gradient(135deg, hsl(0, 70%, 55%), hsl(140, 68%, 48%), hsl(255, 70%, 58%))',
+  },
+  {
     key: 'time-since',
     title: 'Time Since',
     description:
