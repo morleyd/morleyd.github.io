@@ -143,7 +143,8 @@ const status = computed(() => {
   if (game.chess.isCheckmate()) return game.turn === 'w' ? 'Checkmate — your king has fallen.' : 'Checkmate! You win. 🎉'
   if (game.chess.isStalemate()) return 'Stalemate — a stiff, awkward draw.'
   if (game.chess.isDraw()) return "It's a draw. Everyone lives to bicker another day."
-  if (game.aiThinking) return 'The enemy is plotting…'
+  // Black's turn (engine thinking, or the brief hand-off before it starts).
+  if (game.turn !== 'w' || game.aiThinking) return 'The enemy is plotting…'
   if (selectedName.value) return `Holding ${selectedName.value} — pick a square.`
   if (game.chess.isCheck()) return 'You are in check!'
   return 'Your move.'
@@ -290,7 +291,7 @@ onBeforeUnmount(() => {
     <div class="wc-layout">
       <div class="wc-board-col">
         <div class="d-flex align-center justify-space-between mb-2" style="min-height: 28px">
-          <div class="text-body-2">
+          <div class="text-body-2" data-testid="status">
             <v-icon v-if="thinking" icon="mdi-loading" class="spin" size="small" />
             {{ status }}
           </div>
@@ -301,6 +302,7 @@ onBeforeUnmount(() => {
             v-for="(cell, i) in cells"
             :key="i"
             class="sq"
+            :data-square="squareOf(i)"
             :class="{
               dark: ((i % 8) + Math.floor(i / 8)) % 2 === 1,
               sel: squareOf(i) === selectedSquare,
