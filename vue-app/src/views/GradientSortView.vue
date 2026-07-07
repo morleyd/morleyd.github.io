@@ -7,6 +7,7 @@
  * Moves are tracked against the optimal (min swaps = movable − cycles).
  */
 import { computed, onMounted, ref, watch } from 'vue'
+import GameToolbar from '@/components/GameToolbar.vue'
 
 type RGB = [number, number, number]
 interface Palette {
@@ -137,28 +138,27 @@ onMounted(newGame)
 
 <template>
   <v-container class="py-6" max-width="720">
-    <div class="mb-4">
-      <h1 class="page-title">Gradient Sort</h1>
-      <p class="text-body-1 text-medium-emphasis">
+    <GameToolbar title="Gradient Sort">
+      <template #intro>
         Every tile is a step in a smooth gradient. The four corners are locked as anchors — drag (or
         tap two) to swap the rest back into order.
-      </p>
-    </div>
-
-    <!-- Settings -->
-    <div class="d-flex align-center flex-wrap ga-6 mb-4">
-      <div class="slider-wrap">
-        <label class="text-caption text-medium-emphasis">Rows: {{ rows }}</label>
-        <v-slider v-model="rows" :min="3" :max="8" :step="1" hide-details density="compact" thumb-label />
-      </div>
-      <div class="slider-wrap">
-        <label class="text-caption text-medium-emphasis">Columns: {{ cols }}</label>
-        <v-slider v-model="cols" :min="3" :max="8" :step="1" hide-details density="compact" thumb-label />
-      </div>
-      <v-btn variant="tonal" color="primary" prepend-icon="mdi-shuffle-variant" @click="newGame">
-        New game
-      </v-btn>
-    </div>
+      </template>
+      <template #settings>
+        <div class="d-flex align-center flex-wrap ga-6">
+          <div class="slider-wrap">
+            <label class="text-caption text-medium-emphasis">Rows: {{ rows }}</label>
+            <v-slider v-model="rows" :min="3" :max="8" :step="1" hide-details density="compact" thumb-label />
+          </div>
+          <div class="slider-wrap">
+            <label class="text-caption text-medium-emphasis">Columns: {{ cols }}</label>
+            <v-slider v-model="cols" :min="3" :max="8" :step="1" hide-details density="compact" thumb-label />
+          </div>
+          <v-btn variant="tonal" color="primary" prepend-icon="mdi-shuffle-variant" @click="newGame">
+            New game
+          </v-btn>
+        </div>
+      </template>
+    </GameToolbar>
 
     <!-- Scoreboard -->
     <div class="d-flex align-center justify-space-between mb-3">

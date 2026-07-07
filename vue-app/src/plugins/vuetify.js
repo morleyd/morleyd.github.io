@@ -26,7 +26,7 @@ export const vuetify = createVuetify({
           background: '#020617',
           surface: '#0f172a',
           primary: '#8e24aa', // purple, matches the app bar
-          secondary: '#a78bfa',
+          secondary: '#fbbf24', // warm gold accent
         },
       },
     },

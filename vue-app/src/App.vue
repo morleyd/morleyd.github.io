@@ -1,9 +1,18 @@
 <script setup>
+import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useDisplay } from 'vuetify'
 import AppBar from '@/components/AppBar.vue'
 
 const route = useRoute()
 const router = useRouter()
+const { mobile } = useDisplay()
+
+// Hide the top bar when a route opts out entirely (Wordle) or, for game pages,
+// on mobile only — where vertical space is tight (desktop keeps the nav).
+const hideAppBar = computed(
+  () => route.meta.hideAppBar || (route.meta.gamePage && mobile.value),
+)
 
 function navTo(value) {
   router.push({ name: value })
@@ -12,7 +21,7 @@ function navTo(value) {
 
 <template>
   <v-app>
-    <AppBar v-if="!route.meta.hideAppBar" />
+    <AppBar v-if="!hideAppBar" />
 
     <v-main>
       <router-view />

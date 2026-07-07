@@ -33,6 +33,13 @@ const router = createRouter({
       path: '/gradient-sort',
       name: 'gradient-sort',
       component: () => import('../views/GradientSortView.vue'),
+      meta: { gamePage: true },
+    },
+    {
+      path: '/snake',
+      name: 'snake',
+      component: () => import('../views/SnakeView.vue'),
+      meta: { gamePage: true },
     },
     {
       path: '/time-since',
@@ -43,6 +50,11 @@ const router = createRouter({
       path: '/gallery',
       name: 'gallery',
       component: () => import('../views/GalleryView.vue'),
+    },
+    {
+      path: '/:pathMatch(.*)*',
+      name: 'not-found',
+      component: () => import('../views/NotFoundView.vue'),
     },
   ],
 })

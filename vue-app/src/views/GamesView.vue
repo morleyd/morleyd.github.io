@@ -48,6 +48,15 @@ const games: GameCard[] = [
     gradient: 'linear-gradient(135deg, hsl(0, 70%, 55%), hsl(140, 68%, 48%), hsl(255, 70%, 58%))',
   },
   {
+    key: 'snake',
+    title: 'Snake',
+    description:
+      'The classic: guide the snake to eat and grow without hitting the walls or yourself. Keyboard, d-pad, or swipe.',
+    icon: 'mdi-snake',
+    to: '/snake',
+    gradient: 'linear-gradient(135deg, rgba(142, 36, 170, 0.42), rgba(52, 211, 153, 0.22))',
+  },
+  {
     key: 'time-since',
     title: 'Time Since',
     description:
