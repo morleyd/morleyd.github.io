@@ -64,3 +64,16 @@ export function bestOpportunity(fen: string, color: Color): Opportunity | null {
   }
   return best
 }
+
+/** The move that loses the most material — for a piece's confident *bad* advice. */
+export function worstBlunder(fen: string, color: Color): Opportunity | null {
+  const c = new Chess(fen)
+  if (c.turn() !== color) return null
+  let worst: Opportunity | null = null
+  for (const m of c.moves({ verbose: true })) {
+    const r = assessMove(fen, m.from, m.to)
+    const value = r.gain - r.risk // negative = throws material away
+    if (value <= -3 && (!worst || value < worst.value)) worst = { from: m.from, to: m.to, value, ...r }
+  }
+  return worst
+}

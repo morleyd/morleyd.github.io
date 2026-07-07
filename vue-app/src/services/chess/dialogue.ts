@@ -378,6 +378,14 @@ const SUGGEST_RECKLESS = [
   'Glory or nothing. Choose me, choose me!',
   "Let's do something gloriously reckless. Me. Now.",
 ]
+// Confident, wrong. Pieces that don't trust your generalship shout bad ideas.
+const BAD_ADVICE = [
+  'Trust me — send me forward. What could go wrong?',
+  "I've got a brilliant plan. Just move me out here. Brilliant, I say!",
+  "Pick me! This is definitely, absolutely the winning move.",
+  "Ignore the others — MY instincts are never wrong. Usually.",
+  "Bold move incoming! Put me right in the thick of it.",
+]
 const HECKLE = [
   "We don't have all day, you know.",
   'Any... century now?',
@@ -389,6 +397,7 @@ const HECKLE = [
 export const resistLine = (kind: 'refuse' | 'sacrifice', rng: Rng): string =>
   pick(kind === 'sacrifice' ? RESIST_SACRIFICE : RESIST_REFUSE, rng)
 export const suggestLine = (reckless: boolean, rng: Rng): string => pick(reckless ? SUGGEST_RECKLESS : SUGGEST, rng)
+export const badAdviceLine = (rng: Rng): string => pick(BAD_ADVICE, rng)
 export const heckleLine = (rng: Rng): string => pick(HECKLE, rng)
 
 /** A piece's self-introduction (used on click / at game start). */

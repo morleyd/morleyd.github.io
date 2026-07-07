@@ -26,10 +26,12 @@ The magical variant from Harry Potter, for grounding our feature choices:
   trust you yet. → a possible "relationship with the whole army" meta-arc.
 - **Command notation.** Players use algebraic notation. → our move tracker mirrors this.
 
-Design implications we're acting on: the **coax-a-fled-piece-back** window (canon:
-players could talk a reluctant piece around), and reinforcing the **grief→rage**
-beat. Deferred canonical ideas: a real **smash capture** animation; a **trust meter**
-that grows and unlocks less back-talk; **bad advice** (not just good suggestions).
+Design implications, now shipped: the **coax-a-fled-piece-back** window, the
+**grief→rage** beat (vengeance), a persistent **team trust meter** that shifts with
+your play and gates how much the pieces argue, **good and bad advice** (bad advice
+grows as trust falls), and the **box** (graveyard of the fallen). The remaining big
+canonical beat is a real **smash / drag-off capture animation** (right now captures
+just fade).
 
 Sources: [HP Wiki — Wizard's Chess](https://harrypotter.fandom.com/wiki/Wizard's_Chess),
 [HP Lexicon](https://potterlex.com/wizard_s_chess),

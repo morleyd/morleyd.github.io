@@ -31,3 +31,29 @@ export function saveSettings(s: WizardSettings): void {
     /* ignore */
   }
 }
+
+// The team's trust in the player (0–100). Starts at 50 and persists across games:
+// it's the whole army's growing (or souring) opinion of your generalship.
+const TRUST_KEY = 'wizard-chess-trust'
+export const DEFAULT_TRUST = 50
+
+export function loadTrust(): number {
+  try {
+    const raw = typeof localStorage !== 'undefined' && localStorage.getItem(TRUST_KEY)
+    if (raw != null) {
+      const n = Number(raw)
+      if (Number.isFinite(n)) return Math.max(0, Math.min(100, n))
+    }
+  } catch {
+    /* ignore */
+  }
+  return DEFAULT_TRUST
+}
+
+export function saveTrust(t: number): void {
+  try {
+    localStorage.setItem(TRUST_KEY, String(Math.round(t)))
+  } catch {
+    /* ignore */
+  }
+}

@@ -10,8 +10,8 @@
 import { Chess } from 'chess.js'
 import { rngFromSeed } from '../seed'
 import { applyMove, createSociety, scanBoard, soulAt, type Society } from './social'
-import { createDialogueState, heckleLine, resistLine, speak, suggestLine, type DialogueState } from './dialogue'
-import { assessMove, bestOpportunity, PIECE_VALUE } from './assess'
+import { badAdviceLine, createDialogueState, heckleLine, resistLine, speak, suggestLine, type DialogueState } from './dialogue'
+import { assessMove, bestOpportunity, PIECE_VALUE, worstBlunder } from './assess'
 import {
   adjacentSquares,
   applyChaosMove,
@@ -21,7 +21,7 @@ import {
   knockOff,
   materialBalance,
 } from './chaos'
-import { DEFAULT_SETTINGS, type WizardSettings } from './settings'
+import { DEFAULT_SETTINGS, DEFAULT_TRUST, type WizardSettings } from './settings'
 import type { Color, GameEvent, MoveEntry, PieceSoul, PieceType, Square, Utterance } from './types'
 
 export const PLAYER: Color = 'w'
@@ -73,6 +73,8 @@ export class WizardGame {
   lastMoverId: string | null = null
   lastMoveRisky = false
   moveLog: MoveEntry[] = [] // timestamped notation for every ply, chaos included
+  graveyard: string[] = [] // soul ids in the order they fell ("the box")
+  trust = DEFAULT_TRUST // team's trust in the player (0–100); persists across games
   settings: WizardSettings = { ...DEFAULT_SETTINGS }
   private startTime = nowMs()
   private dialogue: DialogueState
@@ -98,6 +100,21 @@ export class WizardGame {
   private logMove(san: string, side: Color, chaos: boolean) {
     this.moveLog.push({ san, ts: this.now(), side, chaos })
   }
+  private setTrust(v: number) {
+    this.trust = Math.max(0, Math.min(100, v))
+  }
+  /** Nudge the team's trust by the quality of the player's just-made move. */
+  private scoreTrust(before: string, from: Square, to: Square) {
+    const r = assessMove(before, from, to)
+    let d = 0
+    if (r.sacrifice) d -= 6
+    else if (r.hanging) d -= 4
+    else if (r.gain - r.risk >= 2) d += 3
+    else d += 0.5
+    const chance = bestOpportunity(before, PLAYER)
+    if (chance && r.gain < chance.gain - 1) d -= 2 // left free material on the board
+    this.setTrust(this.trust + d)
+  }
 
   reset(seed: string, fen?: string) {
     this.seed = seed
@@ -112,6 +129,7 @@ export class WizardGame {
     this.lastMoverId = null
     this.lastMoveRisky = false
     this.moveLog = []
+    this.graveyard = []
     this.startTime = nowMs()
     this.introduced.clear()
     this.resist = null
@@ -207,7 +225,12 @@ export class WizardGame {
     if (this.chess.isCheckmate() && moverId) events.push({ kind: 'checkmate', soulId: moverId, salience: 120 })
     else if (this.chess.isCheck() && moverId) events.push({ kind: 'check', soulId: moverId, salience: 54 })
 
+    // Game verdict swings trust several notches (the side to move is the loser).
+    if (this.chess.isCheckmate()) this.setTrust(this.trust + (this.chess.turn() !== PLAYER ? 15 : -15))
+    else if (this.chess.isDraw() || this.chess.isStalemate()) this.setTrust(this.trust - 3)
+
     this.logMove(move.san, move.color as Color, false)
+    for (const e of events) if (e.kind === 'captured') this.graveyard.push(e.soulId)
     if (this.spooked && this.spooked.soulId === moverId) this.spooked = null // it left on its own
 
     // Record who moved and whether it looked risky, for the travel animation.
@@ -287,7 +310,9 @@ export class WizardGame {
       if (!this.resist || this.resist.from !== this.selected || this.resist.to !== square) {
         const risk = assessMove(this.chess.fen(), this.selected, square)
         let need = soul ? requiredTaps(soul, risk) : 1
-        if (need > 1 && this.rng() > this.settings.agency) need = 1
+        // Low trust → pieces push back more; high trust → they defer to you.
+        const resistChance = this.settings.agency * (1.4 - this.trust / 100)
+        if (need > 1 && this.rng() > resistChance) need = 1
         this.resist = { from: this.selected, to: square, count: 0, need, sacrifice: risk.sacrifice }
       }
       this.resist.count += 1
@@ -311,10 +336,13 @@ export class WizardGame {
       }
 
       this.resist = null
+      const before = this.chess.fen()
+      const from = this.selected
       try {
-        const move = this.chess.move({ from: this.selected, to: square, promotion: 'q' })
+        const move = this.chess.move({ from, to: square, promotion: 'q' })
         this.selected = null
         this.offer = null
+        this.scoreTrust(before, from, square)
         return { moved: true, utterances: this.applyAndVoice(move) }
       } catch {
         this.selected = null
@@ -469,6 +497,7 @@ export class WizardGame {
           v.square = null
         }
         delete this.society.bySquare[target]
+        this.graveyard.push(victimId)
       }
       this.usedStunts.add('tantrum')
       this.lastFrom = null
@@ -567,6 +596,7 @@ export class WizardGame {
         v.square = null
       }
       delete this.society.bySquare[to]
+      this.graveyard.push(victimId)
     }
     if (moverId) {
       delete this.society.bySquare[from]
@@ -593,27 +623,53 @@ export class WizardGame {
   }
 
   /**
-   * Occasionally a piece pipes up to volunteer for a strong move, pre-selecting
-   * itself. Rare (cooldown + chance). Returns the line, or null.
+   * Occasionally a piece pipes up and pre-selects itself with advice — GOOD (a
+   * real opportunity) or, when the team doesn't trust your generalship, confident
+   * BAD advice (a blundering move). Rare (cooldown + chance).
    */
   suggest(): Utterance | null {
     if (!this.canPlay || this.selected) return null
     if (this.settings.agency <= 0) return null
     if (this.society.ply - this.lastSuggestPly < 8) return null
-    if (this.rng() > this.settings.agency * 0.4) return null
-    const opp = bestOpportunity(this.chess.fen(), PLAYER)
-    if (!opp) return null
-    const soul = this.soulAt(opp.from)
+    if (this.rng() > this.settings.agency * 0.45) return null
+
+    const fen = this.chess.fen()
+    const badChance = ((100 - this.trust) / 100) * 0.7 // a wary army shouts bad ideas
+    const wantBad = this.rng() < badChance
+    let from: Square | null = null
+    let bad = false
+    if (wantBad) {
+      const b = worstBlunder(fen, PLAYER)
+      if (b) {
+        from = b.from
+        bad = true
+      }
+    }
+    if (!from) {
+      const o = bestOpportunity(fen, PLAYER)
+      if (o) from = o.from
+    }
+    if (!from) {
+      // fall back to whatever advice exists
+      const b = worstBlunder(fen, PLAYER)
+      if (b) {
+        from = b.from
+        bad = true
+      }
+    }
+    if (!from) return null
+
+    const soul = this.soulAt(from)
     if (!soul) return null
-    this.selected = opp.from
+    this.selected = from
     this.lastSuggestPly = this.society.ply
     const reckless = (soul.persona.recklessness ?? 0.3) > 0.6
     return {
       soulId: soul.id,
-      square: opp.from,
+      square: from,
       color: soul.color,
       name: soul.persona.name,
-      text: suggestLine(reckless, this.rng),
+      text: bad ? badAdviceLine(this.rng) : suggestLine(reckless, this.rng),
       tone: 'gloat',
     }
   }
@@ -633,6 +689,14 @@ export class WizardGame {
       text: heckleLine(this.rng),
       tone: 'angry',
     }
+  }
+
+  /** The fallen, in the order they were taken — for the graveyard ("the box"). */
+  fallen(): { id: string; name: string; type: PieceType; color: Color }[] {
+    return this.graveyard
+      .map((id) => this.society.souls[id])
+      .filter(Boolean)
+      .map((s) => ({ id: s.id, name: s.persona.name, type: s.type, color: s.color }))
   }
 
   /** Names of the player's surviving pieces (for the share message). */

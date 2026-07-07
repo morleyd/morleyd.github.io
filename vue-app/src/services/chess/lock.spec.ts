@@ -20,14 +20,22 @@ function aiTurn(g: WizardGame) {
 function tryWhiteMove(g: WizardGame, legal: { from: string; to: string }[]): boolean {
   // Try legal moves until one actually commits (resistance needs a few taps;
   // a spooked piece may divert a tap to a coax, so fall through to another move).
-  for (const mv of legal.slice(0, 6)) {
-    g.playerTap(mv.from)
-    for (let i = 0; i < 4; i += 1) {
+  for (const mv of legal.slice(0, 8)) {
+    if (g.selected !== mv.from) g.playerTap(mv.from) // select (don't toggle off an already-selected piece)
+    for (let i = 0; i < 5; i += 1) {
       if (g.playerTap(mv.to).moved) return true
     }
   }
   return false
 }
+
+describe('engine determinism', () => {
+  it('returns the same move for the same position (reproducible games)', () => {
+    const fen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
+    expect(chooseMove(fen, 4)).toEqual(chooseMove(fen, 4))
+    expect(chooseMove(fen, 1)).toEqual(chooseMove(fen, 1))
+  })
+})
 
 describe('turn lock', () => {
   it('White can always move on its turn, across many chaotic games', () => {

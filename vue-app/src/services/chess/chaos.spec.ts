@@ -115,5 +115,7 @@ describe('chaos offers and limits (controller)', () => {
     const lines = g.aiApply({ from: 'b5', to: 'd4' })
     expect(Object.values(g.states())).toContain('vengeful')
     expect(lines.some((l) => l.text.includes(victim.persona.name))).toBe(true)
+    // The fallen pawn is now in the box.
+    expect(g.fallen().map((f) => f.id)).toContain(victim.id)
   })
 })

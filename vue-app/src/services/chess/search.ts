@@ -10,6 +10,7 @@
  * so this can be swapped for Stockfish later without touching callers.
  */
 import { Chess } from 'chess.js'
+import { mulberry32, strToSeed } from '../seed'
 import type { EngineMove, PieceType } from './types'
 
 const VALUE: Record<PieceType, number> = { p: 100, n: 320, b: 330, r: 500, q: 900, k: 20000 }
@@ -183,8 +184,12 @@ export function chooseMove(fen: string, level: number): EngineMove | null {
   const spec = LEVELS[Math.min(LEVELS.length - 1, Math.max(0, level - 1))]
   const sign = chess.turn() === 'w' ? 1 : -1
 
-  if (spec.blunder > 0 && Math.random() < spec.blunder) {
-    const m = legal[Math.floor(Math.random() * legal.length)]
+  // Seed randomness from the position so the engine is deterministic per (fen,
+  // level): a given seed + move list reproduces the whole game (shareable, and
+  // it makes a scripted "test game" reliable).
+  const rng = mulberry32(strToSeed(fen + level))
+  if (spec.blunder > 0 && rng() < spec.blunder) {
+    const m = legal[Math.floor(rng() * legal.length)]
     return { from: m.from, to: m.to, promotion: m.promotion }
   }
 

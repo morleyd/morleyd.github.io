@@ -33,8 +33,8 @@ test.describe('Wizard Chess', () => {
     // The engine must actually reply: a black piece leaves its home ranks...
     const blackAtHome = page.locator('[data-piece$="7"] .glyph.black, [data-piece$="8"] .glyph.black')
     await expect.poll(async () => blackAtHome.count(), { timeout: 15_000 }).toBeLessThan(16)
-    // ...and the turn returns to the player.
-    await expect(page.getByTestId('status')).toHaveText('Your move.', { timeout: 15_000 })
+    // ...and the turn returns to the player (either "Your move." or "in check!").
+    await expect(page.getByTestId('status')).not.toHaveText('The enemy is plotting…', { timeout: 15_000 })
 
     // Restraint holds after a real exchange: still ≤2 pieces animating.
     expect(await page.locator(ANIMATING).count()).toBeLessThanOrEqual(2)

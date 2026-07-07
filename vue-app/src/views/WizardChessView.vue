@@ -15,7 +15,7 @@ import { randomSeed } from '@/services/seed'
 import { Engine } from '@/services/chess/engine'
 import { WizardGame } from '@/services/chess/game'
 import { TYPE_NAME } from '@/services/chess/profiles'
-import { loadSettings, saveSettings } from '@/services/chess/settings'
+import { loadSettings, loadTrust, saveSettings, saveTrust } from '@/services/chess/settings'
 import type { Color, PieceType, Square, Utterance } from '@/services/chess/types'
 
 const route = useRoute()
@@ -44,6 +44,10 @@ const game = new WizardGame(initialSeed)
 const settings = ref(loadSettings())
 game.settings = settings.value
 watch(settings, (s) => saveSettings(s), { deep: true })
+
+// The team's trust persists across games; the controller mutates game.trust as
+// you play, so save it whenever the board version bumps.
+game.trust = loadTrust()
 
 const code = ref(initialSeed)
 const level = ref(3)
@@ -243,6 +247,23 @@ const moveRows = computed(() => {
 const STATE_ICON: Record<string, string> = { vengeful: '🔥', spooked: '😨' }
 const pieceStates = computed(() => (version.value, game.states()))
 const coaxSquare = computed(() => (version.value, game.coaxTarget()))
+
+// Team trust (persists across games): its opinion of your generalship.
+const trustPct = computed(() => (version.value, Math.round(game.trust)))
+const trustLabel = computed(() => {
+  const t = trustPct.value
+  if (t < 20) return 'Mutinous'
+  if (t < 40) return 'Wary'
+  if (t < 60) return 'Uneasy'
+  if (t < 80) return 'Loyal'
+  return 'Devoted'
+})
+const trustColor = computed(() => {
+  const t = trustPct.value
+  return t < 30 ? '#ef4444' : t < 55 ? '#f59e0b' : t < 75 ? '#eab308' : '#22c55e'
+})
+const fallenList = computed(() => (version.value, game.fallen()))
+watch(version, () => saveTrust(game.trust)) // persist as the team's opinion shifts
 const checkStyle = computed(() => {
   if (!checkSquare.value) return {}
   const { col, row } = rc(checkSquare.value)
@@ -490,10 +511,26 @@ onBeforeUnmount(() => {
           <li>Now and then a bold piece <span class="k">volunteers</span> for a move it likes.</li>
           <li>The cowardly <span class="k">tremble</span> when cornered; the restless <span class="k">fidget</span>; grudges <span class="k">smoulder</span>.</li>
         </ul>
+        <h3>Team trust &amp; the box</h3>
+        <ul>
+          <li>Your army keeps a <span class="k">trust</span> meter (starts at 50, persists between games). Sharp play raises it; blunders and lost games drop it.</li>
+          <li>Low trust → pieces argue more and shout <span class="k">bad advice</span>. High trust → they defer to you.</li>
+          <li>The fallen wait in <span class="k">the box</span> below the moves.</li>
+        </ul>
+        <h3>Feature tour (see everything fast)</h3>
+        <p>Open settings (⚙): Difficulty <span class="k">1</span>, Chaos and Hints to <span class="k">max</span>. New game, then:</p>
+        <ul>
+          <li>Tap your <span class="k">g1 knight</span> — a dashed purple square appears; tap it for a jetpack leap.</li>
+          <li><span class="k">Long-press</span> (or right-click) any piece for its character sheet.</li>
+          <li>Move your <span class="k">queen next to an enemy pawn</span> — it balks; tap again to insist.</li>
+          <li>Capture something — hear the taunt and watch it land in the box.</li>
+          <li>Dawdle ~15s on your turn — a piece heckles you.</li>
+        </ul>
+        <p>Cold feet, tantrums, defections and vengeance are <em>emergent</em> — max Chaos makes them likely within a few captures.</p>
         <h3>Difficulty</h3>
         <p>Higher levels search deeper and stop blundering. <span class="k">Ruthless</span> thinks the longest.</p>
         <h3>Sharing</h3>
-        <p>The share link carries a seed — your friend gets the exact same cast.</p>
+        <p>The share link carries a seed — with the engine now deterministic, a friend gets the exact same cast <em>and</em> the same game if they play your moves.</p>
       </template>
     </GameToolbar>
 
@@ -565,7 +602,15 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="wc-log-col">
-        <div class="text-overline text-medium-emphasis mb-1">Table talk</div>
+        <div class="trust">
+          <div class="d-flex align-center justify-space-between mb-1">
+            <span class="text-overline text-medium-emphasis">Team trust</span>
+            <span class="trust-label" :style="{ color: trustColor }">{{ trustLabel }} · {{ trustPct }}</span>
+          </div>
+          <v-progress-linear :model-value="trustPct" :color="trustColor" height="8" rounded bg-color="rgba(148,163,184,0.2)" />
+        </div>
+
+        <div class="text-overline text-medium-emphasis mb-1 mt-4">Table talk</div>
         <div class="talk">
           <p v-if="log.length === 0" class="text-medium-emphasis text-body-2 pa-2">
             Tap one of your pieces — they have opinions. Long-press any piece for its character sheet.
@@ -589,6 +634,21 @@ onBeforeUnmount(() => {
             <span class="move-dot" :class="m.side === 'w' ? 'ours' : 'theirs'"></span>
             <span class="move-san">{{ m.chaos ? '🌀 ' : '' }}{{ m.san }}</span>
           </div>
+        </div>
+
+        <div class="text-overline text-medium-emphasis mb-1 mt-4">The box <span class="text-disabled">· fallen</span></div>
+        <div class="box">
+          <p v-if="fallenList.length === 0" class="text-medium-emphasis text-body-2 pa-2">Nobody's fallen yet.</p>
+          <span
+            v-for="f in fallenList"
+            :key="f.id"
+            class="grave"
+            :class="f.color === 'w' ? 'ours' : 'theirs'"
+            :title="`${f.name} (${f.color === 'w' ? 'your' : 'enemy'} ${TYPE_NAME[f.type]})`"
+          >
+            <span class="grave-glyph">{{ GLYPH[f.type] }}</span>
+            <span class="grave-name">{{ f.name }}</span>
+          </span>
         </div>
       </div>
     </div>
@@ -938,11 +998,50 @@ onBeforeUnmount(() => {
   line-height: 1.3;
 }
 .moves {
-  max-height: 26vh;
+  max-height: 22vh;
   overflow-y: auto;
   border-radius: 10px;
   background: rgba(2, 6, 23, 0.35);
   padding: 6px 8px;
+}
+.trust-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+.box {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  border-radius: 10px;
+  background: rgba(2, 6, 23, 0.35);
+  padding: 8px;
+}
+.grave {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px 2px 4px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  background: rgba(148, 163, 184, 0.12);
+}
+.grave-glyph {
+  font-size: 15px;
+  line-height: 1;
+}
+.grave.ours .grave-glyph {
+  color: #f8fafc;
+  text-shadow: 0 0 1px #0f172a;
+}
+.grave.theirs .grave-glyph {
+  color: #1e293b;
+  text-shadow: 0 0 1px #94a3b8;
+}
+.grave.ours .grave-name {
+  color: #fde68a;
+}
+.grave.theirs .grave-name {
+  color: #fca5a5;
 }
 .move-row2 {
   display: flex;
