@@ -73,6 +73,8 @@ export function createSociety(chess: Chess, rng: Rng): Society {
         idleFor: 0,
         kills: 0,
         bonds: {},
+        avenging: null,
+        vengefulUntil: 0,
       }
       bySquare[cell.square] = id
     }
@@ -152,13 +154,34 @@ export function applyMove(society: Society, move: MoveInfo): GameEvent[] {
         events.push({ kind: 'capture', soulId: moverId, otherId: victimId, salience: 60 })
 
         // The victim's comrades take it personally — grudge + anger toward the
-        // killer's identity, sharpened by how fond they were of the fallen. Anger
-        // only crosses into a visible fume when a genuinely bonded friend falls.
+        // killer's identity, sharpened by how fond they were of the fallen.
+        let topGriever: PieceSoul | null = null
+        let topFondness = 0
         for (const s of Object.values(society.souls)) {
           if (s.captured || s.color !== victim.color || s.id === victimId) continue
           const fondness = Math.max(0, s.bonds[victimId] ?? 0.1)
           s.bonds[moverId] = clampBond((s.bonds[moverId] ?? 0) - 0.35 - fondness * 0.4)
           s.mood.anger = clamp(s.mood.anger + 0.2 + fondness * 0.6)
+          if (fondness > topFondness) {
+            topFondness = fondness
+            topGriever = s
+          }
+        }
+        // Losing a genuine friend tips the closest comrade into a lasting
+        // vengeful state (a real power-up, not a one-ply flicker) sworn against
+        // the killer, with a line that names the fallen.
+        if (topGriever && topFondness >= 0.45) {
+          topGriever.avenging = moverId
+          topGriever.vengefulUntil = society.ply + 6
+          topGriever.mood.anger = 1
+          topGriever.mood.fear = 0
+          events.push({
+            kind: 'vengeance',
+            soulId: topGriever.id,
+            otherId: moverId,
+            salience: 95,
+            data: { fallen: victim.persona.name },
+          })
         }
       }
     }

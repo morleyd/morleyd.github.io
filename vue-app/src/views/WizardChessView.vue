@@ -55,8 +55,9 @@ const bump = () => (version.value += 1)
 interface Bubble extends Utterance {
   bid: number
 }
+type LogLine = Utterance & { ts: number }
 const bubbles = ref<Bubble[]>([])
-const log = ref<Utterance[]>([])
+const log = ref<LogLine[]>([])
 let queue: Utterance[] = []
 let pumpTimer: ReturnType<typeof setTimeout> | null = null
 let bubbleId = 0
@@ -95,7 +96,7 @@ function reveal(u: Utterance) {
     }, 4400)
     bubbleTimers.set(b.bid, t)
   }
-  log.value.unshift(u)
+  log.value.unshift({ ...u, ts: game.now() })
   if (log.value.length > 40) log.value.length = 40
 }
 function clearBubbleTimer(id: number) {
@@ -227,14 +228,21 @@ const TYPE_FOR = (u: Utterance): string => {
   return s ? TYPE_NAME[s.type] : ''
 }
 
-// Move tracker: pair plies into numbered rows (chaos plies carry a 🌀).
-const movePairs = computed(() => {
+// Timestamps: mm:ss since the game began — shared by moves and chat so events
+// can be paired in time.
+const fmt = (ms: number) => `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`
+
+// Move tracker: chronological + timestamped (chaos/spontaneous plies flagged),
+// which also sidesteps the old white/black column mis-pairing.
+const moveRows = computed(() => {
   version.value
-  const m = game.moveLog
-  const rows: { n: number; w: string; b: string }[] = []
-  for (let i = 0; i < m.length; i += 2) rows.push({ n: i / 2 + 1, w: m[i], b: m[i + 1] ?? '' })
-  return rows
+  return game.moveLog.map((m) => ({ ...m, time: fmt(m.ts) }))
 })
+
+// Per-piece special states → a small icon badge on the piece.
+const STATE_ICON: Record<string, string> = { vengeful: '🔥', spooked: '😨' }
+const pieceStates = computed(() => (version.value, game.states()))
+const coaxSquare = computed(() => (version.value, game.coaxTarget()))
 const checkStyle = computed(() => {
   if (!checkSquare.value) return {}
   const { col, row } = rc(checkSquare.value)
@@ -333,6 +341,7 @@ function onSquare(square: Square) {
       name: res.introSoul.persona.name,
       text: res.introSoul.persona.intro,
       tone: 'calm',
+      ts: game.now(),
     })
   }
   if (res.cue) triggerCue(res.cue.soulId, res.cue.type)
@@ -518,6 +527,7 @@ onBeforeUnmount(() => {
             @contextmenu.prevent="openSheetAt(squareOf(i))"
           >
             <span v-if="legalTargets.has(squareOf(i))" class="dot"></span>
+            <span v-else-if="squareOf(i) === coaxSquare" class="dot dot--coax" title="Coax back to post"></span>
             <span v-else-if="chaosTargets.has(squareOf(i))" class="dot dot--chaos"></span>
           </div>
 
@@ -534,6 +544,7 @@ onBeforeUnmount(() => {
               :style="pieceStyle(p)"
             >
               <span class="glyph" :class="[p.colorClass, animClass(p.square)]">{{ GLYPH[p.type] }}</span>
+              <span v-if="STATE_ICON[pieceStates[p.square]]" class="power-icon">{{ STATE_ICON[pieceStates[p.square]] }}</span>
             </span>
           </TransitionGroup>
 
@@ -564,6 +575,7 @@ onBeforeUnmount(() => {
             <div class="talk-body">
               <span class="who" :class="u.color === 'w' ? 'ours' : 'theirs'">{{ u.name }}</span>
               <span class="ty">{{ TYPE_FOR(u) }}</span>
+              <span class="stamp">{{ fmt(u.ts) }}</span>
               <div class="what">{{ u.text }}</div>
             </div>
           </div>
@@ -571,11 +583,11 @@ onBeforeUnmount(() => {
 
         <div class="text-overline text-medium-emphasis mb-1 mt-4">Moves</div>
         <div class="moves">
-          <p v-if="movePairs.length === 0" class="text-medium-emphasis text-body-2 pa-2">No moves yet.</p>
-          <div v-for="row in movePairs" :key="row.n" class="move-row">
-            <span class="move-n">{{ row.n }}.</span>
-            <span class="move-ply" :class="{ chaos: row.w.includes('🌀') }">{{ row.w }}</span>
-            <span class="move-ply" :class="{ chaos: row.b.includes('🌀') }">{{ row.b }}</span>
+          <p v-if="moveRows.length === 0" class="text-medium-emphasis text-body-2 pa-2">No moves yet.</p>
+          <div v-for="(m, i) in moveRows" :key="i" class="move-row2" :class="{ chaos: m.chaos }">
+            <span class="stamp">{{ m.time }}</span>
+            <span class="move-dot" :class="m.side === 'w' ? 'ours' : 'theirs'"></span>
+            <span class="move-san">{{ m.chaos ? '🌀 ' : '' }}{{ m.san }}</span>
           </div>
         </div>
       </div>
@@ -699,6 +711,14 @@ onBeforeUnmount(() => {
     transform: scale(1.08);
   }
 }
+/* "Coax back to your post" — a friendly green target. */
+.dot--coax {
+  width: 62%;
+  height: 62%;
+  background: rgba(34, 197, 94, 0.18);
+  border: 3px dashed #22c55e;
+  animation: chaosPulse 1.1s ease-in-out infinite;
+}
 .check-ring {
   position: absolute;
   width: 12.5%;
@@ -728,6 +748,16 @@ onBeforeUnmount(() => {
 .glyph {
   font-size: 9cqmin;
   line-height: 1;
+}
+/* Power-up state badge (vengeful 🔥, spooked 😨) in the piece's top corner. */
+.power-icon {
+  position: absolute;
+  top: 2%;
+  right: 2%;
+  font-size: 4.6cqmin;
+  line-height: 1;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.6));
+  pointer-events: none;
 }
 .glyph.white {
   color: #f8fafc;
@@ -914,23 +944,41 @@ onBeforeUnmount(() => {
   background: rgba(2, 6, 23, 0.35);
   padding: 6px 8px;
 }
-.move-row {
-  display: grid;
-  grid-template-columns: 34px 1fr 1fr;
-  gap: 6px;
+.move-row2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 2px 0;
-  font-variant-numeric: tabular-nums;
   font-size: 0.85rem;
 }
-.move-n {
-  color: rgba(148, 163, 184, 0.8);
-}
-.move-ply {
+.move-row2 .move-san {
   color: #e2e8f0;
 }
-.move-ply.chaos {
+.move-row2.chaos .move-san {
   color: #d8b4fe;
   font-weight: 600;
+}
+.move-dot {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+.move-dot.ours {
+  background: #f8fafc;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.6);
+}
+.move-dot.theirs {
+  background: #1e293b;
+  box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.6);
+}
+.stamp {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.72rem;
+  color: rgba(148, 163, 184, 0.7);
+}
+.talk-body .stamp {
+  margin-left: 6px;
 }
 .sheet-glyph {
   font-size: 30px;

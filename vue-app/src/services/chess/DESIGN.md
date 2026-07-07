@@ -4,6 +4,37 @@
 > personality/animation vision and the punch-list of changes. Lives on the
 > `wizard-chess` branch.
 
+## Canon survey — what Wizard's Chess actually is (HP books/films)
+
+The magical variant from Harry Potter, for grounding our feature choices:
+
+- **Living pieces, directed like troops.** The chessmen are alive and move on the
+  player's spoken command ("Knight to E5") — "a lot like directing troops in
+  battle." → we have this (you command; pieces move themselves).
+- **Brutal captures.** A captured piece is *smashed / hacked / dragged* off the
+  board by the attacker — violent, not a quiet removal. → **we don't do this yet**;
+  our captures just fade. A canonical "smash" animation is the biggest missing beat.
+- **Distinct personalities + loyalty/distrust.** Pieces have their own temperaments
+  and are loyal or suspicious of their player. → core of our social sim.
+- **They argue, refuse, and give (sometimes bad) advice.** Harry's new set was
+  "very suspicious of his commands, often shouting contradictory advice"; pieces
+  "could argue back if they disagreed with an unwise move," and refuse. Trust grows
+  as the player proves themselves. → we have refusal + suggestions; **"trust that
+  grows over the game," "shouted (sometimes bad) advice," and "coax a reluctant
+  piece back" are canonical and worth leaning into.**
+- **Old vs. new sets.** Ron's inherited set knew him and obeyed; a new set doesn't
+  trust you yet. → a possible "relationship with the whole army" meta-arc.
+- **Command notation.** Players use algebraic notation. → our move tracker mirrors this.
+
+Design implications we're acting on: the **coax-a-fled-piece-back** window (canon:
+players could talk a reluctant piece around), and reinforcing the **grief→rage**
+beat. Deferred canonical ideas: a real **smash capture** animation; a **trust meter**
+that grows and unlocks less back-talk; **bad advice** (not just good suggestions).
+
+Sources: [HP Wiki — Wizard's Chess](https://harrypotter.fandom.com/wiki/Wizard's_Chess),
+[HP Lexicon](https://potterlex.com/wizard_s_chess),
+[harrypotter.com fact file](https://www.harrypotter.com/fact-file/objects/wizard-chess-set).
+
 ## Vision
 
 The pieces feel alive because they surprise you. **Novelty is the entire asset,

@@ -87,4 +87,33 @@ describe('chaos offers and limits (controller)', () => {
     expect(u).not.toBeNull()
     expect(g.chess.get('e2')?.color).toBe('b') // now plays for the enemy
   })
+
+  it('cold feet spooks a piece, then the player can coax it back to its post', () => {
+    const g = new WizardGame('coax')
+    // White knight e4 under attack from the e8 rook; e3 is empty behind it.
+    g.reset('coax', '4r1k1/8/8/8/4N3/8/8/6K1 w - - 0 1')
+    g.settings.chaos = 1
+    g.soulAt('e4')!.mood.fear = 1
+    const u = g.spontaneousChaos()
+    expect(u).not.toBeNull()
+    expect(g.chess.get('e3')?.type).toBe('n') // fled backward
+    // Select the spooked knight → its old post is offered as a coax target.
+    g.playerTap('e3')
+    expect(g.coaxTarget()).toBe('e4')
+    g.playerTap('e4')
+    expect(g.chess.get('e4')?.type).toBe('n') // coaxed home
+    expect(g.chess.get('e3')).toBeFalsy()
+    expect(g.turn).toBe('w') // coaxing is free — still your move
+  })
+
+  it('killing a bonded friend makes a comrade vengeful and names the fallen', () => {
+    const g = new WizardGame('rage')
+    // Black knight b5 can capture the white pawn on d4; the c1 bishop adores it.
+    g.reset('rage', '4k3/8/8/1n6/3P4/8/8/2B1K3 b - - 0 1')
+    const victim = g.soulAt('d4')!
+    g.soulAt('c1')!.bonds[victim.id] = 0.8
+    const lines = g.aiApply({ from: 'b5', to: 'd4' })
+    expect(Object.values(g.states())).toContain('vengeful')
+    expect(lines.some((l) => l.text.includes(victim.persona.name))).toBe(true)
+  })
 })

@@ -36,11 +36,13 @@ interface Ctx {
   type: string
   target: string
   vtype: string
+  fallen: string
   level: number
 }
 
 function fill(template: string, ctx: Ctx): string {
   return template
+    .replace(/\{fallen\}/g, ctx.fallen)
     .replace(/\{me\}/g, ctx.me)
     .replace(/\{type\}/g, ctx.type)
     .replace(/\{target\}/g, ctx.target)
@@ -156,6 +158,16 @@ const VICTORY = [
   'Checkmate! Was there ever any doubt?',
 ]
 
+// Grief boiling into vengeance — names the fallen friend and the killer.
+const VENGEANCE = [
+  'You KILLED {fallen}, {target}. I will end you.',
+  '{fallen} was my best friend, {target}. Now you die.',
+  'For {fallen}! {target}, you are already dead — you just don\'t know it.',
+  'They took {fallen}. {target}, I am coming for you and nothing will stop me.',
+  'No... {fallen}! {target}, every step you take, I will be behind you.',
+  '{fallen} deserved better. {target} will get what\'s coming.',
+]
+
 const CASTLE = [
   'Tucked the king away nice and safe. Smart.',
   'Castling — the old switcheroo. Cosy in the corner now.',
@@ -208,6 +220,8 @@ function poolFor(event: GameEvent, speaker: PieceSoul): string[] {
       return CHECK
     case 'checkmate':
       return VICTORY
+    case 'vengeance':
+      return VENGEANCE
     case 'castle':
       return CASTLE
     case 'impatient':
@@ -228,6 +242,7 @@ function toneFor(event: GameEvent, speaker: PieceSoul): Utterance['tone'] {
     case 'threatened':
       return (speaker.persona.bravery ?? 0.5) >= 0.55 && speaker.mood.fear < 0.6 ? 'angry' : 'afraid'
     case 'impatient':
+    case 'vengeance':
       return 'angry'
     case 'defended':
       return 'warm'
@@ -246,6 +261,7 @@ function contextFor(event: GameEvent, society: Society): Ctx {
     type: me ? TYPE_NAME[me.type] : 'piece',
     target: other?.persona.name ?? 'the enemy',
     vtype: other ? TYPE_NAME[other.type] : 'piece',
+    fallen: (event.data?.fallen as string) ?? 'my friend',
     level: (event.data?.level as number) ?? 1,
   }
 }
@@ -257,7 +273,7 @@ function contextFor(event: GameEvent, society: Society): Ctx {
  */
 // The dramatic beats that always deserve a line; everything else is "ambient"
 // chatter that must be spaced out and is usually skipped, to protect novelty.
-const PRIORITY = new Set<GameEvent['kind']>(['capture', 'captured', 'promotion', 'checkmate'])
+const PRIORITY = new Set<GameEvent['kind']>(['capture', 'captured', 'promotion', 'checkmate', 'vengeance'])
 
 export function speak(
   society: Society,

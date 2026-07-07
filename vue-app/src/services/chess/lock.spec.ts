@@ -17,12 +17,14 @@ function aiTurn(g: WizardGame) {
   g.spontaneousChaos()
 }
 
-function tryWhiteMove(g: WizardGame, from: string, to: string): boolean {
-  g.playerTap(from)
-  for (let i = 0; i < 4; i += 1) {
-    const r = g.playerTap(to)
-    if (r.moved) return true
-    if (!g.selected) g.playerTap(from) // reselect if a stray tap cleared it
+function tryWhiteMove(g: WizardGame, legal: { from: string; to: string }[]): boolean {
+  // Try legal moves until one actually commits (resistance needs a few taps;
+  // a spooked piece may divert a tap to a coax, so fall through to another move).
+  for (const mv of legal.slice(0, 6)) {
+    g.playerTap(mv.from)
+    for (let i = 0; i < 4; i += 1) {
+      if (g.playerTap(mv.to).moved) return true
+    }
   }
   return false
 }
@@ -37,7 +39,7 @@ describe('turn lock', () => {
         if (g.turn === 'w') {
           const legal = g.chess.moves({ verbose: true }) as unknown as { from: string; to: string }[]
           if (!legal.length) break // no moves → should be game over
-          const moved = tryWhiteMove(g, legal[0].from, legal[0].to)
+          const moved = tryWhiteMove(g, legal)
           expect(moved, `seed ${seed} ply ${ply}: White had a legal move but could not play it`).toBe(true)
         } else {
           aiTurn(g)

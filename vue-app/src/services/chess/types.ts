@@ -50,6 +50,17 @@ export interface PieceSoul {
   kills: number // enemies this piece has captured
   /** id -> feeling in [-1, 1]. Positive = fondness, negative = grudge. */
   bonds: Record<string, number>
+  /** Vengeance: set when a bonded friend is killed — a real, lasting state. */
+  avenging: string | null // id of the killer this piece is out to get
+  vengefulUntil: number // ply until which the vengeful power-up lasts
+}
+
+/** One recorded ply in the move tracker (chess or chaos), timestamped. */
+export interface MoveEntry {
+  san: string // notation, e.g. "Nf3" or "×d5 (tantrum)"
+  ts: number // ms since the game started
+  side: Color
+  chaos: boolean // a rule-breaking / spontaneous stunt
 }
 
 /** Something noteworthy that happened on a ply, ranked by salience. */
@@ -67,6 +78,7 @@ export interface GameEvent {
     | 'impatient'
     | 'castle'
     | 'gloat'
+    | 'vengeance' // a bonded friend was just killed; this soul swears revenge
   soulId: string
   otherId?: string // victim / attacker / ally, depending on kind
   salience: number

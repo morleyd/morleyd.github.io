@@ -22,10 +22,11 @@ import {
   materialBalance,
 } from './chaos'
 import { DEFAULT_SETTINGS, type WizardSettings } from './settings'
-import type { Color, GameEvent, PieceSoul, PieceType, Square, Utterance } from './types'
+import type { Color, GameEvent, MoveEntry, PieceSoul, PieceType, Square, Utterance } from './types'
 
 export const PLAYER: Color = 'w'
 const opp = (c: Color): Color => (c === 'w' ? 'b' : 'w')
+const nowMs = () => Date.now()
 
 export type AnimClass = 'tremble' | 'bob' | 'angry' | 'joy'
 export type ChaosType = 'disguise' | 'jetpack'
@@ -71,8 +72,9 @@ export class WizardGame {
   lastTo: Square | null = null
   lastMoverId: string | null = null
   lastMoveRisky = false
-  moveLog: string[] = [] // notation for every ply, chaos moves included
+  moveLog: MoveEntry[] = [] // timestamped notation for every ply, chaos included
   settings: WizardSettings = { ...DEFAULT_SETTINGS }
+  private startTime = nowMs()
   private dialogue: DialogueState
   private rng: () => number
   private introduced = new Set<string>()
@@ -80,12 +82,21 @@ export class WizardGame {
   private lastSuggestPly = -99
   private offer: ChaosOffer | null = null
   private usedStunts = new Set<string>() // each stunt fires at most once per game
+  private spooked: { soulId: string; home: Square; until: number } | null = null
 
   constructor(public seed: string) {
     this.chess = new Chess()
     this.rng = rngFromSeed(seed)
     this.society = createSociety(this.chess, this.rng)
     this.dialogue = createDialogueState()
+  }
+
+  /** ms since this game started — the shared clock for move + chat timestamps. */
+  now(): number {
+    return nowMs() - this.startTime
+  }
+  private logMove(san: string, side: Color, chaos: boolean) {
+    this.moveLog.push({ san, ts: this.now(), side, chaos })
   }
 
   reset(seed: string, fen?: string) {
@@ -101,11 +112,13 @@ export class WizardGame {
     this.lastMoverId = null
     this.lastMoveRisky = false
     this.moveLog = []
+    this.startTime = nowMs()
     this.introduced.clear()
     this.resist = null
     this.lastSuggestPly = -99
     this.offer = null
     this.usedStunts.clear()
+    this.spooked = null
   }
 
   get turn(): Color {
@@ -146,9 +159,10 @@ export class WizardGame {
       const bravery = s.persona.bravery ?? 0.5
       const reckless = (s.persona.recklessness ?? 0.3) > 0.6 || bravery > 0.65
 
-      // Anger: only a fresh, bonded-loss fume (decays within a ply or two).
-      if (s.mood.anger > 0.6) {
-        cands.push({ square: s.square, cls: 'angry', prio: 100 + s.mood.anger })
+      // Anger: the lasting vengeful state (a friend was killed) — persists for
+      // its whole window so the red actually means something.
+      if (s.vengefulUntil >= this.society.ply) {
+        cands.push({ square: s.square, cls: 'angry', prio: 110 })
         continue
       }
       // Tremble: under attack AND (cowardly, or completely exposed) — and never
@@ -193,7 +207,8 @@ export class WizardGame {
     if (this.chess.isCheckmate() && moverId) events.push({ kind: 'checkmate', soulId: moverId, salience: 120 })
     else if (this.chess.isCheck() && moverId) events.push({ kind: 'check', soulId: moverId, salience: 54 })
 
-    this.moveLog.push(move.san)
+    this.logMove(move.san, move.color as Color, false)
+    if (this.spooked && this.spooked.soulId === moverId) this.spooked = null // it left on its own
 
     // Record who moved and whether it looked risky, for the travel animation.
     this.lastFrom = move.from
@@ -235,6 +250,28 @@ export class WizardGame {
         introSoul = soul
       }
       return { moved: false, utterances: [], introSoul }
+    }
+
+    // Coax a spooked piece back to its post (free, keeps your turn).
+    if (this.selected && square === this.coaxTarget()) {
+      const soul = this.soulAt(this.selected)
+      const from = this.selected
+      this.spooked = null
+      this.selected = null
+      if (!soul || !this.relocate(from, square, false)) return { moved: false, utterances: [] }
+      return {
+        moved: false,
+        utterances: [
+          {
+            soulId: soul.id,
+            square,
+            color: soul.color,
+            name: soul.persona.name,
+            text: 'Well… since you asked nicely. Back to my post.',
+            tone: 'warm',
+          },
+        ],
+      }
     }
 
     // A tap on an offered chaos target commits the stunt.
@@ -299,6 +336,28 @@ export class WizardGame {
     return a[Math.floor(this.rng() * a.length)]
   }
 
+  /** Persistent per-piece states the view badges with an icon. */
+  states(): Record<Square, 'vengeful' | 'spooked'> {
+    const out: Record<Square, 'vengeful' | 'spooked'> = {}
+    for (const s of Object.values(this.society.souls)) {
+      if (s.captured || !s.square) continue
+      if (s.vengefulUntil >= this.society.ply) out[s.square] = 'vengeful'
+    }
+    if (this.spooked && this.society.ply <= this.spooked.until) {
+      const s = this.society.souls[this.spooked.soulId]
+      if (s && !s.captured && s.square) out[s.square] = 'spooked'
+    }
+    return out
+  }
+
+  /** If a spooked piece is selected within its window, the square you can coax
+   * it back to (canon: talking a reluctant piece back to its post). */
+  coaxTarget(): Square | null {
+    if (!this.spooked || !this.selected) return null
+    if (this.society.ply > this.spooked.until) return null
+    return this.society.bySquare[this.selected] === this.spooked.soulId ? this.spooked.home : null
+  }
+
   /** Decide (once, at selection) whether this piece offers a wild move. */
   private computeOffer(from: Square): ChaosOffer | null {
     if (this.settings.chaos <= 0) return null
@@ -332,7 +391,7 @@ export class WizardGame {
     const soul = this.soulAt(offer.from)
     const res = this.relocate(offer.from, to, true)
     this.usedStunts.add(offer.type)
-    this.moveLog.push(`🌀 ${offer.type === 'disguise' ? 'R' : 'N'}→${to}`)
+    this.logMove(`${offer.type === 'disguise' ? 'R' : 'N'}→${to}`, PLAYER, true)
     this.offer = null
     this.selected = null
     this.resist = null
@@ -368,9 +427,12 @@ export class WizardGame {
       const behind = (sq[0] + back) as Square
       if (this.chess.get(behind)) continue
       if (this.rng() >= this.settings.chaos) continue
+      const home = sq
       if (!this.relocate(sq, behind, false)) continue
       this.usedStunts.add('coldfeet')
-      this.moveLog.push(`🌀 ${behind} (cold feet)`)
+      this.logMove(`${behind} (cold feet)`, s.color, true)
+      // The player can coax their own spooked piece back to its post for a while.
+      if (s.color === PLAYER) this.spooked = { soulId: s.id, home, until: this.society.ply + 6 }
       return {
         soulId: s.id,
         square: behind,
@@ -413,7 +475,7 @@ export class WizardGame {
       this.lastTo = target
       this.lastMoverId = s.id
       this.lastMoveRisky = false
-      this.moveLog.push(`🌀 ×${target} (tantrum)`)
+      this.logMove(`×${target} (tantrum)`, s.color, true)
       return {
         soulId: s.id,
         square: sq,
@@ -443,7 +505,7 @@ export class WizardGame {
       this.lastTo = sq
       this.lastMoverId = s.id
       this.lastMoveRisky = false
-      this.moveLog.push(`🌀 ${sq} defects`)
+      this.logMove(`${sq} defects`, 'b', true)
       return {
         soulId: s.id,
         square: sq,
@@ -481,7 +543,7 @@ export class WizardGame {
       const to = this.pick(caps.length ? caps : targets)
       this.relocate(s.square, to, true)
       this.usedStunts.add('aichaos')
-      this.moveLog.push(`🌀 ${type === 'disguise' ? 'R' : 'N'}→${to} (enemy)`)
+      this.logMove(`${type === 'disguise' ? 'R' : 'N'}→${to} (enemy)`, 'b', true)
       const line = type === 'disguise' ? 'Who says a rook plays it straight?' : "The enemy's got jetpacks too!"
       const utter: Utterance[] = [{ soulId: s.id, square: to, color: 'b', name: s.persona.name, text: line, tone: 'gloat' }]
       utter.push(
