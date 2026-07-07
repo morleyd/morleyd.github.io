@@ -64,6 +64,14 @@ test.describe('Wizard Chess', () => {
     await page.screenshot({ path: 'e2e/screenshots/chaos.png' })
   })
 
+  test('long-press opens a character sheet with trait sliders and moods', async ({ page }) => {
+    await page.goto('/wizard-chess')
+    await page.locator('[data-square="e1"]').click({ delay: 600 }) // hold = long-press the king
+    await expect(page.getByText('Personality (drag to reshape)')).toBeVisible()
+    await expect(page.getByText('Mood right now')).toBeVisible()
+    await page.screenshot({ path: 'e2e/screenshots/sheet.png' })
+  })
+
   test('is playable at a phone viewport', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await page.goto('/wizard-chess')

@@ -36,6 +36,7 @@ export interface PieceSoul {
   square: Square | null // null once captured
   persona: Persona
   stamina: number
+  sass: number // how much this piece likes to talk (0–1)
   captured: boolean
   /** Mood scalars in [0, 1]. */
   mood: {

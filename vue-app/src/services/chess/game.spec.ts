@@ -16,6 +16,7 @@ describe('WizardGame interaction', () => {
     expect(g.selected).toBeNull()
     expect(g.lastFrom).toBe('g1')
     expect(g.lastTo).toBe('f3')
+    expect(g.moveLog).toContain('Nf3') // the move tracker records SAN
   })
 
   it('introduces a piece the first time it is selected, then not again', () => {

@@ -10,7 +10,7 @@ export interface WizardSettings {
   chaos: number // rule-breaking stunt frequency (wired once stunts exist)
 }
 
-export const DEFAULT_SETTINGS: WizardSettings = { chatter: 0.6, animation: 0.6, agency: 0.6, chaos: 0.3 }
+export const DEFAULT_SETTINGS: WizardSettings = { chatter: 0.6, animation: 0.6, agency: 0.6, chaos: 0.55 }
 
 const KEY = 'wizard-chess-settings'
 

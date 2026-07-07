@@ -5,7 +5,8 @@
  * then continues normally — the engine just sees a new position.
  */
 import { Chess } from 'chess.js'
-import type { PieceType, Square } from './types'
+import { PIECE_VALUE } from './assess'
+import type { Color, PieceType, Square } from './types'
 
 const FILES = 'abcdefgh'
 const toSquare = (f: number, r: number): Square => FILES[f] + (r + 1)
@@ -59,6 +60,56 @@ export function applyChaosMove(
     return null
   }
   return { captured }
+}
+
+/** Rebuild + reload the FEN keeping the given side to move (for board edits that
+ * don't consume a turn). Returns false if the result is illegal. */
+function reload(c: Chess, turn: Color): boolean {
+  const placement = c.fen().split(' ')[0]
+  try {
+    c.load(`${placement} ${turn} ${computeCastling(c)} - 0 1`)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Flip a piece's allegiance in place (the defector). Keeps the current turn. */
+export function defect(c: Chess, square: Square): boolean {
+  const p = c.get(square)
+  if (!p || p.type === 'k') return false
+  const turn = c.turn()
+  c.remove(square)
+  c.put({ type: p.type, color: p.color === 'w' ? 'b' : 'w' }, square)
+  return reload(c, turn)
+}
+
+/** Knock a piece clean off the board (the tantrum). Keeps the current turn. */
+export function knockOff(c: Chess, square: Square): boolean {
+  const p = c.get(square)
+  if (!p || p.type === 'k') return false
+  const turn = c.turn()
+  c.remove(square)
+  return reload(c, turn)
+}
+
+/** Material balance in points, positive = White ahead. */
+export function materialBalance(c: Chess): number {
+  let s = 0
+  for (const row of c.board()) for (const cell of row) if (cell) s += (cell.color === 'w' ? 1 : -1) * PIECE_VALUE[cell.type]
+  return s
+}
+
+/** The up-to-8 squares around a square. */
+export function adjacentSquares(sq: Square): Square[] {
+  const [f, r] = coords(sq)
+  const out: Square[] = []
+  for (let df = -1; df <= 1; df += 1)
+    for (let dr = -1; dr <= 1; dr += 1) {
+      if (!df && !dr) continue
+      if (onBoard(f + df, r + dr)) out.push(toSquare(f + df, r + dr))
+    }
+  return out
 }
 
 /** Diagonal (bishop-style) destinations for a disguised rook — slides, stopping

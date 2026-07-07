@@ -290,7 +290,9 @@ export function speak(
       const gap = Math.max(1, Math.round((enemy ? 3 : 4) + (0.6 - chatter) * 6))
       const last = enemy ? state.lastAmbientEnemy : state.lastAmbientAlly
       if (society.ply - last < gap) continue
-      const skip = Math.min(0.97, Math.max(0.05, (enemy ? 0.4 : 0.6) + (0.6 - chatter)))
+      // Sassy pieces pipe up more often than shy ones.
+      const sass = (speaker.sass ?? 0.5) - 0.5
+      const skip = Math.min(0.97, Math.max(0.05, (enemy ? 0.4 : 0.6) + (0.6 - chatter) - sass * 0.4))
       if (rng() < skip) continue
     }
 

@@ -199,17 +199,118 @@ const pieceStyle = (p: PieceView) => {
 }
 const bubbleStyle = (b: Bubble) => {
   const { col, row } = rc(b.square as Square)
+  // Anchor the bubble near the piece and place its tail over the piece.
   const tx = col <= 1 ? '0%' : col >= 6 ? '-100%' : '-50%'
-  return { left: `${((col + 0.5) / 8) * 100}%`, top: `${(row / 8) * 100}%`, '--tx': tx }
+  const tail = col <= 1 ? '18px' : col >= 6 ? 'calc(100% - 18px)' : '50%'
+  return { left: `${((col + 0.5) / 8) * 100}%`, top: `${(row / 8) * 100}%`, '--tx': tx, '--tail': tail }
 }
+
+// Table talk: resolve the speaker so each line can show its piece glyph + type.
+const GLYPH_FOR = (u: Utterance): string => {
+  const s = game.society.souls[u.soulId]
+  return s ? GLYPH[s.type] : '•'
+}
+const TYPE_FOR = (u: Utterance): string => {
+  const s = game.society.souls[u.soulId]
+  return s ? TYPE_NAME[s.type] : ''
+}
+
+// Move tracker: pair plies into numbered rows (chaos plies carry a 🎩).
+const movePairs = computed(() => {
+  version.value
+  const m = game.moveLog
+  const rows: { n: number; w: string; b: string }[] = []
+  for (let i = 0; i < m.length; i += 2) rows.push({ n: i / 2 + 1, w: m[i], b: m[i + 1] ?? '' })
+  return rows
+})
 const checkStyle = computed(() => {
   if (!checkSquare.value) return {}
   const { col, row } = rc(checkSquare.value)
   return { left: `${(col / 8) * 100}%`, top: `${(row / 8) * 100}%` }
 })
 
+// ── Character sheet (long-press / right-click any piece) ───────────────────
+interface SheetData {
+  id: string
+  name: string
+  type: PieceType
+  intro: string
+  color: Color
+  bravery: number
+  recklessness: number
+  patience: number
+  sass: number
+  mood: { fear: number; anger: number; impatience: number; joy: number; confidence: number }
+}
+const sheet = ref<SheetData | null>(null)
+const sheetOpen = ref(false)
+const TRAITS: { key: 'bravery' | 'recklessness' | 'patience' | 'sass'; label: string }[] = [
+  { key: 'bravery', label: 'Bravery' },
+  { key: 'recklessness', label: 'Recklessness' },
+  { key: 'patience', label: 'Patience' },
+  { key: 'sass', label: 'Sass' },
+]
+const MOODS: { key: keyof SheetData['mood']; label: string; color: string }[] = [
+  { key: 'fear', label: 'Fear', color: '#60a5fa' },
+  { key: 'anger', label: 'Anger', color: '#ef4444' },
+  { key: 'impatience', label: 'Impatience', color: '#f59e0b' },
+  { key: 'joy', label: 'Joy', color: '#22c55e' },
+  { key: 'confidence', label: 'Confidence', color: '#a855f7' },
+]
+function openSheetAt(square: Square) {
+  const s = game.soulAt(square)
+  if (!s) return
+  sheet.value = {
+    id: s.id,
+    name: s.persona.name,
+    type: s.type,
+    intro: s.persona.intro,
+    color: s.color,
+    bravery: s.persona.bravery ?? 0.5,
+    recklessness: s.persona.recklessness ?? 0.3,
+    patience: s.persona.patience ?? 0.5,
+    sass: s.sass,
+    mood: { ...s.mood },
+  }
+  sheetOpen.value = true
+}
+// Push an edited trait back onto the live piece so it changes behaviour.
+function setTrait(key: 'bravery' | 'recklessness' | 'patience' | 'sass', v: number) {
+  if (!sheet.value) return
+  sheet.value[key] = v
+  const s = game.society.souls[sheet.value.id]
+  if (!s) return
+  if (key === 'sass') s.sass = v
+  else s.persona[key] = v
+  bump()
+}
+
+// Long-press detection (works for touch and mouse) without stealing taps.
+let pressTimer: ReturnType<typeof setTimeout> | null = null
+let suppressClick = false
+function startPress(square: Square) {
+  if (pressTimer) clearTimeout(pressTimer)
+  pressTimer = setTimeout(() => {
+    pressTimer = null
+    if (game.soulAt(square)) {
+      suppressClick = true
+      openSheetAt(square)
+    }
+  }, 450)
+}
+function endPress() {
+  if (pressTimer) {
+    clearTimeout(pressTimer)
+    pressTimer = null
+  }
+}
+
 // ── Turn flow ────────────────────────────────────────────────────────────
 function onSquare(square: Square) {
+  if (suppressClick) {
+    suppressClick = false
+    return
+  }
   if (!canPlay.value) return
   const res = game.playerTap(square)
   if (res.introSoul) {
@@ -233,20 +334,28 @@ async function runAi() {
   if (game.gameOver) return
   game.aiThinking = true
   bump()
-  const best = await engine.bestMove(game.chess.fen(), level.value)
-  game.aiThinking = false
-  if (best && !game.gameOver) enqueue(game.aiApply(best), 650)
-  bump()
+  // The enemy sometimes pulls a stunt instead of a normal move.
+  const chaos = game.aiChaos()
+  if (chaos) {
+    game.aiThinking = false
+    enqueue(chaos, 550)
+    bump()
+  } else {
+    const best = await engine.bestMove(game.chess.fen(), level.value)
+    game.aiThinking = false
+    if (best && !game.gameOver) enqueue(game.aiApply(best), 650)
+    bump()
+  }
   // Occasionally a piece volunteers for a strong move it spotted.
   const s = game.suggest()
   if (s) {
     enqueue([s], 500)
     bump()
   }
-  // A terrified piece may lose its nerve and shuffle back on its own.
-  const cf = game.coldFeet()
-  if (cf) {
-    enqueue([cf], 350)
+  // A spontaneous stunt may fire (cold feet / tantrum / defection).
+  const sp = game.spontaneousChaos()
+  if (sp) {
+    enqueue([sp], 400)
     bump()
   }
   armIdle()
@@ -293,6 +402,7 @@ onBeforeUnmount(() => {
   engine.dispose()
   clearBanter()
   if (idleTimer) clearTimeout(idleTimer)
+  if (pressTimer) clearTimeout(pressTimer)
   cueTimers.forEach((t) => clearTimeout(t))
 })
 </script>
@@ -389,6 +499,11 @@ onBeforeUnmount(() => {
               to: squareOf(i) === game.lastTo,
             }"
             @click="onSquare(squareOf(i))"
+            @pointerdown="startPress(squareOf(i))"
+            @pointerup="endPress"
+            @pointerleave="endPress"
+            @pointercancel="endPress"
+            @contextmenu.prevent="openSheetAt(squareOf(i))"
           >
             <span v-if="legalTargets.has(squareOf(i))" class="dot"></span>
             <span v-else-if="chaosTargets.has(squareOf(i))" class="dot dot--chaos"></span>
@@ -430,15 +545,70 @@ onBeforeUnmount(() => {
         <div class="text-overline text-medium-emphasis mb-1">Table talk</div>
         <div class="talk">
           <p v-if="log.length === 0" class="text-medium-emphasis text-body-2 pa-2">
-            Tap one of your pieces — they have opinions.
+            Tap one of your pieces — they have opinions. Long-press any piece for its character sheet.
           </p>
-          <div v-for="(u, i) in log" :key="i" class="talk-line" :class="'tone-' + u.tone">
-            <span class="who" :class="u.color === 'w' ? 'ours' : 'theirs'">{{ u.name }}</span>
-            <span class="what">{{ u.text }}</span>
+          <div v-for="(u, i) in log" :key="i" class="talk-line">
+            <span class="badge" :class="u.color === 'w' ? 'ours' : 'theirs'" :title="TYPE_FOR(u)">{{ GLYPH_FOR(u) }}</span>
+            <div class="talk-body">
+              <span class="who" :class="u.color === 'w' ? 'ours' : 'theirs'">{{ u.name }}</span>
+              <span class="ty">{{ TYPE_FOR(u) }}</span>
+              <div class="what">{{ u.text }}</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="text-overline text-medium-emphasis mb-1 mt-4">Moves</div>
+        <div class="moves">
+          <p v-if="movePairs.length === 0" class="text-medium-emphasis text-body-2 pa-2">No moves yet.</p>
+          <div v-for="row in movePairs" :key="row.n" class="move-row">
+            <span class="move-n">{{ row.n }}.</span>
+            <span class="move-ply" :class="{ chaos: row.w.includes('🎩') }">{{ row.w }}</span>
+            <span class="move-ply" :class="{ chaos: row.b.includes('🎩') }">{{ row.b }}</span>
           </div>
         </div>
       </div>
     </div>
+
+    <!-- Character sheet -->
+    <v-dialog v-model="sheetOpen" max-width="420">
+      <v-card v-if="sheet" color="surface" rounded="lg">
+        <v-card-title class="d-flex align-center ga-3">
+          <span class="sheet-glyph" :class="sheet.color === 'w' ? 'ours' : 'theirs'">{{ GLYPH[sheet.type] }}</span>
+          <div>
+            <div>{{ sheet.name }}</div>
+            <div class="text-caption text-medium-emphasis">
+              {{ sheet.color === 'w' ? 'Your' : 'Enemy' }} {{ TYPE_NAME[sheet.type] }}
+            </div>
+          </div>
+          <v-spacer />
+          <v-btn icon="mdi-close" variant="text" size="small" @click="sheetOpen = false" />
+        </v-card-title>
+        <v-card-text>
+          <p class="text-body-2 text-medium-emphasis mb-4">“{{ sheet.intro }}”</p>
+
+          <div class="text-overline mb-1">Personality (drag to reshape)</div>
+          <div v-for="t in TRAITS" :key="t.key" class="mb-1">
+            <label class="text-caption text-medium-emphasis">{{ t.label }}</label>
+            <v-slider
+              :model-value="sheet[t.key]"
+              :min="0"
+              :max="1"
+              :step="0.05"
+              hide-details
+              density="compact"
+              color="primary"
+              @update:model-value="(v) => setTrait(t.key, v)"
+            />
+          </div>
+
+          <div class="text-overline mb-2 mt-3">Mood right now</div>
+          <div v-for="m in MOODS" :key="m.key" class="mood-row">
+            <span class="mood-label text-caption text-medium-emphasis">{{ m.label }}</span>
+            <v-progress-linear :model-value="sheet.mood[m.key] * 100" :color="m.color" height="8" rounded />
+          </div>
+        </v-card-text>
+      </v-card>
+    </v-dialog>
 
     <v-snackbar v-model="snackbar" :timeout="2600" color="secondary">Link copied — share your crew!</v-snackbar>
   </v-container>
@@ -655,6 +825,18 @@ onBeforeUnmount(() => {
 .tone-angry { background: #fecaca; }
 .tone-warm,
 .tone-joy { background: #bbf7d0; }
+/* Tail pointing down at the speaker; inherits the bubble's tone colour. */
+.bubble::after {
+  content: '';
+  position: absolute;
+  bottom: -5px;
+  left: var(--tail, 50%);
+  width: 12px;
+  height: 12px;
+  transform: translateX(-50%) rotate(45deg);
+  background-color: inherit;
+  border-radius: 0 0 3px 0;
+}
 @keyframes pop {
   from {
     opacity: 0;
@@ -670,24 +852,89 @@ onBeforeUnmount(() => {
   padding: 6px;
 }
 .talk-line {
-  padding: 6px 8px 6px 10px;
-  border-left: 3px solid transparent;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 7px 8px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.12);
-  font-size: 0.9rem;
 }
-.talk-line.tone-gloat { border-left-color: #eab308; }
-.talk-line.tone-sad { border-left-color: #94a3b8; }
-.talk-line.tone-afraid { border-left-color: #60a5fa; }
-.talk-line.tone-angry { border-left-color: #ef4444; }
-.talk-line.tone-warm,
-.talk-line.tone-joy { border-left-color: #22c55e; }
+.badge {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  font-size: 18px;
+  line-height: 1;
+}
+.badge.ours {
+  background: rgba(253, 230, 138, 0.16);
+  color: #fde68a;
+}
+.badge.theirs {
+  background: rgba(252, 165, 165, 0.16);
+  color: #fca5a5;
+}
+.talk-body {
+  min-width: 0;
+}
 .who {
   font-weight: 700;
   margin-right: 6px;
 }
 .who.ours { color: #fde68a; }
 .who.theirs { color: #fca5a5; }
-.what { color: #e2e8f0; }
+.ty {
+  font-size: 0.72rem;
+  color: rgba(148, 163, 184, 0.9);
+}
+.what {
+  color: #f1f5f9;
+  font-size: 0.9rem;
+  line-height: 1.3;
+}
+.moves {
+  max-height: 26vh;
+  overflow-y: auto;
+  border-radius: 10px;
+  background: rgba(2, 6, 23, 0.35);
+  padding: 6px 8px;
+}
+.move-row {
+  display: grid;
+  grid-template-columns: 34px 1fr 1fr;
+  gap: 6px;
+  padding: 2px 0;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85rem;
+}
+.move-n {
+  color: rgba(148, 163, 184, 0.8);
+}
+.move-ply {
+  color: #e2e8f0;
+}
+.move-ply.chaos {
+  color: #d8b4fe;
+  font-weight: 600;
+}
+.sheet-glyph {
+  font-size: 30px;
+  line-height: 1;
+}
+.sheet-glyph.ours { color: #fde68a; }
+.sheet-glyph.theirs { color: #fca5a5; }
+.mood-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.mood-label {
+  flex: 0 0 84px;
+}
 .spin {
   animation: spin 0.9s linear infinite;
 }

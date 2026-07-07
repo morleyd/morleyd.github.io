@@ -58,4 +58,24 @@ describe('chaos offers and limits (controller)', () => {
     g.playerTap('a1')
     expect(g.chaosTargets().length).toBe(0)
   })
+
+  it('tantrum: a furious piece knocks an adjacent enemy off the board', () => {
+    const g = new WizardGame('rage')
+    g.reset('rage', '4k3/8/8/3p4/3Q4/8/8/4K3 w - - 0 1') // white Q d4, black pawn d5
+    g.settings.chaos = 1
+    g.soulAt('d4')!.mood.anger = 1 // seething
+    const u = g.spontaneousChaos()
+    expect(u).not.toBeNull()
+    expect(g.chess.get('d5')).toBeFalsy() // pawn was shoved off
+  })
+
+  it('defector: a disgruntled pawn switches sides when White is losing badly', () => {
+    const g = new WizardGame('defect')
+    g.reset('defect', '3qk3/8/8/8/8/8/4P3/4K3 w - - 0 1') // black up a queen
+    g.settings.chaos = 1
+    g.soulAt('e2')!.persona.obedience = 0.1 // ready to quit
+    const u = g.spontaneousChaos()
+    expect(u).not.toBeNull()
+    expect(g.chess.get('e2')?.color).toBe('b') // now plays for the enemy
+  })
 })

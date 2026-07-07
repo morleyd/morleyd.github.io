@@ -12,7 +12,15 @@ import { rngFromSeed } from '../seed'
 import { applyMove, createSociety, scanBoard, soulAt, type Society } from './social'
 import { createDialogueState, heckleLine, resistLine, speak, suggestLine, type DialogueState } from './dialogue'
 import { assessMove, bestOpportunity, PIECE_VALUE } from './assess'
-import { applyChaosMove, bishopTargets, jetpackTargets } from './chaos'
+import {
+  adjacentSquares,
+  applyChaosMove,
+  bishopTargets,
+  defect,
+  jetpackTargets,
+  knockOff,
+  materialBalance,
+} from './chaos'
 import { DEFAULT_SETTINGS, type WizardSettings } from './settings'
 import type { Color, GameEvent, PieceSoul, PieceType, Square, Utterance } from './types'
 
@@ -63,6 +71,7 @@ export class WizardGame {
   lastTo: Square | null = null
   lastMoverId: string | null = null
   lastMoveRisky = false
+  moveLog: string[] = [] // notation for every ply, chaos moves included
   settings: WizardSettings = { ...DEFAULT_SETTINGS }
   private dialogue: DialogueState
   private rng: () => number
@@ -91,6 +100,7 @@ export class WizardGame {
     this.lastTo = null
     this.lastMoverId = null
     this.lastMoveRisky = false
+    this.moveLog = []
     this.introduced.clear()
     this.resist = null
     this.lastSuggestPly = -99
@@ -182,6 +192,8 @@ export class WizardGame {
     const moverId = this.society.bySquare[move.to]
     if (this.chess.isCheckmate() && moverId) events.push({ kind: 'checkmate', soulId: moverId, salience: 120 })
     else if (this.chess.isCheck() && moverId) events.push({ kind: 'check', soulId: moverId, salience: 54 })
+
+    this.moveLog.push(move.san)
 
     // Record who moved and whether it looked risky, for the travel animation.
     this.lastFrom = move.from
@@ -283,6 +295,9 @@ export class WizardGame {
   chaosTargets(): Square[] {
     return this.offer ? this.offer.targets : []
   }
+  private pick<T>(a: T[]): T {
+    return a[Math.floor(this.rng() * a.length)]
+  }
 
   /** Decide (once, at selection) whether this piece offers a wild move. */
   private computeOffer(from: Square): ChaosOffer | null {
@@ -299,9 +314,9 @@ export class WizardGame {
     }
 
     if (piece.type === 'r') {
-      // A frustrated, boxed-in rook tries something diagonal.
+      // A cooped-up rook fancies a diagonal.
       const mobility = this.chess.moves({ square: from }).length
-      const o = build('disguise', mobility <= 4, () => bishopTargets(this.chess, from))
+      const o = build('disguise', mobility <= 6, () => bishopTargets(this.chess, from))
       if (o) return o
     }
     if (piece.type === 'n') {
@@ -317,6 +332,7 @@ export class WizardGame {
     const soul = this.soulAt(offer.from)
     const res = this.relocate(offer.from, to, true)
     this.usedStunts.add(offer.type)
+    this.moveLog.push(`🎩 ${offer.type === 'disguise' ? 'R' : 'N'}→${to}`)
     this.offer = null
     this.selected = null
     this.resist = null
@@ -331,30 +347,147 @@ export class WizardGame {
     return { moved: true, utterances }
   }
 
-  /** A terrified piece flees one square backward on its own (spontaneous). */
-  coldFeet(): Utterance | null {
-    if (!this.canPlay || this.settings.chaos <= 0 || this.usedStunts.has('coldfeet')) return null
+  /** After the engine replies: one spontaneous stunt may occur, either army. */
+  spontaneousChaos(): Utterance | null {
+    if (!this.canPlay || this.settings.chaos <= 0) return null
+    return this.tantrum() ?? this.coldFeet() ?? this.defector()
+  }
+
+  /** A terrified piece flees one square (spontaneous, either colour). */
+  private coldFeet(): Utterance | null {
+    if (this.usedStunts.has('coldfeet')) return null
     const scared = Object.values(this.society.souls)
-      .filter((s) => !s.captured && s.color === PLAYER && s.square && s.mood.fear >= 0.7)
+      .filter((s) => !s.captured && s.square && s.mood.fear >= 0.6)
       .sort((a, b) => b.mood.fear - a.mood.fear)
     for (const s of scared) {
       const sq = s.square as Square
       const rank = Number(sq[1])
-      if (rank <= 1) continue
-      if (this.chess.attackers(sq, opp(PLAYER)).length === 0) continue
-      const behind = (sq[0] + (rank - 1)) as Square
+      const back = s.color === 'w' ? rank - 1 : rank + 1
+      if (back < 1 || back > 8) continue
+      if (this.chess.attackers(sq, opp(s.color)).length === 0) continue
+      const behind = (sq[0] + back) as Square
       if (this.chess.get(behind)) continue
-      if (this.rng() >= this.settings.chaos * 0.4) continue
+      if (this.rng() >= this.settings.chaos) continue
       if (!this.relocate(sq, behind, false)) continue
       this.usedStunts.add('coldfeet')
+      this.moveLog.push(`🎩 ${behind} (cold feet)`)
       return {
         soulId: s.id,
         square: behind,
-        color: PLAYER,
+        color: s.color,
         name: s.persona.name,
         text: 'Nope! Backing away — nope nope nope.',
         tone: 'afraid',
       }
+    }
+    return null
+  }
+
+  /** A max-rage piece knocks an adjacent enemy clean off the board. */
+  private tantrum(): Utterance | null {
+    if (this.usedStunts.has('tantrum')) return null
+    const furious = Object.values(this.society.souls)
+      .filter((s) => !s.captured && s.square && s.mood.anger >= 0.8)
+      .sort((a, b) => b.mood.anger - a.mood.anger)
+    for (const s of furious) {
+      const sq = s.square as Square
+      const foes = adjacentSquares(sq).filter((a) => {
+        const p = this.chess.get(a)
+        return p && p.color !== s.color && p.type !== 'k'
+      })
+      if (!foes.length) continue
+      if (this.rng() >= this.settings.chaos) continue
+      const target = this.pick(foes)
+      const victimId = this.society.bySquare[target]
+      if (!knockOff(this.chess, target)) continue
+      if (victimId) {
+        const v = this.society.souls[victimId]
+        if (v) {
+          v.captured = true
+          v.square = null
+        }
+        delete this.society.bySquare[target]
+      }
+      this.usedStunts.add('tantrum')
+      this.lastFrom = null
+      this.lastTo = target
+      this.lastMoverId = s.id
+      this.lastMoveRisky = false
+      this.moveLog.push(`🎩 ×${target} (tantrum)`)
+      return {
+        soulId: s.id,
+        square: sq,
+        color: s.color,
+        name: s.persona.name,
+        text: "THAT'S IT — you're OFF the board!",
+        tone: 'angry',
+      }
+    }
+    return null
+  }
+
+  /** A disgruntled pawn defects to the enemy when White is losing badly. */
+  private defector(): Utterance | null {
+    if (this.usedStunts.has('defector')) return null
+    if (materialBalance(this.chess) > -5) return null
+    const pawns = Object.values(this.society.souls)
+      .filter((s) => !s.captured && s.color === PLAYER && s.type === 'p' && s.square && (s.persona.obedience ?? 0.6) < 0.55)
+      .sort((a, b) => (a.persona.obedience ?? 0.6) - (b.persona.obedience ?? 0.6))
+    for (const s of pawns) {
+      if (this.rng() >= this.settings.chaos) continue
+      const sq = s.square as Square
+      if (!defect(this.chess, sq)) continue
+      s.color = 'b'
+      this.usedStunts.add('defector')
+      this.lastFrom = null
+      this.lastTo = sq
+      this.lastMoverId = s.id
+      this.lastMoveRisky = false
+      this.moveLog.push(`🎩 ${sq} defects`)
+      return {
+        soulId: s.id,
+        square: sq,
+        color: 'b',
+        name: s.persona.name,
+        text: "Management's been terrible. Hello, other side!",
+        tone: 'gloat',
+      }
+    }
+    return null
+  }
+
+  /** The enemy sometimes pulls a stunt as its whole turn (replacing the engine
+   * move) — so chaos is visible even to a passive player. Returns lines, or null
+   * to fall through to a normal engine move. */
+  aiChaos(): Utterance[] | null {
+    if (this.settings.chaos <= 0 || this.usedStunts.has('aichaos')) return null
+    if (this.rng() >= this.settings.chaos * 0.6) return null
+    const fen = this.chess.fen()
+    for (const s of Object.values(this.society.souls)) {
+      if (s.captured || s.color !== 'b' || !s.square) continue
+      let targets: Square[] = []
+      let type: ChaosType | null = null
+      if (s.type === 'n') {
+        targets = jetpackTargets(this.chess, s.square)
+        type = 'jetpack'
+      } else if (s.type === 'r') {
+        targets = bishopTargets(this.chess, s.square)
+        type = 'disguise'
+      }
+      if (!type) continue
+      targets = targets.filter((to) => !!applyChaosMove(new Chess(fen), s.square as Square, to))
+      if (!targets.length) continue
+      const caps = targets.filter((to) => this.chess.get(to))
+      const to = this.pick(caps.length ? caps : targets)
+      this.relocate(s.square, to, true)
+      this.usedStunts.add('aichaos')
+      this.moveLog.push(`🎩 ${type === 'disguise' ? 'R' : 'N'}→${to} (enemy)`)
+      const line = type === 'disguise' ? 'Who says a rook plays it straight?' : "The enemy's got jetpacks too!"
+      const utter: Utterance[] = [{ soulId: s.id, square: to, color: 'b', name: s.persona.name, text: line, tone: 'gloat' }]
+      utter.push(
+        ...speak(this.society, scanBoard(this.society, this.chess), this.dialogue, this.rng, this.settings.chatter, 1),
+      )
+      return utter
     }
     return null
   }

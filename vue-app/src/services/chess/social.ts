@@ -67,6 +67,7 @@ export function createSociety(chess: Chess, rng: Rng): Society {
         square: cell.square,
         persona: draw(color, type),
         stamina: ROSTER[type].stamina,
+        sass: 0.25 + rng() * 0.6,
         captured: false,
         mood: { impatience: 0, fear: 0, anger: 0, confidence: 0.4, joy: 0.35 },
         idleFor: 0,
