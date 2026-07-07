@@ -242,7 +242,7 @@ onBeforeUnmount(stopTimer)
       <v-chip variant="tonal" prepend-icon="mdi-timer-outline">{{ fmtTime(elapsed) }}</v-chip>
     </div>
 
-    <div class="board-wrap game-board" style="--board-fit: 56vh">
+    <div class="board-wrap game-board" style="--board-fit: calc(100dvh - 240px)">
       <div class="board" :style="{ gridTemplateColumns: `repeat(${size}, 1fr)` }">
         <button
           v-for="(cell, i) in cells"

@@ -185,7 +185,7 @@ onMounted(() => {
       </v-chip>
     </div>
 
-    <div class="board-wrap game-board" style="--board-fit: 58vh">
+    <div class="board-wrap game-board" style="--board-fit: calc(100dvh - 210px)">
       <div class="board" :style="{ gridTemplateColumns: `repeat(${size}, 1fr)` }">
         <button v-for="(v, i) in lights" :key="i" type="button" class="light" :class="{ 'light--on': v === 1 }" @click="toggle(i)"></button>
       </div>

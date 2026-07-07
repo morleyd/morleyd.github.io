@@ -236,7 +236,7 @@ onMounted(() => {
     <div
       class="sort-grid game-board"
       :class="{ 'sort-grid--solved': solved }"
-      :style="{ gridTemplateColumns: `repeat(${cols}, 1fr)`, '--board-fit': '62vh' }"
+      :style="{ gridTemplateColumns: `repeat(${cols}, 1fr)`, '--board-fit': 'calc(100dvh - 210px)' }"
     >
       <div
         v-for="(home, pos) in order"

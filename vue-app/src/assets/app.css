@@ -31,9 +31,11 @@
 
 /* A square game board that always fits within the viewport (never off-screen).
    Each game sets --board-fit to leave room for its own controls. */
+/* Sized to the smaller of the container width and the *visible* viewport height
+   (dvh, so it's correct on mobile where the address bar shrinks the viewport). */
 .game-board {
   width: 100%;
-  max-width: min(100%, var(--board-fit, 60vh));
+  max-width: min(100%, var(--board-fit, 70dvh));
   margin-left: auto;
   margin-right: auto;
 }

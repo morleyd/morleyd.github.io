@@ -192,7 +192,7 @@ onMounted(() => {
       </v-chip>
     </div>
 
-    <div class="board-wrap game-board" style="--board-fit: 52vh">
+    <div class="board-wrap game-board" style="--board-fit: calc(100dvh - 270px)">
       <div class="board" :style="{ gridTemplateColumns: `repeat(${size}, 1fr)` }">
         <div v-for="(c, i) in grid" :key="i" class="tile" :style="{ background: colors[c] }"></div>
       </div>

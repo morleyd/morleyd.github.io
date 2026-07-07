@@ -266,7 +266,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- Board -->
-    <div class="board-wrap game-board" style="--board-fit: 52vh">
+    <div class="board-wrap game-board" style="--board-fit: calc(100dvh - 330px)">
       <div
         class="board"
         :style="{ gridTemplateColumns: `repeat(${size}, 1fr)` }"
