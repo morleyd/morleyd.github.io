@@ -66,6 +66,15 @@ const games: GameCard[] = [
     gradient: 'linear-gradient(135deg, rgba(142, 36, 170, 0.42), rgba(248, 113, 113, 0.24))',
   },
   {
+    key: 'lights-out',
+    title: 'Lights Out',
+    description:
+      'Flip lights and their neighbors to turn the whole board off. Every puzzle scored against the true optimal.',
+    icon: 'mdi-lightbulb-group-outline',
+    to: '/lights-out',
+    gradient: 'linear-gradient(135deg, rgba(142, 36, 170, 0.42), rgba(251, 191, 36, 0.24))',
+  },
+  {
     key: 'time-since',
     title: 'Time Since',
     description:

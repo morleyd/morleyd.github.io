@@ -48,6 +48,12 @@ const router = createRouter({
       meta: { gamePage: true },
     },
     {
+      path: '/lights-out',
+      name: 'lights-out',
+      component: () => import('../views/LightsOutView.vue'),
+      meta: { gamePage: true },
+    },
+    {
       path: '/time-since',
       name: 'time-since',
       component: () => import('../views/TimeSinceView.vue'),

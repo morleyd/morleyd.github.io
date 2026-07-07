@@ -21,6 +21,7 @@ const gamesRouteNames = new Set([
   'gradient-sort',
   'snake',
   'minesweeper',
+  'lights-out',
   'time-since',
 ])
 
