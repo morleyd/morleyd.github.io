@@ -16,10 +16,18 @@ type Rng = () => number
 export interface DialogueState {
   recent: string[] // ring buffer of recently spoken lines
   lastSpoke: Record<string, number> // soulId -> ply
-  lastAmbient: number // ply of the last low-priority (ambient) line
+  // Ambient chatter is budgeted per side so the enemy isn't drowned out by your
+  // own pieces — the two armies each get their own quiet slot.
+  lastAmbientAlly: number
+  lastAmbientEnemy: number
 }
 
-export const createDialogueState = (): DialogueState => ({ recent: [], lastSpoke: {}, lastAmbient: -99 })
+export const createDialogueState = (): DialogueState => ({
+  recent: [],
+  lastSpoke: {},
+  lastAmbientAlly: -99,
+  lastAmbientEnemy: -99,
+})
 
 const RECENT_MAX = 40
 
@@ -100,6 +108,8 @@ const THREATENED_BRAVE = [
   'Threaten all you like — I do not flinch.',
   'Make your move, {target}. I will be ready.',
   'Is that supposed to frighten me? Cute.',
+  "You found me, {target}? Good. Saves me the trouble of finding you.",
+  'Over here, {target}. If you think you can.',
 ]
 const THREATENED_TIMID = [
   'Um. Is anyone going to defend me? Anyone??',
@@ -109,6 +119,10 @@ const THREATENED_TIMID = [
   'Why is nobody moving?! {target} is RIGHT THERE!',
   'I am too young and too flat to die!',
   'Is it too late to go back to my starting square?',
+  'Wait — is that {vtype} pointed at ME?!',
+  "They've spotted me! I'm wide open here!",
+  'Retreat! Somebody, cover me!',
+  'Nothing to see here, {target}. Look away. Please look away.',
 ]
 
 const DEFENDED = [
@@ -255,7 +269,8 @@ export function speak(
   const out: Utterance[] = []
   const spokenThisPly = new Set<string>()
   const ranked = [...events].sort((a, b) => b.salience - a.salience)
-  let ambientUsed = false
+  let ambientAlly = false
+  let ambientEnemy = false
 
   for (const event of ranked) {
     if (out.length >= max) break
@@ -264,12 +279,15 @@ export function speak(
     if (spokenThisPly.has(speaker.id)) continue
 
     const priority = PRIORITY.has(event.kind)
+    const enemy = speaker.color === 'b' // the player is always White
     if (!priority) {
-      // Ambient banter: at most one per call, spaced several plies apart, and
-      // usually skipped even then. Silence is the norm.
-      if (ambientUsed) continue
-      if (society.ply - state.lastAmbient < 4) continue
-      if (rng() < 0.6) continue
+      // Ambient banter: one per side per call, spaced apart, usually skipped.
+      // The enemy is a touch chattier so it taunts and cries out more often.
+      if (enemy ? ambientEnemy : ambientAlly) continue
+      const gap = enemy ? 3 : 4
+      const last = enemy ? state.lastAmbientEnemy : state.lastAmbientAlly
+      if (society.ply - last < gap) continue
+      if (rng() < (enemy ? 0.4 : 0.6)) continue
     }
 
     // Per-piece cooldown so nobody monologues (looser for dramatic moments).
@@ -300,8 +318,13 @@ export function speak(
     state.recent.push(text)
     if (state.recent.length > RECENT_MAX) state.recent.shift()
     if (!priority) {
-      ambientUsed = true
-      state.lastAmbient = society.ply
+      if (enemy) {
+        ambientEnemy = true
+        state.lastAmbientEnemy = society.ply
+      } else {
+        ambientAlly = true
+        state.lastAmbientAlly = society.ply
+      }
     }
   }
   return out
