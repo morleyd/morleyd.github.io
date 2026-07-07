@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useDisplay } from 'vuetify'
 import AppBar from '@/components/AppBar.vue'
@@ -12,6 +12,17 @@ const { mobile } = useDisplay()
 // on mobile only — where vertical space is tight (desktop keeps the nav).
 const hideAppBar = computed(
   () => route.meta.hideAppBar || (route.meta.gamePage && mobile.value),
+)
+
+// On mobile, lock page scroll for board games so they fill the screen and
+// touch-dragging tiles doesn't scroll the page (opt-in via route meta).
+const lockScroll = computed(() => route.meta.lockScroll && mobile.value)
+watch(
+  lockScroll,
+  (lock) => {
+    document.documentElement.style.overflow = lock ? 'hidden' : ''
+  },
+  { immediate: true },
 )
 
 function navTo(value) {

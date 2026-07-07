@@ -1,11 +1,13 @@
 <script setup lang="ts">
 /**
- * Minesweeper — reveal all safe cells without hitting a mine.
- * First click is always safe. Tap to dig, long-press / right-click / flag-mode
- * to flag. Timer + best time per difficulty (localStorage).
+ * Minesweeper — clear every safe cell using the number clues. Boards are
+ * generated from a seed (shareable). Tap to dig, right-click / flag-mode to flag.
  */
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import GameToolbar from '@/components/GameToolbar.vue'
+import { copyToClipboard } from '@/services/share'
+import { randomSeed, rngFromSeed } from '@/services/seed'
 
 interface Cell {
   mine: boolean
@@ -19,16 +21,22 @@ const presets: Record<string, { size: number; mines: number }> = {
   Medium: { size: 12, mines: 24 },
   Hard: { size: 16, mines: 50 },
 }
+const levelKey: Record<string, 'Easy' | 'Medium' | 'Hard'> = { E: 'Easy', M: 'Medium', H: 'Hard' }
+
+const route = useRoute()
+const router = useRouter()
+
 const level = ref<'Easy' | 'Medium' | 'Hard'>('Easy')
+const code = ref('')
 const size = computed(() => presets[level.value].size)
 const mineCount = computed(() => presets[level.value].mines)
 
 const cells = ref<Cell[]>([])
-const state = ref<'idle' | 'playing' | 'won' | 'lost'>('idle')
+const state = ref<'ready' | 'playing' | 'won' | 'lost'>('ready')
 const flagMode = ref(false)
 const elapsed = ref(0)
 const best = reactive<Record<string, number>>({})
-
+const snackbar = ref(false)
 let timer: ReturnType<typeof setInterval> | null = null
 
 const flagsUsed = computed(() => cells.value.filter((c) => c.flagged).length)
@@ -55,29 +63,20 @@ const stopTimer = () => {
   timer = null
 }
 
-const newGame = () => {
+const build = () => {
   stopTimer()
-  elapsed.value = 0
-  state.value = 'idle'
-  flagMode.value = false
-  cells.value = Array.from({ length: size.value * size.value }, () => ({
+  const n = size.value
+  const rng = rngFromSeed(`${level.value}|${code.value}`)
+  cells.value = Array.from({ length: n * n }, () => ({
     mine: false,
     revealed: false,
     flagged: false,
     adjacent: 0,
   }))
-}
-
-const placeMines = (safe: number) => {
-  const n = size.value
-  const forbidden = new Set([safe, ...neighbors(safe)])
-  const spots: number[] = []
-  for (let i = 0; i < n * n; i += 1) {
-    if (!forbidden.has(i)) spots.push(i)
-  }
-  // shuffle, take mineCount
+  // seeded mine placement (whole board deterministic → shareable)
+  const spots = Array.from({ length: n * n }, (_, i) => i)
   for (let i = spots.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1))
+    const j = Math.floor(rng() * (i + 1))
     ;[spots[i], spots[j]] = [spots[j], spots[i]]
   }
   spots.slice(0, mineCount.value).forEach((i) => {
@@ -86,6 +85,23 @@ const placeMines = (safe: number) => {
   cells.value.forEach((cell, i) => {
     if (!cell.mine) cell.adjacent = neighbors(i).filter((j) => cells.value[j].mine).length
   })
+  state.value = 'ready'
+  elapsed.value = 0
+  flagMode.value = false
+}
+
+const syncUrl = () => {
+  const lk = (Object.keys(levelKey).find((k) => levelKey[k] === level.value) || 'E')
+  router.replace({ name: 'minesweeper', params: { seed: `${lk}.${code.value}` } })
+}
+const newGame = () => {
+  code.value = randomSeed()
+  syncUrl()
+  build()
+}
+const changeLevel = (v: 'Easy' | 'Medium' | 'Hard') => {
+  level.value = v
+  newGame()
 }
 
 const floodReveal = (start: number) => {
@@ -95,17 +111,12 @@ const floodReveal = (start: number) => {
     const cell = cells.value[i]
     if (cell.revealed || cell.flagged || cell.mine) continue
     cell.revealed = true
-    if (cell.adjacent === 0) {
-      neighbors(i).forEach((j) => {
-        if (!cells.value[j].revealed) stack.push(j)
-      })
-    }
+    if (cell.adjacent === 0) neighbors(i).forEach((j) => !cells.value[j].revealed && stack.push(j))
   }
 }
 
 const checkWin = () => {
-  const revealed = cells.value.filter((c) => c.revealed).length
-  if (revealed === size.value * size.value - mineCount.value) {
+  if (cells.value.filter((c) => c.revealed).length === size.value * size.value - mineCount.value) {
     state.value = 'won'
     stopTimer()
     const b = best[level.value]
@@ -129,20 +140,14 @@ const toggleFlag = (i: number) => {
 const onCell = (i: number) => {
   if (state.value === 'won' || state.value === 'lost') return
   const cell = cells.value[i]
-  if (flagMode.value) {
-    toggleFlag(i)
-    return
-  }
+  if (flagMode.value) return toggleFlag(i)
   if (cell.flagged) return
-
-  if (state.value === 'idle') {
-    placeMines(i)
+  if (state.value === 'ready') {
     state.value = 'playing'
     timer = setInterval(() => {
       elapsed.value += 1
     }, 1000)
   }
-
   if (cell.mine) {
     cells.value.forEach((c) => {
       if (c.mine) c.revealed = true
@@ -162,19 +167,18 @@ const onContext = (i: number, e: Event) => {
 
 const numberColors = ['', '#60a5fa', '#4ade80', '#f87171', '#c084fc', '#fbbf24', '#22d3ee', '#e2e8f0', '#94a3b8']
 
-const changeLevel = (v: 'Easy' | 'Medium' | 'Hard') => {
-  level.value = v
-  newGame()
-}
+const fmtTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+const bestLabel = computed(() => (best[level.value] === undefined ? '—' : fmtTime(best[level.value])))
 
-const fmtTime = (s: number) => {
-  const m = Math.floor(s / 60)
-  const sec = s % 60
-  return `${m}:${String(sec).padStart(2, '0')}`
+const share = async () => {
+  const url = window.location.origin + route.fullPath
+  const line =
+    state.value === 'won'
+      ? `Cleared ${level.value} Minesweeper in ${fmtTime(elapsed.value)}. Beat my time!`
+      : `Try this ${level.value} Minesweeper board:`
+  await copyToClipboard(`${line}\n${url}`)
+  snackbar.value = true
 }
-const bestLabel = computed(() =>
-  best[level.value] === undefined ? '—' : fmtTime(best[level.value]),
-)
 
 onMounted(() => {
   try {
@@ -182,61 +186,70 @@ onMounted(() => {
   } catch {
     // ignore
   }
-  newGame()
+  const p = typeof route.params.seed === 'string' ? route.params.seed : ''
+  const m = /^([EMH])\.(.+)$/.exec(p)
+  if (m) {
+    level.value = levelKey[m[1]]
+    code.value = m[2]
+    build()
+  } else {
+    newGame()
+  }
 })
 onBeforeUnmount(stopTimer)
 </script>
 
 <template>
   <v-container class="py-6" max-width="640">
-    <GameToolbar title="Minesweeper">
+    <GameToolbar title="Minesweeper" shareable @share="share">
       <template #intro>
-        Tap to dig; right-click or the flag toggle to flag. First dig is always safe — clear every
-        cell that isn't a mine.
+        Dig every cell that isn't a mine. Number clues tell you how many mines touch that cell.
       </template>
       <template #settings>
         <div class="d-flex flex-column ga-4">
-          <v-btn-toggle
-            :model-value="level"
-            mandatory
-            density="compact"
-            variant="outlined"
-            divided
-            @update:model-value="changeLevel"
-          >
+          <v-btn-toggle :model-value="level" mandatory density="compact" variant="outlined" divided @update:model-value="changeLevel">
             <v-btn v-for="l in ['Easy', 'Medium', 'Hard']" :key="l" :value="l" size="small">{{ l }}</v-btn>
           </v-btn-toggle>
           <v-btn variant="tonal" color="primary" prepend-icon="mdi-refresh" @click="newGame">New game</v-btn>
         </div>
       </template>
+      <template #info>
+        <h3>Goal</h3>
+        <p>Reveal every safe cell without detonating a mine. Flag the mines to keep track.</p>
+        <h3>Controls</h3>
+        <ul>
+          <li><span class="k">Tap</span> a cell to dig it.</li>
+          <li><span class="k">Right-click</span>, or turn on <span class="k">Flag</span> mode, to place/remove a flag.</li>
+        </ul>
+        <h3>Reading the clues</h3>
+        <ul>
+          <li>A number is how many of the 8 neighboring cells are mines.</li>
+          <li>Blank cells have zero neighboring mines and open up their neighbors automatically.</li>
+        </ul>
+        <h3>Tips</h3>
+        <ul>
+          <li>If a number already touches that many flags, its other neighbors are safe to dig.</li>
+          <li>If a number equals its hidden neighbors, all of those are mines — flag them.</li>
+        </ul>
+      </template>
     </GameToolbar>
 
-    <!-- HUD -->
     <div class="d-flex align-center justify-space-between mb-3 ga-2">
-      <v-chip variant="tonal" prepend-icon="mdi-mine"> {{ minesLeft }} </v-chip>
-      <v-btn
-        :color="flagMode ? 'secondary' : undefined"
-        :variant="flagMode ? 'flat' : 'tonal'"
-        prepend-icon="mdi-flag"
-        size="small"
-        @click="flagMode = !flagMode"
-      >
-        Flag{{ flagMode ? ' ON' : '' }}
+      <v-chip variant="tonal" prepend-icon="mdi-mine">{{ minesLeft }}</v-chip>
+      <v-btn :color="flagMode ? 'secondary' : undefined" :variant="flagMode ? 'flat' : 'tonal'" prepend-icon="mdi-flag" size="small" @click="flagMode = !flagMode">
+        Flag{{ flagMode ? ' on' : '' }}
       </v-btn>
-      <v-chip variant="tonal" prepend-icon="mdi-timer-outline"> {{ fmtTime(elapsed) }} </v-chip>
+      <v-chip variant="tonal" prepend-icon="mdi-timer-outline">{{ fmtTime(elapsed) }}</v-chip>
     </div>
 
-    <div class="board-wrap">
+    <div class="board-wrap game-board" style="--board-fit: 56vh">
       <div class="board" :style="{ gridTemplateColumns: `repeat(${size}, 1fr)` }">
         <button
           v-for="(cell, i) in cells"
           :key="i"
           type="button"
           class="cell"
-          :class="{
-            'cell--revealed': cell.revealed,
-            'cell--mine': cell.revealed && cell.mine,
-          }"
+          :class="{ 'cell--revealed': cell.revealed, 'cell--mine': cell.revealed && cell.mine }"
           @click="onCell(i)"
           @contextmenu="onContext(i, $event)"
         >
@@ -247,23 +260,21 @@ onBeforeUnmount(stopTimer)
           </template>
         </button>
       </div>
-
       <div v-if="state === 'won' || state === 'lost'" class="overlay">
         <p class="text-h5 mb-1">{{ state === 'won' ? 'Cleared! 🎉' : 'Boom 💥' }}</p>
         <p v-if="state === 'won'" class="text-body-2 mb-3">Time {{ fmtTime(elapsed) }}</p>
-        <v-btn color="primary" variant="flat" prepend-icon="mdi-refresh" @click="newGame">Play again</v-btn>
+        <v-btn color="primary" variant="flat" prepend-icon="mdi-refresh" @click="newGame">New game</v-btn>
       </div>
     </div>
 
     <p class="text-caption text-medium-emphasis mt-3">Best ({{ level }}): {{ bestLabel }}</p>
+    <v-snackbar v-model="snackbar" :timeout="2600" color="secondary">Link copied — challenge a friend!</v-snackbar>
   </v-container>
 </template>
 
 <style scoped>
 .board-wrap {
   position: relative;
-  max-width: 560px;
-  margin: 0 auto;
 }
 .board {
   display: grid;
@@ -279,7 +290,7 @@ onBeforeUnmount(stopTimer)
   border-radius: 3px;
   background: rgba(124, 58, 237, 0.28);
   font-weight: 700;
-  font-size: clamp(0.6rem, 2.4vw, 1rem);
+  font-size: clamp(0.55rem, 2.2vw, 1rem);
   line-height: 1;
   cursor: pointer;
   transition: background 0.1s ease;

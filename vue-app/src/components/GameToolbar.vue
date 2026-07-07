@@ -1,18 +1,20 @@
 <script setup lang="ts">
 /**
- * Compact header for game pages.
- * - Desktop: full title + intro + inline settings (plenty of room).
- * - Mobile: a slim bar with a back-to-Games button, the title, and a cog menu
- *   holding the settings — so the game itself fits without scrolling.
- * The global app bar is hidden on mobile for these routes (see App.vue).
+ * Shared header for game pages.
+ * - Desktop: title + intro + inline settings, with info & share actions.
+ * - Mobile: slim bar (back / title / info / share / settings-cog); the game
+ *   fills the screen. The global app bar is hidden on mobile for these routes.
  */
+import { ref } from 'vue'
 import { useDisplay } from 'vuetify'
 import { useRouter } from 'vue-router'
 
-defineProps<{ title: string }>()
+defineProps<{ title: string; shareable?: boolean }>()
+const emit = defineEmits<{ share: [] }>()
 
 const { mobile } = useDisplay()
 const router = useRouter()
+const infoOpen = ref(false)
 </script>
 
 <template>
@@ -20,6 +22,8 @@ const router = useRouter()
   <div v-if="mobile" class="d-flex align-center ga-1 mb-3">
     <v-btn icon="mdi-arrow-left" variant="text" density="comfortable" @click="router.push({ name: 'games' })" />
     <h1 class="page-title page-title--flush mb-0 flex-grow-1 text-truncate">{{ title }}</h1>
+    <v-btn v-if="$slots.info" icon="mdi-information-outline" variant="text" density="comfortable" @click="infoOpen = true" />
+    <v-btn v-if="shareable" icon="mdi-share-variant" variant="text" density="comfortable" @click="emit('share')" />
     <v-menu v-if="$slots.settings" location="bottom end" :close-on-content-click="false">
       <template #activator="{ props }">
         <v-btn icon="mdi-cog-outline" variant="text" density="comfortable" v-bind="props" />
@@ -32,12 +36,32 @@ const router = useRouter()
 
   <!-- Desktop: full header -->
   <div v-else class="mb-4">
-    <h1 class="page-title">{{ title }}</h1>
-    <p v-if="$slots.intro" class="text-body-1 text-medium-emphasis mb-0">
+    <div class="d-flex align-center ga-2">
+      <h1 class="page-title mb-0">{{ title }}</h1>
+      <v-spacer />
+      <v-btn v-if="$slots.info" icon="mdi-information-outline" variant="text" @click="infoOpen = true" />
+      <v-btn v-if="shareable" icon="mdi-share-variant" variant="text" @click="emit('share')" />
+    </div>
+    <p v-if="$slots.intro" class="text-body-1 text-medium-emphasis mb-0 mt-2">
       <slot name="intro" />
     </p>
     <div v-if="$slots.settings" class="mt-4">
       <slot name="settings" />
     </div>
   </div>
+
+  <!-- Info dialog (both breakpoints) -->
+  <v-dialog v-model="infoOpen" max-width="520" scrollable>
+    <v-card color="surface">
+      <v-card-title class="d-flex align-center justify-space-between">
+        <span>{{ title }}</span>
+        <v-btn icon="mdi-close" variant="text" size="small" @click="infoOpen = false" />
+      </v-card-title>
+      <v-divider />
+      <v-card-text class="game-info">
+        <slot name="info" />
+      </v-card-text>
+    </v-card>
+  </v-dialog>
 </template>
+

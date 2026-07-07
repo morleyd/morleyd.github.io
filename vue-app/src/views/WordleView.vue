@@ -88,6 +88,7 @@ const snackbar = ref({
 const analysisDialog = ref(false)
 const shareMenu = ref(false)
 const helpMenu = ref(false)
+const infoOpen = ref(false)
 
 // Puzzle Type Tracking
 type PuzzleType = 'daily' | 'custom' | 'random'
@@ -656,13 +657,31 @@ onBeforeUnmount(() => {
 <template>
   <v-main class="wordle-main">
     <v-card class="pa-6 wordle-card" max-width="640" elevation="8">
-      <!-- Header Section with Hamburger Menu -->
+      <!-- Header: back arrow · title · info + options (matches the other games) -->
       <div class="d-flex align-center justify-space-between mb-4">
-        <!-- Hamburger Menu -->
-        <v-menu location="bottom start" :close-on-content-click="false">
-          <template #activator="{ props }">
-            <v-btn icon="mdi-menu" variant="text" v-bind="props" class="hamburger-menu-btn" />
-          </template>
+        <v-btn icon="mdi-arrow-left" variant="text" @click="$router.push({ name: 'games' })" />
+
+        <!-- Header Content -->
+        <div class="flex-grow-1 text-center px-2">
+          <p class="text-body-1 text-grey-lighten-1 mb-1">
+            Guess the hidden {{ WORD_LENGTH }}-letter word in {{ MAX_ATTEMPTS }} tries.
+          </p>
+          <p class="text-caption text-grey-lighten-1">
+            <template v-if="puzzleType === 'daily'">
+              {{ activeWordLabel }} · #{{ puzzleNumber }} · {{ puzzleDateLabel }}
+            </template>
+            <template v-else>
+              {{ activeWordLabel }}
+            </template>
+          </p>
+        </div>
+
+        <div class="d-flex align-center">
+          <v-btn icon="mdi-information-outline" variant="text" @click="infoOpen = true" />
+          <v-menu location="bottom end" :close-on-content-click="false">
+            <template #activator="{ props }">
+              <v-btn icon="mdi-cog-outline" variant="text" v-bind="props" class="hamburger-menu-btn" />
+            </template>
           <v-card class="menu-card" min-width="280">
             <v-card-title class="text-subtitle-1 font-weight-semibold">
               Game Options
@@ -670,9 +689,6 @@ onBeforeUnmount(() => {
             <v-divider />
             <v-card-text class="pa-0">
               <v-list density="compact" class="pa-0">
-                <!-- Back to the Games landing (app bar is hidden while playing) -->
-                <v-list-item prepend-icon="mdi-arrow-left" title="Back to Games" :to="{ name: 'games' }" />
-                <v-divider />
                 <!-- Hard Mode Toggle -->
                 <v-list-item>
                   <v-tooltip location="right">
@@ -746,25 +762,8 @@ onBeforeUnmount(() => {
               </v-list>
             </v-card-text>
           </v-card>
-        </v-menu>
-
-        <!-- Header Content -->
-        <div class="flex-grow-1 text-center">
-          <p class="text-body-1 text-grey-lighten-1 mb-1">
-            Guess the hidden {{ WORD_LENGTH }}-letter word in {{ MAX_ATTEMPTS }} tries.
-          </p>
-          <p class="text-caption text-grey-lighten-1">
-            <template v-if="puzzleType === 'daily'">
-              {{ activeWordLabel }} · #{{ puzzleNumber }} · {{ puzzleDateLabel }}
-            </template>
-            <template v-else>
-              {{ activeWordLabel }}
-            </template>
-          </p>
+          </v-menu>
         </div>
-
-        <!-- Spacer for alignment -->
-        <div style="width: 48px"></div>
       </div>
 
       <!-- Custom Game Menu (separate menu) -->
@@ -889,6 +888,40 @@ onBeforeUnmount(() => {
     <v-snackbar v-model="snackbar.show" :timeout="2400" :color="snackbar.color" location="top">
       {{ snackbar.message }}
     </v-snackbar>
+
+    <!-- Info Dialog -->
+    <v-dialog v-model="infoOpen" max-width="520" scrollable>
+      <v-card color="surface">
+        <v-card-title class="d-flex align-center justify-space-between">
+          <span>Wordle</span>
+          <v-btn icon="mdi-close" variant="text" size="small" @click="infoOpen = false" />
+        </v-card-title>
+        <v-divider />
+        <v-card-text class="game-info">
+          <h3>Goal</h3>
+          <p>Guess the hidden 5-letter word in six tries.</p>
+          <h3>Tile colors</h3>
+          <ul>
+            <li><span class="k">Green</span> — right letter, right spot.</li>
+            <li><span class="k">Yellow</span> — right letter, wrong spot.</li>
+            <li><span class="k">Gray</span> — not in the word.</li>
+          </ul>
+          <h3>Modes (⚙ menu)</h3>
+          <ul>
+            <li><span class="k">Daily</span> — the same puzzle for everyone each day.</li>
+            <li><span class="k">Free Play</span> — endless random words.</li>
+            <li><span class="k">Custom Game</span> — set a word and share a link with a friend.</li>
+            <li><span class="k">Hard Mode</span> — revealed hints must be reused in later guesses.</li>
+            <li><span class="k">Remaining Words</span> — see which answers still fit your clues.</li>
+          </ul>
+          <h3>Tips</h3>
+          <ul>
+            <li>Open with a word rich in vowels and common letters (e.g. CRANE, SLATE).</li>
+            <li>Use your second guess to test a fresh set of letters, not to chase one green.</li>
+          </ul>
+        </v-card-text>
+      </v-card>
+    </v-dialog>
 
 <!-- Analysis Dialog -->
 <v-dialog v-model="analysisDialog" width="900">

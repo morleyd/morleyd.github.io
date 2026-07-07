@@ -29,6 +29,41 @@
   display: none;
 }
 
+/* A square game board that always fits within the viewport (never off-screen).
+   Each game sets --board-fit to leave room for its own controls. */
+.game-board {
+  width: 100%;
+  max-width: min(100%, var(--board-fit, 60vh));
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* Shared styling for the in-game info dialogs */
+.game-info h3 {
+  font-size: 1rem;
+  font-weight: 700;
+  margin: 16px 0 6px;
+}
+.game-info h3:first-child {
+  margin-top: 0;
+}
+.game-info p {
+  margin-bottom: 10px;
+  line-height: 1.5;
+}
+.game-info ul {
+  margin: 0 0 10px;
+  padding-left: 20px;
+}
+.game-info li {
+  margin-bottom: 4px;
+  line-height: 1.45;
+}
+.game-info .k {
+  color: rgb(var(--v-theme-secondary));
+  font-weight: 600;
+}
+
 @media (max-width: 600px) {
   .page-title {
     font-size: 1.5rem;

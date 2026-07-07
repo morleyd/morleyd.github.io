@@ -6,6 +6,7 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import GameToolbar from '@/components/GameToolbar.vue'
+import { copyToClipboard } from '@/services/share'
 
 interface Cell {
   x: number
@@ -179,6 +180,13 @@ const changeSpeed = (v: 'Slow' | 'Normal' | 'Fast') => {
   if (state.value === 'running') runTimer()
 }
 
+const snackbar = ref(false)
+const share = async () => {
+  const url = window.location.origin + '/snake'
+  await copyToClipboard(`I scored ${score.value} in Snake${score.value === best.value && score.value > 0 ? ' (my best!)' : ''}. Beat me!\n${url}`)
+  snackbar.value = true
+}
+
 onMounted(() => {
   try {
     best.value = Number(localStorage.getItem('snake-best')) || 0
@@ -196,10 +204,30 @@ onBeforeUnmount(() => {
 
 <template>
   <v-container class="py-6" max-width="620">
-    <GameToolbar title="Snake">
+    <GameToolbar title="Snake" shareable @share="share">
       <template #intro>
         Arrow keys / WASD, the d-pad, or swipe. Eat the food to grow — don't hit the walls or
         yourself.
+      </template>
+      <template #info>
+        <h3>Goal</h3>
+        <p>Guide the snake to eat food and grow as long as possible without crashing.</p>
+        <h3>Controls</h3>
+        <ul>
+          <li><span class="k">Arrow keys</span> or <span class="k">WASD</span> on desktop.</li>
+          <li>The on-screen <span class="k">d-pad</span> or a <span class="k">swipe</span> on mobile.</li>
+          <li><span class="k">Space</span> pauses.</li>
+        </ul>
+        <h3>Rules</h3>
+        <ul>
+          <li>Each food eaten grows the snake by one and adds a point.</li>
+          <li>You lose if you hit a wall or your own body. You can't reverse directly into yourself.</li>
+        </ul>
+        <h3>Tips</h3>
+        <ul>
+          <li>Use the edges to stall safely while you plan a route to the food.</li>
+          <li>Leave yourself an exit — don't coil into a dead end.</li>
+        </ul>
       </template>
       <template #settings>
         <div class="d-flex align-center flex-wrap ga-6">
@@ -238,7 +266,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- Board -->
-    <div class="board-wrap">
+    <div class="board-wrap game-board" style="--board-fit: 52vh">
       <div
         class="board"
         :style="{ gridTemplateColumns: `repeat(${size}, 1fr)` }"
@@ -271,6 +299,7 @@ onBeforeUnmount(() => {
       <v-btn icon="mdi-chevron-right" variant="tonal" class="dpad--right" @click="setDir(1, 0)" />
       <v-btn icon="mdi-chevron-down" variant="tonal" class="dpad--down" @click="setDir(0, 1)" />
     </div>
+    <v-snackbar v-model="snackbar" :timeout="2600" color="secondary">Score copied — challenge a friend!</v-snackbar>
   </v-container>
 </template>
 
@@ -282,8 +311,6 @@ onBeforeUnmount(() => {
 
 .board-wrap {
   position: relative;
-  max-width: 520px;
-  margin: 0 auto;
 }
 
 .board {

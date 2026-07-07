@@ -7,6 +7,7 @@
  *  - a separate list of letters that are NOT in the word (gray)
  */
 import { computed, ref } from 'vue'
+import GameToolbar from '@/components/GameToolbar.vue'
 import { answerBank } from '@/services/wordLists'
 import { WORD_LENGTH, evaluateGuess, statusesToPattern } from '@/services/wordleLogic'
 
@@ -156,12 +157,27 @@ const reset = () => {
 <template>
   <v-main class="helper-main">
     <v-card class="pa-5 pa-sm-6 helper-card" max-width="640" elevation="8">
-      <div class="text-center mb-4">
-        <h1 class="page-title mb-1">Wordle Helper</h1>
-        <p class="text-body-2 text-grey-lighten-1">
+      <GameToolbar title="Wordle Helper">
+        <template #intro>
           Fill in what you know and the list of possible answers narrows as you go.
-        </p>
-      </div>
+        </template>
+        <template #info>
+          <h3>What it does</h3>
+          <p>Enter the clues you've collected and it lists every remaining answer that fits.</p>
+          <h3>How to enter clues</h3>
+          <ul>
+            <li>For each spot, type the <span class="k">correct (green)</span> letter if you know it.</li>
+            <li>Add <span class="k">wrong-spot (yellow)</span> letters that belong in the word but not at that position.</li>
+            <li>List <span class="k">gray</span> letters under "not in the word".</li>
+            <li>Use <span class="k">letter counts</span> when a letter appears more than once (e.g. two E's).</li>
+          </ul>
+          <h3>Tips</h3>
+          <ul>
+            <li>Enter clues as you play — the possible-word count shrinks fast.</li>
+            <li>Turn on "suggested guesses" to see high-information next words.</li>
+          </ul>
+        </template>
+      </GameToolbar>
 
       <p class="text-subtitle-2 mb-1">For each spot: the correct letter, plus any letters that belong in the word but <em>not</em> here.</p>
 

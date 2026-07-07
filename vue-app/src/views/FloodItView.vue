@@ -1,19 +1,26 @@
 <script setup lang="ts">
 /**
- * Flood It — starting from the top-left, pick a color to flood the connected
- * region; absorb the whole board into one color in as few moves as possible.
- * "Par" is a greedy solver's move count — match or beat it.
+ * Flood It — flood from the top-left corner, picking colors to absorb the board
+ * into one color. Seeded (shareable). Moves scored vs a greedy "par".
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import GameToolbar from '@/components/GameToolbar.vue'
+import { copyToClipboard } from '@/services/share'
+import { randomSeed, rngFromSeed } from '@/services/seed'
 
 const PALETTE = ['#ef4444', '#f59e0b', '#eab308', '#22c55e', '#3b82f6', '#a855f7']
 
+const route = useRoute()
+const router = useRouter()
+
 const size = ref(11)
 const colorCount = ref(6)
+const code = ref('')
 const grid = ref<number[]>([])
 const moves = ref(0)
 const par = ref(0)
+const snackbar = ref(false)
 
 const colors = computed(() => PALETTE.slice(0, colorCount.value))
 const solved = computed(() => grid.value.length > 0 && grid.value.every((c) => c === grid.value[0]))
@@ -29,7 +36,6 @@ const neighbors = (i: number, n: number): number[] => {
   return out
 }
 
-// Cells connected to the top-left through its current color.
 const regionOf = (g: number[], n: number): number[] => {
   const color = g[0]
   const seen = new Uint8Array(g.length)
@@ -54,7 +60,6 @@ const flood = (g: number[], n: number, k: number) => {
   for (const i of regionOf(g, n)) g[i] = k
 }
 
-// Greedy: each move pick the color that grows the flooded region the most.
 const greedyPar = (initial: number[], n: number, c: number): number => {
   const g = initial.slice()
   let count = 0
@@ -67,9 +72,9 @@ const greedyPar = (initial: number[], n: number, c: number): number => {
       if (k === g[0]) continue
       const tmp = g.slice()
       flood(tmp, n, k)
-      const size = regionOf(tmp, n).length
-      if (size > bestSize) {
-        bestSize = size
+      const s = regionOf(tmp, n).length
+      if (s > bestSize) {
+        bestSize = s
         bestColor = k
       }
     }
@@ -87,25 +92,60 @@ const pick = (k: number) => {
   moves.value += 1
 }
 
-const newGame = () => {
+const build = () => {
   const n = size.value
   const c = colorCount.value
+  const rng = rngFromSeed(`${n}x${c}|${code.value}`)
   let g: number[]
   do {
-    g = Array.from({ length: n * n }, () => Math.floor(Math.random() * c))
+    g = Array.from({ length: n * n }, () => Math.floor(rng() * c))
   } while (g.every((v) => v === g[0]))
   grid.value = g
   par.value = greedyPar(g, n, c)
   moves.value = 0
 }
 
-watch([size, colorCount], newGame)
-onMounted(newGame)
+const syncUrl = () => router.replace({ name: 'flood-it', params: { seed: `${size.value}.${colorCount.value}.${code.value}` } })
+const newGame = () => {
+  code.value = randomSeed()
+  syncUrl()
+  build()
+}
+const setSize = (v: number) => {
+  size.value = v
+  newGame()
+}
+const setColors = (v: number) => {
+  colorCount.value = v
+  newGame()
+}
+
+const share = async () => {
+  const url = window.location.origin + route.fullPath
+  const line = solved.value
+    ? `Flooded this board in ${moves.value} (${par.value} par). Beat me!`
+    : `Try this Flood It board:`
+  await copyToClipboard(`${line}\n${url}`)
+  snackbar.value = true
+}
+
+onMounted(() => {
+  const p = typeof route.params.seed === 'string' ? route.params.seed : ''
+  const m = /^(\d+)\.(\d+)\.(.+)$/.exec(p)
+  if (m) {
+    size.value = Math.min(16, Math.max(6, +m[1]))
+    colorCount.value = Math.min(6, Math.max(4, +m[2]))
+    code.value = m[3]
+    build()
+  } else {
+    newGame()
+  }
+})
 </script>
 
 <template>
   <v-container class="py-6" max-width="620">
-    <GameToolbar title="Flood It">
+    <GameToolbar title="Flood It" shareable @share="share">
       <template #intro>
         Flood the board from the top-left corner. Pick colors to grow your region until the whole
         board is one color — in as few moves as possible.
@@ -114,14 +154,30 @@ onMounted(newGame)
         <div class="d-flex flex-column ga-4">
           <div class="slider-wrap">
             <label class="text-caption text-medium-emphasis">Board: {{ size }}×{{ size }}</label>
-            <v-slider v-model="size" :min="6" :max="16" :step="1" hide-details density="compact" thumb-label />
+            <v-slider :model-value="size" :min="6" :max="16" :step="1" hide-details density="compact" thumb-label @update:model-value="setSize" />
           </div>
           <div class="slider-wrap">
             <label class="text-caption text-medium-emphasis">Colors: {{ colorCount }}</label>
-            <v-slider v-model="colorCount" :min="4" :max="6" :step="1" hide-details density="compact" thumb-label />
+            <v-slider :model-value="colorCount" :min="4" :max="6" :step="1" hide-details density="compact" thumb-label @update:model-value="setColors" />
           </div>
           <v-btn variant="tonal" color="primary" prepend-icon="mdi-refresh" @click="newGame">New game</v-btn>
         </div>
+      </template>
+      <template #info>
+        <h3>Goal</h3>
+        <p>Turn the entire board a single color. Your region starts at the top-left corner.</p>
+        <h3>How to play</h3>
+        <ul>
+          <li>Pick a color from the swatches. Your whole region becomes that color and absorbs any touching cells of it.</li>
+          <li>Repeat until every cell matches.</li>
+        </ul>
+        <h3>Scoring</h3>
+        <p><span class="k">Par</span> is a greedy solver's move count — match or beat it.</p>
+        <h3>Tips</h3>
+        <ul>
+          <li>Early on, pick the color that grabs the most new cells; late game, think about reaching far corners.</li>
+          <li>Don't chase a color just because there's a lot of it — chase what your region actually touches.</li>
+        </ul>
       </template>
     </GameToolbar>
 
@@ -136,14 +192,9 @@ onMounted(newGame)
       </v-chip>
     </div>
 
-    <div class="board-wrap">
+    <div class="board-wrap game-board" style="--board-fit: 52vh">
       <div class="board" :style="{ gridTemplateColumns: `repeat(${size}, 1fr)` }">
-        <div
-          v-for="(c, i) in grid"
-          :key="i"
-          class="tile"
-          :style="{ background: colors[c] }"
-        ></div>
+        <div v-for="(c, i) in grid" :key="i" class="tile" :style="{ background: colors[c] }"></div>
       </div>
       <div v-if="solved" class="overlay">
         <p class="text-h5 mb-1">{{ moves <= par ? 'Under par! 🎉' : 'Flooded!' }}</p>
@@ -152,7 +203,6 @@ onMounted(newGame)
       </div>
     </div>
 
-    <!-- Color picker -->
     <div class="d-flex justify-center flex-wrap ga-2 mt-4">
       <button
         v-for="(color, k) in colors"
@@ -165,6 +215,7 @@ onMounted(newGame)
         @click="pick(k)"
       ></button>
     </div>
+    <v-snackbar v-model="snackbar" :timeout="2600" color="secondary">Link copied — challenge a friend!</v-snackbar>
   </v-container>
 </template>
 
@@ -174,8 +225,6 @@ onMounted(newGame)
 }
 .board-wrap {
   position: relative;
-  max-width: 480px;
-  margin: 0 auto;
 }
 .board {
   display: grid;
@@ -186,13 +235,12 @@ onMounted(newGame)
   aspect-ratio: 1 / 1;
 }
 .tile {
-  aspect-ratio: 1 / 1;
   border-radius: 2px;
   transition: background 0.25s ease;
 }
 .swatch {
-  width: 48px;
-  height: 48px;
+  width: 44px;
+  height: 44px;
   border-radius: 10px;
   border: 3px solid transparent;
   cursor: pointer;
