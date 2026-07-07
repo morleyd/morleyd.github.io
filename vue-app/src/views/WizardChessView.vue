@@ -1,99 +1,159 @@
 <script setup lang="ts">
 /**
  * Wizard Chess — play a time-boxed negamax engine, but the real show is the
- * cast: every piece is a named character with a personality who banters, gloats,
- * panics and holds grudges as the game unfolds. Seeded, so a shared code brings
- * back the same crew and the same table talk.
+ * cast: every piece is a named character who banters, gloats, panics and holds
+ * grudges. All game logic lives in the headless WizardGame controller; this
+ * component renders it, drives the engine, and paces the chatter so it reads
+ * like a conversation rather than a wall of text.
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Chess } from 'chess.js'
 import GameToolbar from '@/components/GameToolbar.vue'
 import { copyToClipboard } from '@/services/share'
-import { randomSeed, rngFromSeed } from '@/services/seed'
-import { useSquareFit } from '@/composables/useSquareFit'
+import { randomSeed } from '@/services/seed'
 import { Engine } from '@/services/chess/engine'
-import { applyMove, createSociety, scanBoard, soulAt, type Society } from '@/services/chess/social'
-import { createDialogueState, introOf, speak, type DialogueState } from '@/services/chess/dialogue'
-import type { Color, GameEvent, PieceType, Square, Utterance } from '@/services/chess/types'
+import { WizardGame } from '@/services/chess/game'
+import { TYPE_NAME } from '@/services/chess/profiles'
+import type { Color, PieceType, Square, Utterance } from '@/services/chess/types'
 
 const route = useRoute()
 const router = useRouter()
-
-// Board tops out around a phone width; the talk log sits beside/below it.
-const { el: boardEl, px: boardPx } = useSquareFit(150)
 
 const GLYPH: Record<PieceType, string> = { p: '♟', n: '♞', b: '♝', r: '♜', q: '♛', k: '♚' }
 const LEVEL_NAMES = ['', 'Novice', 'Casual', 'Steady', 'Sharp', 'Cunning', 'Ruthless']
 
 const engine = new Engine()
-let chess = new Chess()
-let society: Society = { souls: {}, bySquare: {}, ply: 0 }
-let dialogue: DialogueState = createDialogueState()
-let rng: () => number = Math.random
+const initialSeed = randomSeed()
+const game = new WizardGame(initialSeed)
 
-const code = ref('')
+const code = ref(initialSeed)
 const level = ref(3)
-const version = ref(0) // bumped after each move to re-derive the board
-const selected = ref<Square | null>(null)
-const lastFrom = ref<Square | null>(null)
-const lastTo = ref<Square | null>(null)
-const thinking = ref(false)
-const status = ref('Your move. Drag your fate.')
-const gameOver = ref(false)
+const version = ref(0) // bumped on every state change to re-derive the board
 const snackbar = ref(false)
+const bump = () => (version.value += 1)
 
-interface Bubble {
-  id: number
-  square: Square
-  color: Color
-  text: string
+// ── Paced banter ────────────────────────────────────────────────────────────
+interface Bubble extends Utterance {
+  bid: number
 }
 const bubbles = ref<Bubble[]>([])
 const log = ref<Utterance[]>([])
+let queue: Utterance[] = []
+let pumpTimer: ReturnType<typeof setTimeout> | null = null
 let bubbleId = 0
 const bubbleTimers = new Map<number, ReturnType<typeof setTimeout>>()
 
-// ── Derived board ───────────────────────────────────────────────────────────
+function enqueue(lines: Utterance[]) {
+  if (!lines.length) return
+  queue.push(...lines)
+  if (queue.length > 6) queue.splice(0, queue.length - 6) // don't let banter pile up
+  pump()
+}
+function pump() {
+  if (pumpTimer) return
+  const step = () => {
+    const u = queue.shift()
+    if (!u) {
+      pumpTimer = null
+      return
+    }
+    reveal(u)
+    pumpTimer = setTimeout(step, 950)
+  }
+  step()
+}
+function reveal(u: Utterance) {
+  if (u.square) {
+    const b: Bubble = { ...u, bid: bubbleId++ }
+    bubbles.value.push(b)
+    if (bubbles.value.length > 3) {
+      const dropped = bubbles.value.shift()
+      if (dropped) clearBubbleTimer(dropped.bid)
+    }
+    const t = setTimeout(() => {
+      bubbles.value = bubbles.value.filter((x) => x.bid !== b.bid)
+      bubbleTimers.delete(b.bid)
+    }, 4600)
+    bubbleTimers.set(b.bid, t)
+  }
+  log.value.unshift(u)
+  if (log.value.length > 40) log.value.length = 40
+}
+function clearBubbleTimer(id: number) {
+  const t = bubbleTimers.get(id)
+  if (t) clearTimeout(t)
+  bubbleTimers.delete(id)
+}
+function clearBanter() {
+  queue = []
+  if (pumpTimer) {
+    clearTimeout(pumpTimer)
+    pumpTimer = null
+  }
+  bubbleTimers.forEach((t) => clearTimeout(t))
+  bubbleTimers.clear()
+  bubbles.value = []
+  log.value = []
+}
+
+// ── Derived, reactive board ─────────────────────────────────────────────────
 interface Cell {
   square: Square
   type: PieceType
   color: Color
   name: string | null
+  mood: string
 }
 const cells = computed<(Cell | null)[]>(() => {
-  version.value // reactive dependency
-  return chess
+  version.value
+  return game.chess
     .board()
     .flat()
     .map((c) => {
       if (!c) return null
-      const soul = soulAt(society, c.square)
-      return { square: c.square, type: c.type as PieceType, color: c.color as Color, name: soul?.persona.name ?? null }
+      const soul = game.soulAt(c.square)
+      return {
+        square: c.square,
+        type: c.type as PieceType,
+        color: c.color as Color,
+        name: soul?.persona.name ?? null,
+        mood: game.moodAt(c.square),
+      }
     })
 })
-
-const legalTargets = computed<Set<Square>>(() => {
-  version.value
-  if (!selected.value) return new Set()
-  const moves = chess.moves({ square: selected.value, verbose: true }) as unknown as { to: Square }[]
-  return new Set(moves.map((m) => m.to))
-})
-
+const selectedSquare = computed(() => (version.value, game.selected))
+const legalTargets = computed(() => (version.value, game.legalTargets()))
+const canPlay = computed(() => (version.value, game.canPlay))
+const thinking = computed(() => (version.value, game.aiThinking))
 const checkSquare = computed<Square | null>(() => {
   version.value
-  if (!chess.isCheck()) return null
-  const turn = chess.turn()
-  for (const c of chess.board().flat()) if (c && c.type === 'k' && c.color === turn) return c.square
+  if (!game.chess.isCheck()) return null
+  const turn = game.chess.turn()
+  for (const c of game.chess.board().flat()) if (c && c.type === 'k' && c.color === turn) return c.square
   return null
+})
+const selectedName = computed(() => {
+  const sq = selectedSquare.value
+  if (!sq) return null
+  const s = game.soulAt(sq)
+  return s ? `${s.persona.name} the ${TYPE_NAME[s.type]}` : null
+})
+const status = computed(() => {
+  version.value
+  if (game.chess.isCheckmate()) return game.turn === 'w' ? 'Checkmate — your king has fallen.' : 'Checkmate! You win. 🎉'
+  if (game.chess.isStalemate()) return 'Stalemate — a stiff, awkward draw.'
+  if (game.chess.isDraw()) return "It's a draw. Everyone lives to bicker another day."
+  if (game.aiThinking) return 'The enemy is plotting…'
+  if (selectedName.value) return `Holding ${selectedName.value} — pick a square.`
+  if (game.chess.isCheck()) return 'You are in check!'
+  return 'Your move.'
 })
 
 const FILES = 'abcdefgh'
 const squareOf = (i: number): Square => FILES[i % 8] + (8 - Math.floor(i / 8))
 const rc = (sq: Square) => ({ col: sq.charCodeAt(0) - 97, row: 8 - Number(sq[1]) })
 const bubbleStyle = (b: Bubble) => {
-  const { col, row } = rc(b.square)
-  // Nudge the tail so edge bubbles don't spill off the board.
+  const { col, row } = rc(b.square as Square)
   const tx = col <= 1 ? '0%' : col >= 6 ? '-100%' : '-50%'
   return { left: `${((col + 0.5) / 8) * 100}%`, top: `${(row / 8) * 100}%`, '--tx': tx }
 }
@@ -103,147 +163,42 @@ const checkStyle = computed(() => {
   return { left: `${(col / 8) * 100}%`, top: `${(row / 8) * 100}%` }
 })
 
-// ── Turn plumbing ─────────────────────────────────────────────────────────
-const playerColor: Color = 'w'
-const canInteract = computed(() => !gameOver.value && !thinking.value && chess.turn() === playerColor)
-
-function pushBubble(u: Utterance) {
-  if (!u.square) return
-  const b: Bubble = { id: bubbleId++, square: u.square, color: u.color, text: u.text }
-  bubbles.value.push(b)
-  if (bubbles.value.length > 3) {
-    const dropped = bubbles.value.shift()
-    if (dropped) clearBubble(dropped.id, false)
-  }
-  const t = setTimeout(() => clearBubble(b.id), 4800)
-  bubbleTimers.set(b.id, t)
-}
-function clearBubble(id: number, removeFromList = true) {
-  const t = bubbleTimers.get(id)
-  if (t) clearTimeout(t)
-  bubbleTimers.delete(id)
-  if (removeFromList) bubbles.value = bubbles.value.filter((b) => b.id !== id)
-}
-
-function voice(events: GameEvent[]) {
-  const lines = speak(society, events, dialogue, rng, 2)
-  for (const u of lines) {
-    pushBubble(u)
-    log.value.unshift(u)
-  }
-  if (log.value.length > 40) log.value.length = 40
-}
-
-/** Fold a played move into the social sim, surface banter, and refresh state. */
-function afterMove(move: ReturnType<Chess['move']>) {
-  if (!move) return
-  const events = applyMove(society, {
-    from: move.from,
-    to: move.to,
-    color: move.color as Color,
-    piece: move.piece as PieceType,
-    flags: move.flags,
-    captured: move.captured as PieceType | undefined,
-    promotion: move.promotion as PieceType | undefined,
-  })
-
-  const moverId = society.bySquare[move.to]
-  if (chess.isCheckmate() && moverId) {
-    events.push({ kind: 'checkmate', soulId: moverId, salience: 120 })
-  } else if (chess.isCheck() && moverId) {
-    events.push({ kind: 'check', soulId: moverId, salience: 54 })
-  }
-
-  voice([...events, ...scanBoard(society, chess)])
-
-  lastFrom.value = move.from
-  lastTo.value = move.to
-  selected.value = null
-  version.value += 1
-  updateStatus()
-}
-
-function updateStatus() {
-  if (chess.isCheckmate()) {
-    gameOver.value = true
-    status.value = chess.turn() === playerColor ? 'Checkmate — your king has fallen.' : 'Checkmate! You win. 🎉'
-  } else if (chess.isStalemate()) {
-    gameOver.value = true
-    status.value = 'Stalemate — a stiff, awkward draw.'
-  } else if (chess.isDraw()) {
-    gameOver.value = true
-    status.value = "It's a draw. Everyone lives to bicker another day."
-  } else if (chess.isCheck()) {
-    status.value = chess.turn() === playerColor ? 'You are in check!' : 'Check! The enemy king squirms.'
-  } else {
-    status.value = chess.turn() === playerColor ? 'Your move.' : 'The enemy is plotting…'
-  }
-}
-
-async function aiMove() {
-  if (gameOver.value) return
-  thinking.value = true
-  updateStatus()
-  const best = await engine.bestMove(chess.fen(), level.value)
-  thinking.value = false
-  if (!best || gameOver.value) return
-  try {
-    afterMove(chess.move({ from: best.from, to: best.to, promotion: best.promotion ?? 'q' }))
-  } catch {
-    updateStatus()
-  }
-}
-
+// ── Turn flow ────────────────────────────────────────────────────────────
 function onSquare(square: Square) {
-  if (!canInteract.value) return
-  const piece = chess.get(square)
-
-  // Selecting one of your own pieces: highlight moves + say hello sometimes.
-  if (piece && piece.color === playerColor) {
-    if (selected.value === square) {
-      selected.value = null
-    } else {
-      selected.value = square
-      const soul = soulAt(society, square)
-      if (soul && rng() < 0.5) {
-        pushBubble({ soulId: soul.id, square, color: soul.color, name: soul.persona.name, text: introOf(soul) })
-      }
-    }
-    return
+  if (!canPlay.value) return
+  const res = game.playerTap(square)
+  if (res.introSoul) {
+    log.value.unshift({
+      soulId: res.introSoul.id,
+      square,
+      color: res.introSoul.color,
+      name: res.introSoul.persona.name,
+      text: res.introSoul.persona.intro,
+      tone: 'calm',
+    })
   }
-
-  // Committing a move to a highlighted target.
-  if (selected.value && legalTargets.value.has(square)) {
-    try {
-      afterMove(chess.move({ from: selected.value, to: square, promotion: 'q' }))
-      window.setTimeout(aiMove, 350)
-    } catch {
-      selected.value = null
-    }
-    return
-  }
-
-  selected.value = null
+  enqueue(res.utterances)
+  bump()
+  if (res.moved) window.setTimeout(runAi, 420)
 }
 
-// ── Setup / lifecycle ─────────────────────────────────────────────────────
-function start() {
-  chess = new Chess()
-  rng = rngFromSeed(`${code.value}`)
-  society = createSociety(chess, rng)
-  dialogue = createDialogueState()
-  bubbles.value.forEach((b) => clearBubble(b.id, false))
-  bubbles.value = []
-  log.value = []
-  selected.value = null
-  lastFrom.value = null
-  lastTo.value = null
-  gameOver.value = false
-  version.value += 1
-  updateStatus()
+async function runAi() {
+  if (game.gameOver) return
+  game.aiThinking = true
+  bump()
+  const best = await engine.bestMove(game.chess.fen(), level.value)
+  game.aiThinking = false
+  if (best && !game.gameOver) enqueue(game.aiApply(best))
+  bump()
 }
 
+// ── Setup ────────────────────────────────────────────────────────────────
 const syncUrl = () => router.replace({ name: 'wizard-chess', params: { seed: `${level.value}.${code.value}` } })
+function start() {
+  game.reset(code.value)
+  clearBanter()
+  bump()
+}
 function newGame() {
   code.value = randomSeed()
   syncUrl()
@@ -254,16 +209,9 @@ function setLevel(v: number) {
   syncUrl()
 }
 
-const cast = computed(() => {
-  version.value
-  return Object.values(society.souls)
-    .filter((s) => !s.captured && s.color === playerColor)
-    .map((s) => s.persona.name)
-})
-
 async function share() {
   const url = window.location.origin + route.fullPath
-  const names = cast.value.slice(0, 3).join(', ')
+  const names = game.livingCast().slice(0, 3).join(', ')
   await copyToClipboard(`Meet my chess crew — ${names} and the gang. Take them on:\n${url}`)
   snackbar.value = true
 }
@@ -275,15 +223,13 @@ onMounted(() => {
     level.value = Math.min(6, Math.max(1, Number(m[1])))
     code.value = m[2]
   } else {
-    code.value = randomSeed()
     syncUrl()
   }
   start()
 })
-
 onBeforeUnmount(() => {
   engine.dispose()
-  bubbleTimers.forEach((t) => clearTimeout(t))
+  clearBanter()
 })
 </script>
 
@@ -324,14 +270,14 @@ onBeforeUnmount(() => {
         <h3>How to play</h3>
         <ul>
           <li>Tap one of your pieces to select it; its legal moves light up. Tap a target to move.</li>
-          <li>Tap a piece to hear it introduce itself.</li>
+          <li>The first time you pick up a piece, it introduces itself in the table talk.</li>
           <li>Pawns always promote to a queen, for simplicity.</li>
         </ul>
         <h3>The cast</h3>
         <ul>
           <li>Pieces <span class="k">gloat</span> when they capture and give <span class="k">last words</span> when they fall.</li>
           <li>The timid <span class="k">panic</span> when threatened; the brave stand defiant.</li>
-          <li>Idle pieces grow <span class="k">impatient</span> — some rooks work themselves into a proper rage.</li>
+          <li>Idle pieces grow <span class="k">impatient</span> — watch them fidget, and some rooks work themselves into a proper rage.</li>
           <li>Lose a friend to an enemy piece and the survivors hold a <span class="k">grudge</span>.</li>
         </ul>
         <h3>Difficulty</h3>
@@ -343,51 +289,46 @@ onBeforeUnmount(() => {
 
     <div class="wc-layout">
       <div class="wc-board-col">
-        <div class="d-flex align-center justify-space-between mb-2">
-          <div class="text-body-1">
+        <div class="d-flex align-center justify-space-between mb-2" style="min-height: 28px">
+          <div class="text-body-2">
             <v-icon v-if="thinking" icon="mdi-loading" class="spin" size="small" />
             {{ status }}
           </div>
-          <v-chip v-if="gameOver" color="primary" variant="flat" size="small">Game over</v-chip>
         </div>
 
-        <div
-          ref="boardEl"
-          class="board"
-          :style="{ width: boardPx + 'px', height: boardPx + 'px' }"
-        >
+        <div class="board" :class="{ waiting: !canPlay }">
           <div
             v-for="(cell, i) in cells"
             :key="i"
             class="sq"
             :class="{
               dark: ((i % 8) + Math.floor(i / 8)) % 2 === 1,
-              sel: squareOf(i) === selected,
-              from: squareOf(i) === lastFrom,
-              to: squareOf(i) === lastTo,
+              sel: squareOf(i) === selectedSquare,
+              from: squareOf(i) === game.lastFrom,
+              to: squareOf(i) === game.lastTo,
             }"
             @click="onSquare(squareOf(i))"
           >
             <span
               v-if="cell"
               class="piece"
-              :class="cell.color === 'w' ? 'white' : 'black'"
+              :class="[cell.color === 'w' ? 'white' : 'black', 'mood-' + cell.mood]"
               :title="cell.name || ''"
             >{{ GLYPH[cell.type] }}</span>
             <span v-if="legalTargets.has(squareOf(i))" class="dot" :class="{ cap: !!cell }"></span>
           </div>
 
-          <!-- highlight for the king in check -->
           <span v-if="checkSquare" class="check-ring" :style="checkStyle"></span>
 
-          <!-- speech bubbles anchored over squares -->
           <div
             v-for="b in bubbles"
-            :key="b.id"
+            :key="b.bid"
             class="bubble"
-            :class="b.color === 'w' ? 'ours' : 'theirs'"
+            :class="['tone-' + b.tone, b.color === 'w' ? 'ours' : 'theirs']"
             :style="bubbleStyle(b)"
-          >{{ b.text }}</div>
+          >
+            <span class="bubble-name">{{ b.name }}:</span> {{ b.text }}
+          </div>
         </div>
 
         <div class="d-flex justify-center ga-2 mt-3">
@@ -399,9 +340,9 @@ onBeforeUnmount(() => {
         <div class="text-overline text-medium-emphasis mb-1">Table talk</div>
         <div class="talk">
           <p v-if="log.length === 0" class="text-medium-emphasis text-body-2 pa-2">
-            Make a move — your pieces have opinions.
+            Tap one of your pieces — they have opinions.
           </p>
-          <div v-for="(u, i) in log" :key="i" class="talk-line">
+          <div v-for="(u, i) in log" :key="i" class="talk-line" :class="'tone-' + u.tone">
             <span class="who" :class="u.color === 'w' ? 'ours' : 'theirs'">{{ u.name }}</span>
             <span class="what">{{ u.text }}</span>
           </div>
@@ -423,11 +364,9 @@ onBeforeUnmount(() => {
   align-items: flex-start;
   flex-wrap: wrap;
 }
-/* Give the column an independent width (flex basis) so useSquareFit measures a
-   real box, not the board it is trying to size. */
 .wc-board-col {
-  flex: 1 1 340px;
-  max-width: 520px;
+  flex: 1 1 360px;
+  max-width: 560px;
 }
 .wc-log-col {
   flex: 1 1 260px;
@@ -436,14 +375,21 @@ onBeforeUnmount(() => {
 
 .board {
   position: relative;
-  margin: 0 auto;
   display: grid;
   grid-template-columns: repeat(8, 1fr);
   grid-template-rows: repeat(8, 1fr);
+  width: 100%;
+  max-width: min(78vh, 560px);
+  aspect-ratio: 1 / 1;
+  margin: 0 auto;
   border-radius: 10px;
   overflow: visible;
   box-shadow: 0 8px 30px rgba(2, 6, 23, 0.45);
   user-select: none;
+  container-type: size;
+}
+.board.waiting {
+  cursor: default;
 }
 .sq {
   position: relative;
@@ -461,12 +407,13 @@ onBeforeUnmount(() => {
 }
 .sq.from,
 .sq.to {
-  background-image: linear-gradient(rgba(250, 204, 21, 0.35), rgba(250, 204, 21, 0.35));
+  background-image: linear-gradient(rgba(250, 204, 21, 0.4), rgba(250, 204, 21, 0.4));
 }
 .piece {
-  font-size: min(7.5vw, 40px);
+  font-size: 9cqmin;
   line-height: 1;
   pointer-events: none;
+  will-change: transform;
 }
 .piece.white {
   color: #f8fafc;
@@ -476,19 +423,60 @@ onBeforeUnmount(() => {
   color: #1e293b;
   text-shadow: 0 0 1px #000, 0 1px 2px rgba(0, 0, 0, 0.5);
 }
+/* Personality shows in body language. */
+.piece.mood-impatience {
+  animation: bob 0.85s ease-in-out infinite;
+}
+.piece.mood-anger {
+  animation: fume 0.5s ease-in-out infinite;
+  color: #fecaca;
+}
+.piece.mood-anger.black {
+  color: #7f1d1d;
+}
+.piece.mood-fear {
+  animation: tremble 0.12s linear infinite;
+}
+.piece.mood-joy {
+  animation: bounce 1.1s ease-in-out infinite;
+}
+@keyframes bob {
+  50% {
+    transform: translateY(-8%);
+  }
+}
+@keyframes bounce {
+  50% {
+    transform: translateY(-12%) scale(1.05);
+  }
+}
+@keyframes tremble {
+  25% {
+    transform: translateX(-4%) rotate(-3deg);
+  }
+  75% {
+    transform: translateX(4%) rotate(3deg);
+  }
+}
+@keyframes fume {
+  50% {
+    transform: scale(1.08);
+    filter: drop-shadow(0 0 3px #ef4444);
+  }
+}
 .dot {
   position: absolute;
   width: 26%;
   height: 26%;
   border-radius: 50%;
-  background: rgba(15, 23, 42, 0.35);
+  background: rgba(15, 23, 42, 0.4);
   pointer-events: none;
 }
 .dot.cap {
   width: 84%;
   height: 84%;
   background: transparent;
-  border: 4px solid rgba(15, 23, 42, 0.35);
+  border: 4px solid rgba(15, 23, 42, 0.4);
   border-radius: 50%;
 }
 .check-ring {
@@ -503,41 +491,56 @@ onBeforeUnmount(() => {
 
 .bubble {
   position: absolute;
-  transform: translate(var(--tx, -50%), -115%);
-  max-width: 190px;
-  padding: 7px 10px;
+  transform: translate(var(--tx, -50%), -118%);
+  max-width: 180px;
+  padding: 6px 10px;
   border-radius: 12px;
-  font-size: 0.82rem;
-  line-height: 1.25;
+  font-size: 0.8rem;
+  line-height: 1.3;
   color: #0f172a;
   background: #fef9c3;
-  box-shadow: 0 4px 14px rgba(2, 6, 23, 0.4);
+  box-shadow: 0 4px 14px rgba(2, 6, 23, 0.45);
   z-index: 5;
   pointer-events: none;
   animation: pop 0.18s ease-out;
 }
-.bubble.theirs {
-  background: #fecaca;
+.bubble-name {
+  font-weight: 700;
+  opacity: 0.75;
 }
+/* Tone colours — same palette for bubbles and the log accent. */
+.tone-gloat { background: #fde68a; }
+.tone-sad { background: #cbd5e1; }
+.tone-afraid { background: #bfdbfe; }
+.tone-angry { background: #fecaca; }
+.tone-warm { background: #bbf7d0; }
+.tone-joy { background: #bbf7d0; }
 @keyframes pop {
   from {
     opacity: 0;
-    transform: translate(var(--tx, -50%), -95%) scale(0.9);
+    transform: translate(var(--tx, -50%), -98%) scale(0.9);
   }
 }
 
 .talk {
-  max-height: 60vh;
+  max-height: 62vh;
   overflow-y: auto;
   border-radius: 10px;
   background: rgba(2, 6, 23, 0.35);
   padding: 6px;
 }
 .talk-line {
-  padding: 6px 8px;
+  padding: 6px 8px 6px 10px;
+  border-left: 3px solid transparent;
   border-bottom: 1px solid rgba(148, 163, 184, 0.12);
   font-size: 0.9rem;
 }
+.talk-line.tone-gloat { border-left-color: #eab308; }
+.talk-line.tone-sad { border-left-color: #94a3b8; }
+.talk-line.tone-afraid { border-left-color: #60a5fa; }
+.talk-line.tone-angry { border-left-color: #ef4444; }
+.talk-line.tone-warm,
+.talk-line.tone-joy { border-left-color: #22c55e; }
 .who {
   font-weight: 700;
   margin-right: 6px;

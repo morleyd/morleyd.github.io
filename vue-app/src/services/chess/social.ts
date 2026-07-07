@@ -214,6 +214,7 @@ export function scanBoard(society: Society, chess: Chess): GameEvent[] {
   const events: GameEvent[] = []
   for (const s of Object.values(society.souls)) {
     if (s.captured || !s.square) continue
+    const prevFear = s.mood.fear
     const attackers = chess.attackers(s.square, opp(s.color))
     const defenders = chess.attackers(s.square, s.color)
 
@@ -225,12 +226,14 @@ export function scanBoard(society: Society, chess: Chess): GameEvent[] {
         events.push({ kind: 'threatened', soulId: s.id, salience: 34 + VALUE[s.type] })
       }
     } else {
-      s.mood.fear = clamp(s.mood.fear - 0.14)
+      s.mood.fear = clamp(s.mood.fear - 0.2)
+      // Only voice gratitude when a piece was genuinely scared and is now safe —
+      // otherwise every defended pawn in the opening chirps "safe and sound".
       if (defenders.length > 0) {
         const defId = society.bySquare[defenders[0]]
         if (defId && defId !== s.id) {
-          s.bonds[defId] = clampBond((s.bonds[defId] ?? 0) + 0.06)
-          if (s.mood.fear < 0.2) events.push({ kind: 'defended', soulId: s.id, otherId: defId, salience: 16 })
+          s.bonds[defId] = clampBond((s.bonds[defId] ?? 0) + 0.08)
+          if (prevFear > 0.45) events.push({ kind: 'defended', soulId: s.id, otherId: defId, salience: 24 })
         }
       }
     }

@@ -79,4 +79,5 @@ export interface Utterance {
   color: Color
   name: string
   text: string
+  tone: 'calm' | 'gloat' | 'sad' | 'afraid' | 'angry' | 'warm' | 'joy'
 }
