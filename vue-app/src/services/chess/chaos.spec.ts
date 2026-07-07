@@ -28,6 +28,15 @@ describe('chaos moves', () => {
     const c = new Chess('7k/8/8/8/8/8/8/R3K3 w - - 0 1')
     expect(applyChaosMove(c, 'a1', 'h8')).toBeNull()
   })
+
+  it('refuses a chaos move that leaves the mover in check', () => {
+    // Black to move, king e8 in check from the rook on e1.
+    const fen = '1n2k3/8/8/8/8/8/8/4RK2 b - - 0 1'
+    // A jetpack that ignores the check is illegal...
+    expect(applyChaosMove(new Chess(fen), 'b8', 'a6')).toBeNull()
+    // ...but one that blocks the check (Ne7 interposes) is allowed.
+    expect(applyChaosMove(new Chess(fen), 'b8', 'e7')).not.toBeNull()
+  })
 })
 
 describe('chaos offers and limits (controller)', () => {

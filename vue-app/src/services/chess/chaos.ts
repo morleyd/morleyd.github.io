@@ -36,7 +36,24 @@ function computeCastling(c: Chess): string {
  * illegal self-check, or a pawn shoved onto a promotion rank) can never leave the
  * live game half-mutated and corrupted.
  */
+const other = (c: Color): Color => (c === 'w' ? 'b' : 'w')
+
+function kingSquare(c: Chess, color: Color): Square | null {
+  for (const row of c.board()) for (const cell of row) if (cell && cell.type === 'k' && cell.color === color) return cell.square
+  return null
+}
+/** Is `color`'s king attacked in this position? */
+function sideInCheck(c: Chess, color: Color): boolean {
+  const k = kingSquare(c, color)
+  return k ? c.attackers(k, other(color)).length > 0 : false
+}
+
 function commit(c: Chess, edited: Chess, turn: Color): boolean {
+  // The side that is NOT to move must not be in check — otherwise the mover left
+  // their own king exposed (or ignored an existing check), an illegal position.
+  // chess.js's FEN validator does NOT catch this, so we must. (This is what let a
+  // knight "jetpack" while its king was in check, then hang the game.)
+  if (sideInCheck(edited, other(turn))) return false
   const fen = `${edited.fen().split(' ')[0]} ${turn} ${computeCastling(edited)} - 0 1`
   try {
     new Chess(fen) // validate without touching `c`
@@ -68,7 +85,11 @@ export function applyChaosMove(
   if (target) edited.remove(to)
   edited.put({ type: piece.type, color: piece.color }, to)
 
-  const turn: Color = flipTurn ? (piece.color === 'w' ? 'b' : 'w') : piece.color
+  // flipTurn = a real move (pass to the other side); otherwise keep whoever's
+  // turn it currently is — NOT the moved piece's colour (a black piece getting
+  // cold feet on White's turn must leave it White's turn).
+  const cur = c.turn() as Color
+  const turn: Color = flipTurn ? (cur === 'w' ? 'b' : 'w') : cur
   return commit(c, edited, turn) ? { captured } : null
 }
 

@@ -41,6 +41,11 @@ describe('turn lock', () => {
           expect(moved, `seed ${seed} ply ${ply}: White had a legal move but could not play it`).toBe(true)
         } else {
           aiTurn(g)
+          // The AI turn must always hand control back to White (or end the game);
+          // otherwise an illegal chaos move has hung the game on Black.
+          if (!g.gameOver) {
+            expect(g.turn, `seed ${seed} ply ${ply}: AI turn did not return to White`).toBe('w')
+          }
         }
       }
     }

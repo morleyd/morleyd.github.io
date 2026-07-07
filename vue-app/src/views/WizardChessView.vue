@@ -21,7 +21,19 @@ import type { Color, PieceType, Square, Utterance } from '@/services/chess/types
 const route = useRoute()
 const router = useRouter()
 
-const GLYPH: Record<PieceType, string> = { p: '♟', n: '♞', b: '♝', r: '♜', q: '♛', k: '♚' }
+// U+FE0E (text variation selector) forces monochrome text rendering. Without it,
+// iOS/Apple render the pawn (U+265F) as a colour emoji that ignores our `color`,
+// so pawns showed up as black images while every other piece was styled. Applied
+// to all glyphs so the whole set renders consistently as text we can colour.
+const VS = '\uFE0E'
+const GLYPH: Record<PieceType, string> = {
+  p: '♟' + VS,
+  n: '♞' + VS,
+  b: '♝' + VS,
+  r: '♜' + VS,
+  q: '♛' + VS,
+  k: '♚' + VS,
+}
 const LEVEL_NAMES = ['', 'Novice', 'Casual', 'Steady', 'Sharp', 'Cunning', 'Ruthless']
 
 const engine = new Engine()
