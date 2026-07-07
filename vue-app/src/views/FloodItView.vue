@@ -8,6 +8,9 @@ import { useRoute, useRouter } from 'vue-router'
 import GameToolbar from '@/components/GameToolbar.vue'
 import { copyToClipboard } from '@/services/share'
 import { randomSeed, rngFromSeed } from '@/services/seed'
+import { useSquareFit } from '@/composables/useSquareFit'
+
+const { el: boardEl, px: boardPx } = useSquareFit(140)
 
 const PALETTE = ['#ef4444', '#f59e0b', '#eab308', '#22c55e', '#3b82f6', '#a855f7']
 
@@ -24,6 +27,8 @@ const snackbar = ref(false)
 
 const colors = computed(() => PALETTE.slice(0, colorCount.value))
 const solved = computed(() => grid.value.length > 0 && grid.value.every((c) => c === grid.value[0]))
+// Which colors still appear anywhere on the board (others are "eliminated").
+const presentColors = computed(() => new Set(grid.value))
 
 const neighbors = (i: number, n: number): number[] => {
   const x = i % n
@@ -192,7 +197,7 @@ onMounted(() => {
       </v-chip>
     </div>
 
-    <div class="board-wrap game-board" style="--board-fit: calc(100dvh - 270px)">
+    <div ref="boardEl" class="board-wrap" :style="{ width: boardPx + 'px', height: boardPx + 'px' }">
       <div class="board" :style="{ gridTemplateColumns: `repeat(${size}, 1fr)` }">
         <div v-for="(c, i) in grid" :key="i" class="tile" :style="{ background: colors[c] }"></div>
       </div>
@@ -209,9 +214,9 @@ onMounted(() => {
         :key="k"
         type="button"
         class="swatch"
-        :class="{ 'swatch--current': grid[0] === k }"
+        :class="{ 'swatch--current': grid[0] === k, 'swatch--gone': !presentColors.has(k) }"
         :style="{ background: color }"
-        :disabled="solved"
+        :disabled="solved || !presentColors.has(k)"
         @click="pick(k)"
       ></button>
     </div>
@@ -232,7 +237,8 @@ onMounted(() => {
   padding: 6px;
   border-radius: 12px;
   background: rgba(2, 6, 23, 0.6);
-  aspect-ratio: 1 / 1;
+  width: 100%;
+  height: 100%;
 }
 .tile {
   border-radius: 2px;
@@ -255,6 +261,11 @@ onMounted(() => {
 .swatch:disabled {
   opacity: 0.5;
   cursor: default;
+}
+/* An eliminated color: greyed out */
+.swatch--gone {
+  filter: grayscale(1);
+  opacity: 0.3;
 }
 .overlay {
   position: absolute;

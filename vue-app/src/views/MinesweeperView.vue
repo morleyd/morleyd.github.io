@@ -8,6 +8,9 @@ import { useRoute, useRouter } from 'vue-router'
 import GameToolbar from '@/components/GameToolbar.vue'
 import { copyToClipboard } from '@/services/share'
 import { randomSeed, rngFromSeed } from '@/services/seed'
+import { useSquareFit } from '@/composables/useSquareFit'
+
+const { el: boardEl, px: boardPx } = useSquareFit(110)
 
 interface Cell {
   mine: boolean
@@ -242,7 +245,7 @@ onBeforeUnmount(stopTimer)
       <v-chip variant="tonal" prepend-icon="mdi-timer-outline">{{ fmtTime(elapsed) }}</v-chip>
     </div>
 
-    <div class="board-wrap game-board" style="--board-fit: calc(100dvh - 240px)">
+    <div ref="boardEl" class="board-wrap" :style="{ width: boardPx + 'px', height: boardPx + 'px' }">
       <div class="board" :style="{ gridTemplateColumns: `repeat(${size}, 1fr)` }">
         <button
           v-for="(cell, i) in cells"
@@ -282,7 +285,8 @@ onBeforeUnmount(stopTimer)
   padding: 6px;
   border-radius: 10px;
   background: rgba(2, 6, 23, 0.6);
-  aspect-ratio: 1 / 1;
+  width: 100%;
+  height: 100%;
 }
 .cell {
   aspect-ratio: 1 / 1;

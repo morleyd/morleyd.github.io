@@ -9,6 +9,9 @@ import { useRoute, useRouter } from 'vue-router'
 import GameToolbar from '@/components/GameToolbar.vue'
 import { copyToClipboard } from '@/services/share'
 import { randomSeed, rngFromSeed } from '@/services/seed'
+import { useSquareFit } from '@/composables/useSquareFit'
+
+const { el: boardEl, px: boardPx } = useSquareFit(80)
 
 const route = useRoute()
 const router = useRouter()
@@ -162,8 +165,8 @@ onMounted(() => {
         <h3>The "light chasing" method</h3>
         <ul>
           <li>Going top to bottom: whenever a cell is <em>lit</em>, click the cell <em>directly below it</em>. This clears each row as you pass.</li>
-          <li>After chasing to the bottom, the lit cells left in the last row map (by a fixed lookup) to which <em>top-row</em> cells to click.</li>
-          <li>Click those top cells, then chase down once more — the board clears.</li>
+          <li>After chasing to the bottom, look at the lights still lit in the bottom row. A small table — the <em>same for every puzzle of a given size</em> — tells you which <em>top-row</em> cells to press for that leftover pattern.</li>
+          <li>Press those top cells, then chase down once more — the board clears. (For 5×5 there are only a handful of possible leftover patterns, so the table is short.)</li>
         </ul>
         <h3>The linear algebra (why it works)</h3>
         <ul>
@@ -185,7 +188,7 @@ onMounted(() => {
       </v-chip>
     </div>
 
-    <div class="board-wrap game-board" style="--board-fit: calc(100dvh - 210px)">
+    <div ref="boardEl" class="board-wrap" :style="{ width: boardPx + 'px', height: boardPx + 'px' }">
       <div class="board" :style="{ gridTemplateColumns: `repeat(${size}, 1fr)` }">
         <button v-for="(v, i) in lights" :key="i" type="button" class="light" :class="{ 'light--on': v === 1 }" @click="toggle(i)"></button>
       </div>
@@ -212,7 +215,8 @@ onMounted(() => {
   padding: 12px;
   border-radius: 14px;
   background: rgba(2, 6, 23, 0.6);
-  aspect-ratio: 1 / 1;
+  width: 100%;
+  height: 100%;
 }
 .light {
   aspect-ratio: 1 / 1;

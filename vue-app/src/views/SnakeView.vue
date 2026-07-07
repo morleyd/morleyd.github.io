@@ -7,6 +7,9 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import GameToolbar from '@/components/GameToolbar.vue'
 import { copyToClipboard } from '@/services/share'
+import { useSquareFit } from '@/composables/useSquareFit'
+
+const { el: boardEl, px: boardPx } = useSquareFit(200)
 
 interface Cell {
   x: number
@@ -266,7 +269,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- Board -->
-    <div class="board-wrap game-board" style="--board-fit: calc(100dvh - 330px)">
+    <div ref="boardEl" class="board-wrap" :style="{ width: boardPx + 'px', height: boardPx + 'px' }">
       <div
         class="board"
         :style="{ gridTemplateColumns: `repeat(${size}, 1fr)` }"
@@ -320,7 +323,8 @@ onBeforeUnmount(() => {
   border-radius: 12px;
   background: rgba(2, 6, 23, 0.85);
   border: 1px solid rgba(148, 163, 184, 0.15);
-  aspect-ratio: 1 / 1;
+  width: 100%;
+  height: 100%;
   touch-action: none;
   /* subtle ambient glow */
   box-shadow: 0 0 40px rgba(124, 58, 237, 0.18), inset 0 0 40px rgba(124, 58, 237, 0.06);

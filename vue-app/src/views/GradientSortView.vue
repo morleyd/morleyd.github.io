@@ -9,6 +9,9 @@ import { useRoute, useRouter } from 'vue-router'
 import GameToolbar from '@/components/GameToolbar.vue'
 import { copyToClipboard } from '@/services/share'
 import { randomSeed, rngFromSeed } from '@/services/seed'
+import { useSquareFit } from '@/composables/useSquareFit'
+
+const { el: boardEl, px: boardPx } = useSquareFit(80)
 
 type RGB = [number, number, number]
 interface Palette {
@@ -234,9 +237,10 @@ onMounted(() => {
     </div>
 
     <div
-      class="sort-grid game-board"
+      ref="boardEl"
+      class="sort-grid"
       :class="{ 'sort-grid--solved': solved }"
-      :style="{ gridTemplateColumns: `repeat(${cols}, 1fr)`, '--board-fit': 'calc(100dvh - 210px)' }"
+      :style="{ gridTemplateColumns: `repeat(${cols}, 1fr)`, width: boardPx + 'px', height: boardPx + 'px' }"
     >
       <div
         v-for="(home, pos) in order"
@@ -260,7 +264,6 @@ onMounted(() => {
 .sort-grid {
   display: grid;
   gap: 8px;
-  aspect-ratio: 1 / 1;
   padding: 10px;
   border-radius: 14px;
   background: rgba(15, 23, 42, 0.5);
