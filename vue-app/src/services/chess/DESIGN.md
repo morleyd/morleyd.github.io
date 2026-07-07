@@ -111,6 +111,11 @@ the exceptions, not the ambient state.
 - True fork/tactic detection (beyond winning captures) for smarter suggestions.
 - Reckless pieces volunteering *risky* moves, not just winning ones.
 - A hesitation beat before a timid piece commits to a scary move.
+- **Move-tracker pairing**: spontaneous stunts (defect / cold feet / tantrum) add
+  a move-log entry without consuming a turn, so the white/black column pairing
+  shifts by one after one occurs. Game logic is unaffected — display only. Fix:
+  render chaos/spontaneous plies as their own full-width row instead of pairing.
+- Persist character-sheet trait edits across games (currently per-game only).
 
 ---
 
