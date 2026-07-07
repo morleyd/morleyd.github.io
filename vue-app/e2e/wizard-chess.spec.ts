@@ -50,9 +50,17 @@ test.describe('Wizard Chess', () => {
         JSON.stringify({ chatter: 0.6, animation: 0.6, agency: 0.6, chaos: 1 }),
       )
     })
-    await page.goto('/wizard-chess')
+    // Chaos is now only offered at a *dramatic* moment (a stunt that captures,
+    // checks, or escapes an attack) — never on a calm opening. So set up a
+    // position where a jetpack leap is a genuine capture: a white knight on d4
+    // with a black pawn on f6, exactly one extended leap away.
+    await page.goto('/wizard-chess?fen=' + encodeURIComponent('4k3/8/5p2/8/3N4/8/8/4K3 w - - 0 1'))
 
-    await page.locator('[data-square="g1"]').click() // a white knight
+    // Wait for the hand-set position to settle (four pieces, knight on d4).
+    await expect(page.locator('.piece-box')).toHaveCount(4)
+    await expect(page.locator('[data-piece="d4"]')).toBeVisible()
+
+    await page.locator('[data-square="d4"]').click() // the white knight
     // A chaos option is offered (dashed purple target).
     await expect(page.locator('.dot--chaos').first()).toBeVisible()
     const chaosSq = await page.locator('.sq:has(.dot--chaos)').first().getAttribute('data-square')
@@ -60,7 +68,7 @@ test.describe('Wizard Chess', () => {
 
     // Take the off-book leap; the knight lands where no normal knight could.
     await page.locator(`[data-square="${chaosSq}"]`).click()
-    await expect(page.locator(`[data-piece="${chaosSq}"]`)).toBeVisible()
+    await expect(page.locator(`[data-piece="${chaosSq}"] .glyph.white`)).toBeVisible()
     await page.screenshot({ path: 'e2e/screenshots/chaos.png' })
   })
 

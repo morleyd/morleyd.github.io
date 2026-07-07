@@ -111,4 +111,158 @@ describe('WizardGame interaction', () => {
     expect(g.turn).toBe('w')
     expect(g.canPlay).toBe(true) // human can move again
   })
+
+  it('trust rises when the player wins material and falls when a piece is lost', () => {
+    // Player captures a pawn: trust should climb.
+    const win = new WizardGame('trust-win')
+    win.reset('trust-win', '4k3/8/8/3p4/4P3/8/8/4K3 w - - 0 1')
+    win.settings.agency = 0 // no resistance to muddy the move
+    const before = win.trust
+    win.playerTap('e4')
+    win.playerTap('d5') // exd5, wins a pawn
+    expect(win.chess.get('d5')?.color).toBe('w')
+    expect(win.trust).toBeGreaterThan(before)
+
+    // Enemy takes one of ours: trust should drop, and harder than a win lifts it.
+    const lose = new WizardGame('trust-lose')
+    lose.reset('trust-lose', '4k3/8/8/3p4/4P3/8/8/4K3 b - - 0 1')
+    const b2 = lose.trust
+    lose.aiApply({ from: 'd5', to: 'e4' }) // dxe4, we lose the pawn
+    expect(lose.chess.get('e4')?.color).toBe('b')
+    expect(lose.trust).toBeLessThan(b2)
+  })
+
+  it('offers a stunt only at a dramatic moment (not on a calm opening)', () => {
+    const calm = new WizardGame('calm')
+    calm.settings.chaos = 1 // always offer when eligible
+    calm.playerTap('g1') // a knight with only quiet extended leaps available
+    expect(calm.chaosTargets().length).toBe(0)
+
+    const drama = new WizardGame('drama')
+    drama.reset('drama', '4k3/8/5p2/8/3N4/8/8/4K3 w - - 0 1') // Nd4, capture/check leaps exist
+    drama.settings.chaos = 1
+    drama.playerTap('d4')
+    expect(drama.chaosTargets().length).toBeGreaterThan(0)
+    expect(drama.chaosOfferType()).toBe('jetpack')
+  })
+
+  it('lets a vengeful piece rage-strike an adjacent enemy off the board', () => {
+    const g = new WizardGame('rage')
+    g.reset('rage', '4k3/8/8/3p4/3R4/8/8/4K3 w - - 0 1') // white rook d4, black pawn d5
+    g.settings.chaos = 1
+    const rook = g.soulAt('d4')!
+    rook.vengefulUntil = 10 // still within its vengeful window (ply 0)
+
+    g.playerTap('d4')
+    expect(g.chaosOfferType()).toBe('rage')
+    expect(g.chaosTargets()).toContain('d5')
+
+    const strike = g.playerTap('d5')
+    expect(strike.moved).toBe(true)
+    expect(g.chess.get('d5')).toBeFalsy() // the pawn is gone
+    expect(g.chess.get('d4')?.type).toBe('r') // the rook stayed put
+    expect(g.turn).toBe('b') // the strike was the turn
+    expect(rook.vengefulUntil).toBe(-1) // rage spent
+    expect(g.fallen().some((f) => f.type === 'p')).toBe(true) // the victim is in the box
+  })
+
+  it('charges a long-idle piece up its file, shoving or trampling its pawn', () => {
+    const g = new WizardGame('breakout')
+    g.reset('breakout', '4k3/8/8/8/8/8/P7/R3K3 w - - 0 1') // white rook a1 boxed by pawn a2
+    g.settings.chaos = 1
+    const rook = g.soulAt('a1')!
+    rook.idleFor = 20 // stuck for ages...
+    rook.mood.impatience = 1 // ...and the player has heard it ranting about it
+
+    const line = g.spontaneousChaos()
+    expect(line).toBeTruthy()
+    expect(g.chess.get('a1')).toBeFalsy() // the rook charged out of the corner
+
+    // The rook now sits somewhere up the a-file (a slide, not a jump).
+    let rookRank = 0
+    for (let r = 2; r <= 8; r += 1) if (g.chess.get(('a' + r) as `a${number}`)?.type === 'r') rookRank = r
+    expect(rookRank).toBeGreaterThan(1)
+
+    // Its pawn is either shoved one rank ahead (still on the file) or trampled.
+    const pawnAhead = g.chess.get(('a' + (rookRank + 1)) as `a${number}`)?.type === 'p'
+    const pawnTrampled = g.fallen().some((f) => f.type === 'p')
+    expect(pawnAhead || pawnTrampled).toBe(true)
+    expect(g.moveLog.some((m) => m.chaos && m.san.includes('breakout'))).toBe(true)
+    // The trample is the only death that spirals; everything else is dragged off.
+    if (pawnTrampled) expect(g.deathFx).toBe('spiral')
+    expect(g.fx?.kind).toBe('breakout') // a lingering mark tells the player what happened
+  })
+
+  it('keeps quiet pieces from breaking out — the rant must come first', () => {
+    const g = new WizardGame('breakout-quiet')
+    g.reset('breakout-quiet', '4k3/8/8/8/8/8/P7/R3K3 w - - 0 1')
+    g.settings.chaos = 1
+    const rook = g.soulAt('a1')!
+    rook.idleFor = 20
+    rook.mood.impatience = 0.2 // long-idle but hasn't been complaining
+    expect(g.spontaneousChaos()).toBeNull()
+  })
+
+  it('never lets the enemy stunt in the opening, and only for a capture', () => {
+    // Opening position, max chaos: no plan, ever (ply < 8).
+    const g = new WizardGame('ai-chaos-gate')
+    g.settings.chaos = 1
+    g.playerTap('e2')
+    g.playerTap('e4')
+    expect(g.society.ply).toBeLessThan(8)
+    expect(g.aiChaosPlan()).toBeNull()
+
+    // Past the opening with a black knight in jetpack range of a white pawn:
+    // the plan exists, is a capture, and is staged (announce first, then commit).
+    const h = new WizardGame('ai-chaos-hit')
+    h.reset('ai-chaos-hit', '4k3/8/2n5/8/8/5P2/8/4K3 b - - 0 1') // Nc6 -> f3 is an extended leap
+    h.settings.chaos = 1
+    h.society.ply = 20 // mid-game
+    let plan = null
+    for (let i = 0; i < 40 && !plan; i += 1) plan = h.aiChaosPlan() // rng-gated; keep asking
+    expect(plan).toBeTruthy()
+    expect(h.chess.get(plan!.to)?.color).toBe('w') // it only stunts to CAPTURE
+    expect(plan!.announce.text).not.toMatch(/enemy|yours|you've got/i) // no advertising the player's gear
+    expect(h.chess.get(plan!.from)?.color).toBe('b') // nothing moved yet — announce is a telegraph
+
+    const lines = h.aiChaosCommit(plan!)
+    expect(lines.length).toBeGreaterThan(0)
+    expect(h.chess.get(plan!.to)?.color).toBe('b') // now it landed
+    expect(h.fx?.kind).toBe(plan!.type) // and left a lingering mark
+  })
+
+  it('holds a tantrum until the rage has been visible for a round', () => {
+    const g = new WizardGame('tantrum-wait')
+    g.reset('tantrum-wait', '4k3/8/8/3p4/3R4/8/8/4K3 w - - 0 1') // white rook d4 beside black pawn d5
+    g.settings.chaos = 1
+    const rook = g.soulAt('d4')!
+    rook.mood.anger = 1 // max rage, adjacent enemy at d5
+
+    // First sighting: the red state must be READ first — no eruption yet.
+    expect(g.spontaneousChaos()).toBeNull()
+    expect(g.chess.get('d5')?.type).toBe('p')
+
+    // A round later the tantrum may fire.
+    g.society.ply += 2
+    rook.mood.anger = 1
+    const line = g.spontaneousChaos()
+    expect(line).toBeTruthy()
+    expect(g.chess.get('d5')).toBeFalsy() // the pawn got knocked off
+    expect(g.fx?.kind).toBe('tantrum')
+  })
+
+  it('gives each pregame pair a multi-turn conversation with no repeated lines', () => {
+    const g = new WizardGame('pregame-convo')
+    const lines = g.pregameChatter()
+    expect(lines.length).toBeGreaterThanOrEqual(8) // a few real conversations
+    // Alternating speakers within each 4-line conversation.
+    for (let i = 0; i + 3 < lines.length; i += 4) {
+      expect(lines[i].soulId).toBe(lines[i + 2].soulId)
+      expect(lines[i + 1].soulId).toBe(lines[i + 3].soulId)
+      expect(lines[i].soulId).not.toBe(lines[i + 1].soulId)
+    }
+    // No repeated dialogue across the whole pregame.
+    const texts = lines.map((l) => l.text.replace(/\b[A-Z][a-z]+\b/g, '{name}'))
+    expect(new Set(texts).size).toBe(texts.length)
+  })
 })

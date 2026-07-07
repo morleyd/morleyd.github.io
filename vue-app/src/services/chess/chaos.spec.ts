@@ -68,11 +68,14 @@ describe('chaos offers and limits (controller)', () => {
     expect(g.chaosTargets().length).toBe(0)
   })
 
-  it('tantrum: a furious piece knocks an adjacent enemy off the board', () => {
+  it('tantrum: a furious piece knocks an adjacent enemy off — after the rage has been seen', () => {
     const g = new WizardGame('rage')
     g.reset('rage', '4k3/8/8/3p4/3Q4/8/8/4K3 w - - 0 1') // white Q d4, black pawn d5
     g.settings.chaos = 1
     g.soulAt('d4')!.mood.anger = 1 // seething
+    expect(g.spontaneousChaos()).toBeNull() // first sighting: the red must be read first
+    g.society.ply += 2 // a round passes with the rage on display
+    g.soulAt('d4')!.mood.anger = 1
     const u = g.spontaneousChaos()
     expect(u).not.toBeNull()
     expect(g.chess.get('d5')).toBeFalsy() // pawn was shoved off

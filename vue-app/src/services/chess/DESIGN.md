@@ -16,26 +16,75 @@ the **box** (graveyard) under the board with a drag-off capture, **coax-back**,
 **vengeance** (a bonded friend's death → lasting vengeful state), timestamped
 chronological **move tracker**, **pregame conversations that form bonds**, a
 **constant cast with shuffled positions**, and the iOS pawn-glyph fix. No emojis.
-~38 unit + 4 Playwright e2e tests pass. Latest playtest bug fixed: pregame red
-glow (`vengefulUntil` default).
+The five bounded playtest fixes below (trust swings, spaced pregame banter,
+dramatic-only chaos offers, back-row breakout charge, rage-strike payoff) are all
+in as of the latest session. **42 unit + 4 Playwright e2e tests pass.**
 
-### NEXT STEPS (from the latest playtest feedback — not yet done)
+### NEXT STEPS (from the latest playtest feedback)
 
-Bounded logic/UX fixes (no new art needed) — do these first:
-- [ ] **Trust swings harder**: drop when the player loses a piece (bonded friends
-      voice losing faith), rise on captures and advancing pieces up the board;
-      bigger magnitudes. (Currently trust only scores the player's own move
-      quality; losing a piece isn't penalised.)
-- [ ] **Space out pregame banter** (it finishes in ~3s) — slower reveal cadence;
-      add an `interval` param to the view's `enqueue`/`pump`.
-- [ ] **Chaos offers only at dramatic moments**: offer jetpack/disguise only when
-      the stunt captures, gives check, or escapes an attack — not on any select.
-      (Edit `computeOffer` in `game.ts` to filter targets to "dramatic" ones.)
-- [ ] **Trapped back-row breakout**: a piece idle a very long time shoves past its
-      own pawn, swapping both (new spontaneous stunt in `game.ts`).
-- [ ] **Rage payoff**: a vengeful/raging piece can unleash a **rage-strike** on an
-      adjacent enemy (offered action, `offer.type: 'rage'` → `knockOff`), so the
-      red state actually does something.
+Bounded logic/UX fixes (no new art needed) — **all shipped this session:**
+- [x] **Trust swings harder**: `trustFromMove()` runs on every move, either side.
+      Player captures raise trust (`+2 + val·0.7`); losing a piece drops it hard
+      (`−(3 + val·1.1 + grief·1.5)`, worse the more beloved the fallen); advancing
+      up the board earns a little faith. A bonded survivor voices flagging faith
+      via `loseFaithLine()`.
+- [x] **Space out pregame banter**: `enqueue`/`pump` now take an `interval`; the
+      pregame reveal runs at 2400ms (queue cap raised 8→12 so no pairs drop).
+- [x] **Chaos offers only at dramatic moments**: `computeOffer` filters stunt
+      targets to those that capture, give check, or escape an attack on the
+      piece's own square — idle repositioning never triggers an offer.
+- [x] **Trapped back-row breakout**: a piece idle ≥12 plies behind its own pawn
+      charges up its file — a real multi-rank slide (distance depends on the room
+      above), shoving its pawn one rank further ahead, or **trampling** it (the
+      pawn dies) when there's no room. Spontaneous, 1×/game, chaos-gated. *(Not a
+      jump/swap — it's a dense-castle charge, per David's steer.)*
+- [x] **Rage payoff**: `offer.type: 'rage'` → `doRageStrike()`. A still-vengeful
+      piece with an adjacent enemy can smash it clean off the board (`knockOff`
+      with turn-flip — the strike IS the turn). Rage is then spent and the red
+      clears. Red `.dot--rage` strike ring in the view.
+
+Enabler added this session: an optional **`?fen=`** query param loads a specific
+position (shareable puzzles / deterministic e2e setups); honoured only on the
+initial mount, and `reset()` falls back to the opening on a malformed FEN.
+
+### The pacing pass (second playtest, "everything lands at once") — shipped
+
+The playtest log showed the drama *working* but compressed into single beats
+(Gertrude took g7, Cuthbert died, Gerard swore vengeance AND tantrum-killed
+Gertrude — all at 8:57). The fixes, all in:
+
+- [x] **Pregame is a scene**: each adjacent pair now has a 4-line conversation
+      (opener → reply → banter → closer, alternating speakers, 3 pairs), no line
+      ever repeating, at a 2600ms reveal — ~30s of getting acquainted. Longer
+      exchanges bond harder (+0.7). Idle heckle waits 50s so it can't step on it.
+- [x] **Enemy chaos is earned and staged**: never before ply 8, only when the
+      stunt *captures* (picks the biggest victim), and lands in two beats —
+      `aiChaosPlan()` telegraphs (a line + "UP TO SOMETHING…" mark on the piece),
+      then ~2.6s later `aiChaosCommit()` strikes. Announce lines never advertise
+      the player's own gear (killed "The enemy's got jetpacks too!").
+- [x] **One big thing at a time**: after the enemy's move, at most ONE follow-up
+      beat (spontaneous stunt, else a suggestion — never both), arriving ~2.6s
+      later as its own scene. Spontaneous chaos also never fires while the
+      player is holding a piece.
+- [x] **Tantrum needs visible buildup**: a max-rage piece must have been *seen*
+      raging for a full round (red aura pulsing) before it can erupt
+      (`enrageSeen`). No more same-beat kill-and-revenge.
+- [x] **Breakout follows the rant**: only a piece whose impatience the player
+      has heard (≥0.7, i.e. the escalating IMPATIENT lines fired) can charge —
+      Dennis's "UNLEASHED WRATH" now actually pays off in the loudest ranter.
+- [x] **Lingering stunt FX**: every rule-break leaves a mark for ~5.5s — origin
+      ghost ring, destination ring, and a label naming it (JETPACK! / DISGUISE! /
+      RAGE-STRIKE! / TANTRUM! / BREAKOUT! / COLD FEET / DEFECTED!). Honors
+      reduced-motion.
+- [x] **Slower, heavier animation**: travel ~320–720ms (risky ×1.8); captures
+      are *hauled down to the box* over ~1.1s (canon drag-off); the ONE spiral-
+      out death is the trampled pawn (`deathFx: 'drag' | 'spiral'`). Bubbles
+      linger 5.6s.
+- [x] **Vengeful legibility**: selecting a red-pulsing piece explains it in the
+      status bar ("X burns with vengeance against Y — tap a red ring to strike").
+- [x] **Template-level dialogue dedup**: "You KILLED {fallen}…" can't be used
+      twice in a game even with different names (recent ring tracks templates
+      too).
 
 Big visual pass (needs the decision below, do as a focused effort):
 - [ ] **Migrate unicode glyphs → real piece images** (enabler). Lets us overlay

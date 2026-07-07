@@ -13,7 +13,7 @@ import GameToolbar from '@/components/GameToolbar.vue'
 import { copyToClipboard } from '@/services/share'
 import { randomSeed } from '@/services/seed'
 import { Engine } from '@/services/chess/engine'
-import { WizardGame } from '@/services/chess/game'
+import { WizardGame, type StuntFx } from '@/services/chess/game'
 import { TYPE_NAME } from '@/services/chess/profiles'
 import { loadSettings, loadTrust, saveSettings, saveTrust } from '@/services/chess/settings'
 import type { Color, PieceType, Square, Utterance } from '@/services/chess/types'
@@ -67,22 +67,25 @@ let pumpTimer: ReturnType<typeof setTimeout> | null = null
 let bubbleId = 0
 const bubbleTimers = new Map<number, ReturnType<typeof setTimeout>>()
 
-function enqueue(lines: Utterance[], delay = 0) {
+let pumpInterval = 1000 // gap between revealed lines; wider for unhurried pregame banter
+function enqueue(lines: Utterance[], delay = 0, interval = 1000) {
   if (!lines.length) return
   queue.push(...lines)
-  if (queue.length > 8) queue.splice(0, queue.length - 8)
-  pump(delay)
+  if (queue.length > 12) queue.splice(0, queue.length - 12)
+  pump(delay, interval)
 }
-function pump(delay: number) {
+function pump(delay: number, interval = 1000) {
   if (pumpTimer) return
+  pumpInterval = interval
   const step = () => {
     const u = queue.shift()
     if (!u) {
       pumpTimer = null
+      pumpInterval = 1000
       return
     }
     reveal(u)
-    pumpTimer = setTimeout(step, 1000)
+    pumpTimer = setTimeout(step, pumpInterval)
   }
   pumpTimer = setTimeout(step, delay)
 }
@@ -111,7 +114,7 @@ function reveal(u: Utterance) {
     const timer = setTimeout(() => {
       bubbles.value = bubbles.value.filter((x) => x.bid !== b.bid)
       bubbleTimers.delete(b.bid)
-    }, 4400)
+    }, 5600)
     bubbleTimers.set(b.bid, timer)
   }
   log.value.unshift({ ...u, ts: t })
@@ -155,18 +158,57 @@ function triggerCue(soulId: string, type: string) {
 }
 const cueClass = (id: string) => (cueMap.value[id] ? 'cue-' + cueMap.value[id] : '')
 
+// ── Lingering stunt FX ─────────────────────────────────────────────────────
+// Any rule-breaking moment leaves a visible mark on the board (origin ghost +
+// destination ring + a label naming the stunt) that lingers long enough to be
+// read — so "wait, what just happened?" always has an answer on the board.
+const stuntFx = ref<(Omit<StuntFx, 'seq'> & { seq?: number }) | null>(null)
+let fxTimer: ReturnType<typeof setTimeout> | null = null
+let lastFxSeq = -1
+const FX_LABEL: Record<string, string> = {
+  jetpack: 'JETPACK!',
+  disguise: 'DISGUISE!',
+  rage: 'RAGE-STRIKE!',
+  tantrum: 'TANTRUM!',
+  breakout: 'BREAKOUT!',
+  coldfeet: 'COLD FEET',
+  defect: 'DEFECTED!',
+  telegraph: 'UP TO SOMETHING…',
+}
+function stuntMark(f: { kind: StuntFx['kind']; from: Square | null; to: Square }) {
+  stuntFx.value = f
+  if (fxTimer) clearTimeout(fxTimer)
+  fxTimer = setTimeout(() => (stuntFx.value = null), 5500)
+}
+watch(version, () => {
+  // Pick up marks the game logic set (player stunts, spontaneous chaos, enemy commits).
+  if (game.fx && game.fx.seq !== lastFxSeq) {
+    lastFxSeq = game.fx.seq
+    stuntMark(game.fx)
+  }
+})
+const fxRingStyle = (sq: Square) => {
+  const { col, row } = rc(sq)
+  return { left: `${(col / 8) * 100}%`, top: `${(row / 8) * 100}%` }
+}
+const fxLabelStyle = (sq: Square) => {
+  const { col, row } = rc(sq)
+  const tx = col <= 1 ? '0%' : col >= 6 ? '-100%' : '-50%'
+  return { left: `${((col + 0.5) / 8) * 100}%`, top: `${(row / 8) * 100}%`, '--tx': tx }
+}
+
 // ── Idle heckling ─────────────────────────────────────────────────────────
 // Fires at most ONCE per idle stretch: a real interaction re-arms it. (Previously
 // it re-armed itself every 16s, producing a wall of repeated heckles.)
 let idleTimer: ReturnType<typeof setTimeout> | null = null
-function armIdle() {
+function armIdle(delay = 22_000) {
   if (idleTimer) clearTimeout(idleTimer)
   if (!game.canPlay) return
   idleTimer = setTimeout(() => {
     idleTimer = null
     const u = game.idleHeckle()
     if (u) enqueue([u])
-  }, 22_000)
+  }, delay)
 }
 
 // ── Reactive, derived board ─────────────────────────────────────────────────
@@ -186,6 +228,7 @@ const animMap = computed(() => (version.value, game.animations()))
 const selectedSquare = computed(() => (version.value, game.selected))
 const legalTargets = computed(() => (version.value, game.legalTargets()))
 const chaosTargets = computed(() => (version.value, new Set(game.chaosTargets())))
+const rageOffer = computed(() => (version.value, game.chaosOfferType() === 'rage'))
 const canPlay = computed(() => (version.value, game.canPlay))
 const thinking = computed(() => (version.value, game.aiThinking))
 const checkSquare = computed<Square | null>(() => {
@@ -207,7 +250,17 @@ const status = computed(() => {
   if (game.chess.isStalemate()) return 'Stalemate — a stiff, awkward draw.'
   if (game.chess.isDraw()) return "It's a draw. Everyone lives to bicker another day."
   if (game.turn !== 'w' || game.aiThinking) return 'The enemy is plotting…'
-  if (selectedName.value) return `Holding ${selectedName.value} — pick a square.`
+  if (selectedName.value) {
+    // A vengeful piece's red pulse gets explained the moment you pick it up —
+    // and, when a rage-strike is on offer, told how to spend it.
+    const s = game.soulAt(selectedSquare.value as Square)
+    if (s && s.vengefulUntil >= game.society.ply) {
+      const killer = s.avenging ? game.society.souls[s.avenging]?.persona.name : null
+      const strike = game.chaosOfferType() === 'rage' && game.chaosTargets().length > 0
+      return `${s.persona.name} burns with vengeance${killer ? ` against ${killer}` : ''}${strike ? ' — tap a red ring to strike' : ''}.`
+    }
+    return `Holding ${selectedName.value} — pick a square.`
+  }
   if (game.chess.isCheck()) return 'You are in check!'
   return 'Your move.'
 })
@@ -221,11 +274,12 @@ const animClass = (square: Square) => {
   return a ? 'anim-' + a : ''
 }
 // Travel speed: bold/reckless pieces dash, timid ones creep; risky moves drag.
+// Deliberately unhurried across the board — the movement is part of the story.
 function moveMs(p: PieceView): number {
   const s = game.society.souls[p.id]
   const bold = Math.max(s.persona.bravery ?? 0.5, s.persona.recklessness ?? 0.3)
-  let ms = Math.round(500 - bold * 320) // ~180–500ms
-  if (p.id === game.lastMoverId && game.lastMoveRisky) ms = Math.round(ms * 1.7)
+  let ms = Math.round(720 - bold * 400) // ~320–720ms
+  if (p.id === game.lastMoverId && game.lastMoveRisky) ms = Math.round(ms * 1.8)
   return ms
 }
 const pieceStyle = (p: PieceView) => {
@@ -268,6 +322,9 @@ const stateClass = (sq: Square) => {
   return s ? 'state-' + s : ''
 }
 const coaxSquare = computed(() => (version.value, game.coaxTarget()))
+// How the next capture leaves the board: dragged to the box (default) or — only
+// for a trampled pawn — spiralling out of existence.
+const deathFx = computed(() => (version.value, game.deathFx))
 
 // Team trust (persists across games): its opinion of your generalship.
 const trustPct = computed(() => (version.value, Math.round(game.trust)))
@@ -409,44 +466,85 @@ async function runAi() {
   if (game.gameOver) return
   game.aiThinking = true
   bump()
-  // The enemy sometimes pulls a stunt instead of a normal move.
-  const chaos = game.aiChaos()
-  if (chaos) {
-    game.aiThinking = false
-    enqueue(chaos, 550)
+  // The enemy sometimes pulls a stunt instead of a normal move — staged in two
+  // beats so the player can see it coming: a telegraph line + a mark on the
+  // piece, THEN (a beat later) the stunt itself.
+  const plan = game.aiChaosPlan()
+  if (plan) {
+    enqueue([plan.announce], 400)
+    stuntMark({ kind: 'telegraph', from: null, to: plan.from })
     bump()
-  } else {
-    const best = await engine.bestMove(game.chess.fen(), level.value)
-    game.aiThinking = false
-    if (best && !game.gameOver) enqueue(game.aiApply(best), 650)
-    bump()
+    window.setTimeout(() => {
+      const lines = game.aiChaosCommit(plan)
+      if (!lines.length) {
+        void engineMove() // the plan died on an illegal position — play it straight
+        return
+      }
+      game.aiThinking = false
+      enqueue(lines, 200)
+      bump()
+      maybePostGame()
+      armIdle()
+      scheduleFollowUp()
+    }, 2600)
+    return
   }
-  // Occasionally a piece volunteers for a strong move it spotted.
-  const s = game.suggest()
-  if (s) {
-    enqueue([s], 500)
-    bump()
-  }
-  // A spontaneous stunt may fire (cold feet / tantrum / defection).
-  const sp = game.spontaneousChaos()
-  if (sp) {
-    enqueue([sp], 400)
-    bump()
-  }
+  await engineMove()
+}
+
+async function engineMove() {
+  const best = await engine.bestMove(game.chess.fen(), level.value)
+  game.aiThinking = false
+  if (best && !game.gameOver) enqueue(game.aiApply(best), 650)
+  bump()
   maybePostGame()
   armIdle()
+  scheduleFollowUp()
+}
+
+// At most ONE follow-up beat per enemy turn, arriving as its own scene a couple
+// of seconds after the move so big moments never land on top of each other: a
+// spontaneous stunt (tantrum / breakout / cold feet / defection), or failing
+// that, a piece volunteering advice. Never both.
+let followUpTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleFollowUp() {
+  if (followUpTimer) clearTimeout(followUpTimer)
+  followUpTimer = setTimeout(() => {
+    followUpTimer = null
+    if (game.gameOver) return
+    const sp = game.spontaneousChaos()
+    if (sp) {
+      enqueue([sp])
+      bump()
+      return
+    }
+    const s = game.suggest()
+    if (s) {
+      enqueue([s])
+      bump()
+    }
+  }, 2600)
 }
 
 // ── Setup ────────────────────────────────────────────────────────────────
 const syncUrl = () => router.replace({ name: 'wizard-chess', params: { seed: `${level.value}.${code.value}` } })
-function start() {
-  game.reset(code.value)
+function start(fen?: string) {
+  game.reset(code.value, fen)
   clearBanter()
   cueMap.value = {}
+  stuntFx.value = null
+  if (fxTimer) clearTimeout(fxTimer)
+  if (followUpTimer) {
+    clearTimeout(followUpTimer)
+    followUpTimer = null
+  }
+  lastFxSeq = -1
   postSaid = false
   bump()
-  enqueue(game.pregameChatter(), 500) // adjacent pieces get acquainted (forms bonds)
-  armIdle()
+  // Adjacent pieces get properly acquainted (multi-turn conversations that form
+  // bonds) — an unhurried scene, so the idle heckle waits until it's over.
+  enqueue(game.pregameChatter(), 800, 2600)
+  armIdle(50_000)
 }
 function newGame() {
   code.value = randomSeed()
@@ -474,13 +572,18 @@ onMounted(() => {
   } else {
     syncUrl()
   }
-  start()
+  // Optional `?fen=` sets up a specific position (shareable puzzles / testing);
+  // only honoured on the initial mount — a New Game always starts fresh.
+  const fen = typeof route.query.fen === 'string' ? route.query.fen : undefined
+  start(fen)
 })
 onBeforeUnmount(() => {
   engine.dispose()
   clearBanter()
   if (idleTimer) clearTimeout(idleTimer)
   if (pressTimer) clearTimeout(pressTimer)
+  if (fxTimer) clearTimeout(fxTimer)
+  if (followUpTimer) clearTimeout(followUpTimer)
   cueTimers.forEach((t) => clearTimeout(t))
 })
 </script>
@@ -601,13 +704,22 @@ onBeforeUnmount(() => {
           >
             <span v-if="legalTargets.has(squareOf(i))" class="dot"></span>
             <span v-else-if="squareOf(i) === coaxSquare" class="dot dot--coax" title="Coax back to post"></span>
-            <span v-else-if="chaosTargets.has(squareOf(i))" class="dot dot--chaos"></span>
+            <span v-else-if="chaosTargets.has(squareOf(i))" class="dot" :class="rageOffer ? 'dot--rage' : 'dot--chaos'"></span>
           </div>
 
           <span v-if="checkSquare" class="check-ring" :style="checkStyle"></span>
 
+          <!-- lingering stunt FX: ghost at origin, ring at destination, label -->
+          <template v-if="stuntFx">
+            <span v-if="stuntFx.from" class="stunt-ring stunt-ring--from" :style="fxRingStyle(stuntFx.from)"></span>
+            <span class="stunt-ring" :class="'fx-' + stuntFx.kind" :style="fxRingStyle(stuntFx.to)"></span>
+            <span class="stunt-label" :class="'fx-' + stuntFx.kind" :style="fxLabelStyle(stuntFx.to)">{{
+              FX_LABEL[stuntFx.kind]
+            }}</span>
+          </template>
+
           <!-- pieces: animated overlay -->
-          <TransitionGroup name="pmove" tag="div" class="pieces">
+          <TransitionGroup name="pmove" tag="div" class="pieces" :class="'death-' + deathFx">
             <span
               v-for="p in piecesList"
               :key="p.id"
@@ -817,6 +929,80 @@ onBeforeUnmount(() => {
   border: 3px dashed #22c55e;
   animation: chaosPulse 1.1s ease-in-out infinite;
 }
+/* Rage-strike target — an angry red ring around the enemy about to be smashed. */
+.dot--rage {
+  width: 74%;
+  height: 74%;
+  background: rgba(239, 68, 68, 0.16);
+  border: 3px dashed #ef4444;
+  animation: chaosPulse 0.7s ease-in-out infinite;
+}
+
+/* Lingering stunt FX: after any rule-breaking moment, a ghost ring marks where
+   it started, a bright ring marks where it landed, and a label names it — all
+   lingering several seconds so the player can read what just happened. */
+.stunt-ring {
+  position: absolute;
+  width: 12.5%;
+  height: 12.5%;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 3px #c084fc;
+  background: radial-gradient(circle, rgba(192, 132, 252, 0.28), transparent 70%);
+  pointer-events: none;
+  z-index: 2;
+  animation: fxFade 5.5s ease-out forwards;
+}
+.stunt-ring--from {
+  box-shadow: inset 0 0 0 2px rgba(192, 132, 252, 0.5);
+  background: none;
+}
+.stunt-ring.fx-rage,
+.stunt-ring.fx-tantrum {
+  box-shadow: inset 0 0 0 3px #ef4444;
+  background: radial-gradient(circle, rgba(239, 68, 68, 0.3), transparent 70%);
+}
+.stunt-ring.fx-coldfeet {
+  box-shadow: inset 0 0 0 3px #60a5fa;
+  background: radial-gradient(circle, rgba(96, 165, 250, 0.28), transparent 70%);
+}
+.stunt-ring.fx-telegraph {
+  animation:
+    chaosPulse 0.9s ease-in-out infinite,
+    fxFade 5.5s ease-out forwards;
+}
+.stunt-label {
+  position: absolute;
+  transform: translate(var(--tx, -50%), -130%);
+  padding: 2px 8px;
+  border-radius: 8px;
+  background: rgba(88, 28, 135, 0.92);
+  color: #f3e8ff;
+  font-size: clamp(0.6rem, 1.9vw, 0.8rem);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 6;
+  animation: fxFade 5.5s ease-out forwards;
+}
+.stunt-label.fx-rage,
+.stunt-label.fx-tantrum {
+  background: rgba(127, 29, 29, 0.92);
+  color: #fee2e2;
+}
+.stunt-label.fx-coldfeet {
+  background: rgba(30, 58, 138, 0.92);
+  color: #dbeafe;
+}
+@keyframes fxFade {
+  0%,
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
 .check-ring {
   position: absolute;
   width: 12.5%;
@@ -869,16 +1055,27 @@ onBeforeUnmount(() => {
 .pmove-move {
   transition: transform var(--move-ms, 300ms) cubic-bezier(0.22, 0.61, 0.36, 1);
 }
-/* Capture = dragged off the board (down toward the box), tumbling. */
+/* Capture = hauled off the board, down toward the box: slow, heavy, readable.
+   (Canon: the fallen are dragged off, not vanished.) */
 .pmove-leave-active {
   transition:
-    opacity 0.5s ease-in,
-    transform 0.55s cubic-bezier(0.5, 0, 0.9, 0.35);
+    opacity 1.05s ease-in,
+    transform 1.15s cubic-bezier(0.45, 0.05, 0.8, 0.4);
   z-index: 3;
 }
 .pmove-leave-to {
   opacity: 0;
-  transform: translateY(80%) rotate(42deg) scale(0.5);
+  transform: translateY(260%) rotate(12deg);
+}
+/* The ONE exception: a trampled pawn spirals out of existence underfoot. */
+.pieces.death-spiral .pmove-leave-active {
+  transition:
+    opacity 0.85s ease-in,
+    transform 0.95s ease-in;
+}
+.pieces.death-spiral .pmove-leave-to {
+  opacity: 0;
+  transform: rotate(660deg) scale(0);
 }
 
 /* Mood animations — capped to ~2 pieces by the controller, so rare by design.
@@ -1175,8 +1372,15 @@ onBeforeUnmount(() => {
   .piece-box.cue-hop {
     animation: none !important;
   }
-  .pmove-move {
+  .pmove-move,
+  .pmove-leave-active,
+  .pieces.death-spiral .pmove-leave-active {
     transition: none !important;
+  }
+  .stunt-ring,
+  .stunt-ring.fx-telegraph,
+  .stunt-label {
+    animation: none !important;
   }
   .glyph.anim-angry {
     filter: drop-shadow(0 0 3px #ef4444);

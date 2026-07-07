@@ -14,7 +14,9 @@ import type { GameEvent, PieceSoul, Utterance } from './types'
 type Rng = () => number
 
 export interface DialogueState {
-  recent: string[] // ring buffer of recently spoken lines
+  recent: string[] // ring buffer of recently spoken lines (filled text)
+  recentTemplates: string[] // and their raw templates — two "You KILLED X" with
+  // different names still read as the same canned line, so dedup both.
   lastSpoke: Record<string, number> // soulId -> ply
   // Ambient chatter is budgeted per side so the enemy isn't drowned out by your
   // own pieces — the two armies each get their own quiet slot.
@@ -24,6 +26,7 @@ export interface DialogueState {
 
 export const createDialogueState = (): DialogueState => ({
   recent: [],
+  recentTemplates: [],
   lastSpoke: {},
   lastAmbientAlly: -99,
   lastAmbientEnemy: -99,
@@ -321,10 +324,11 @@ export function speak(
 
     const ctx = contextFor(event, society)
     let text = ''
+    let template = ''
     for (let attempt = 0; attempt < 4; attempt += 1) {
-      const candidate = fill(pick(pool, rng), ctx)
-      text = candidate // fall back to a repeat rather than staying silent
-      if (!state.recent.includes(candidate)) break
+      template = pick(pool, rng)
+      text = fill(template, ctx) // fall back to a repeat rather than staying silent
+      if (!state.recent.includes(text) && !state.recentTemplates.includes(template)) break
     }
 
     out.push({
@@ -338,7 +342,9 @@ export function speak(
     spokenThisPly.add(speaker.id)
     state.lastSpoke[speaker.id] = society.ply
     state.recent.push(text)
+    state.recentTemplates.push(template)
     if (state.recent.length > RECENT_MAX) state.recent.shift()
+    if (state.recentTemplates.length > RECENT_MAX) state.recentTemplates.shift()
     if (!priority) {
       if (enemy) {
         ambientEnemy = true
@@ -405,6 +411,18 @@ const SMALLTALK = [
   'Whatever happens, it was an honour to serve on this rank.',
   'Anyone else nervous, or just me?',
 ]
+// A surviving comrade's faith in the general slips when one of ours is lost —
+// directed at the player (the trust meter's voice), not the killer.
+const LOSE_FAITH = [
+  'We keep dying out here. Do you even have a plan, general?',
+  'Another one gone. I am starting to wonder about your command.',
+  "That's twice now I've trusted your orders. Twice too many.",
+  "Is this what leadership looks like? We're being picked apart.",
+  "I followed you into this. I'm not sure I'd do it again.",
+  "Fewer of us every turn. The ranks are talking, general.",
+]
+export const loseFaithLine = (rng: Rng): string => pick(LOSE_FAITH, rng)
+
 const POSTGAME_WIN = [
   'Told you we had it!',
   'A famous victory. Drinks are on the king.',
@@ -418,7 +436,9 @@ export const smallTalkLine = (rng: Rng): string => pick(SMALLTALK, rng)
 export const postGameLine = (won: boolean, rng: Rng): string => pick(won ? POSTGAME_WIN : POSTGAME_LOSS, rng)
 
 // Pregame conversations between adjacent pieces — this is how friendships form
-// (and thus why anyone grieves later). {target} = the other piece's name.
+// (and thus why anyone grieves later). Each pair gets a real back-and-forth:
+// opener → reply → a couple of banter beats → closer, alternating speakers.
+// {target} = the other piece's name.
 const CHAT_OPENER = [
   'Stick close today, {target}?',
   'Nervous, {target}? I am.',
@@ -435,8 +455,53 @@ const CHAT_REPLY = [
   'To the end, {target}.',
   'Count on it, {target}.',
 ]
-export const chatOpener = (name: string, rng: Rng): string => pick(CHAT_OPENER, rng).replace(/\{target\}/g, name)
-export const chatReply = (name: string, rng: Rng): string => pick(CHAT_REPLY, rng).replace(/\{target\}/g, name)
+const CHAT_BANTER = [
+  'Remember the last campaign, {target}? You were magnificent.',
+  'If a knight comes for me, {target}, shout first. Loudly.',
+  'Stay off the long diagonals, {target}. That is where they get you.',
+  'I heard the enemy queen is in a MOOD today.',
+  'Watch the flanks, {target}. It is always the flanks.',
+  'I polished my base all morning. Battle-ready.',
+  'If I fall, {target}, avenge me. Dramatically.',
+  'You always say that, {target}. And you are always right.',
+  'The pawns drew straws for who goes first. I lost.',
+  'Keep an eye on the king for me, {target}. He wanders.',
+]
+const CHAT_CLOSER = [
+  'For the king, {target}.',
+  'Shoulder to shoulder, then.',
+  'Let us give them a show, {target}.',
+  'Till the last rank, {target}.',
+  'See you on the other side of this, {target}.',
+]
+const fillName = (t: string, name: string) => t.replace(/\{target\}/g, name)
+const pickFresh = (pool: string[], used: Set<string>, rng: Rng): string => {
+  for (let i = 0; i < 6; i += 1) {
+    const t = pick(pool, rng)
+    if (!used.has(t)) {
+      used.add(t)
+      return t
+    }
+  }
+  return pick(pool, rng)
+}
+export const chatOpener = (name: string, rng: Rng, used: Set<string>): string => fillName(pickFresh(CHAT_OPENER, used, rng), name)
+export const chatReply = (name: string, rng: Rng, used: Set<string>): string => fillName(pickFresh(CHAT_REPLY, used, rng), name)
+export const chatBanter = (name: string, rng: Rng, used: Set<string>): string => fillName(pickFresh(CHAT_BANTER, used, rng), name)
+export const chatCloser = (name: string, rng: Rng, used: Set<string>): string => fillName(pickFresh(CHAT_CLOSER, used, rng), name)
+
+// Enemy stunts arrive in two beats: a telegraph the player can read coming, then
+// the payoff. Neither ever claims the player's own pieces have the same gear.
+const ENEMY_ANNOUNCE: Record<'jetpack' | 'disguise', string[]> = {
+  jetpack: ['You hear that rattle? That is MY contraption warming up.', 'I strapped something to my back before the game. Watch.'],
+  disguise: ['Who says a rook plays it straight?', 'I have been practising diagonals in secret. Observe.'],
+}
+const ENEMY_COMMIT: Record<'jetpack' | 'disguise', string[]> = {
+  jetpack: ['AIRBORNE! Hahahaha!', 'The sky is MINE!'],
+  disguise: ['Diagonals feel WONDERFUL.', 'Bishop lessons paid off!'],
+}
+export const enemyStuntAnnounce = (type: 'jetpack' | 'disguise', rng: Rng): string => pick(ENEMY_ANNOUNCE[type], rng)
+export const enemyStuntCommit = (type: 'jetpack' | 'disguise', rng: Rng): string => pick(ENEMY_COMMIT[type], rng)
 export const suggestLine = (reckless: boolean, rng: Rng): string => pick(reckless ? SUGGEST_RECKLESS : SUGGEST, rng)
 export const badAdviceLine = (rng: Rng): string => pick(BAD_ADVICE, rng)
 export const heckleLine = (rng: Rng): string => pick(HECKLE, rng)

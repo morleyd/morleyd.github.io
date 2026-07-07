@@ -103,13 +103,17 @@ export function defect(c: Chess, square: Square): boolean {
   return commit(c, edited, c.turn())
 }
 
-/** Knock a piece clean off the board (the tantrum). Keeps the current turn. */
-export function knockOff(c: Chess, square: Square): boolean {
+/** Knock a piece clean off the board (the tantrum / rage-strike). By default
+ * keeps the current turn (a bonus, as with the tantrum); pass `flipTurn` when the
+ * strike IS the mover's move for the turn (the offered rage-strike). */
+export function knockOff(c: Chess, square: Square, flipTurn = false): boolean {
   const p = c.get(square)
   if (!p || p.type === 'k') return false
   const edited = new Chess(c.fen())
   edited.remove(square)
-  return commit(c, edited, c.turn())
+  const cur = c.turn() as Color
+  const turn: Color = flipTurn ? (cur === 'w' ? 'b' : 'w') : cur
+  return commit(c, edited, turn)
 }
 
 /** Material balance in points, positive = White ahead. */
