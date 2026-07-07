@@ -215,7 +215,7 @@ const TYPE_FOR = (u: Utterance): string => {
   return s ? TYPE_NAME[s.type] : ''
 }
 
-// Move tracker: pair plies into numbered rows (chaos plies carry a 🎩).
+// Move tracker: pair plies into numbered rows (chaos plies carry a 🌀).
 const movePairs = computed(() => {
   version.value
   const m = game.moveLog
@@ -444,7 +444,7 @@ onBeforeUnmount(() => {
             <v-slider v-model="settings.agency" :min="0" :max="1" :step="0.1" hide-details density="compact" />
           </div>
           <div class="slider-wrap">
-            <label class="text-caption text-medium-emphasis">Chaos 🎩</label>
+            <label class="text-caption text-medium-emphasis">Chaos 🌀</label>
             <v-slider v-model="settings.chaos" :min="0" :max="1" :step="0.1" hide-details density="compact" color="secondary" />
           </div>
           <v-btn variant="tonal" color="primary" prepend-icon="mdi-refresh" @click="newGame">New game</v-btn>
@@ -562,8 +562,8 @@ onBeforeUnmount(() => {
           <p v-if="movePairs.length === 0" class="text-medium-emphasis text-body-2 pa-2">No moves yet.</p>
           <div v-for="row in movePairs" :key="row.n" class="move-row">
             <span class="move-n">{{ row.n }}.</span>
-            <span class="move-ply" :class="{ chaos: row.w.includes('🎩') }">{{ row.w }}</span>
-            <span class="move-ply" :class="{ chaos: row.b.includes('🎩') }">{{ row.b }}</span>
+            <span class="move-ply" :class="{ chaos: row.w.includes('🌀') }">{{ row.w }}</span>
+            <span class="move-ply" :class="{ chaos: row.b.includes('🌀') }">{{ row.b }}</span>
           </div>
         </div>
       </div>

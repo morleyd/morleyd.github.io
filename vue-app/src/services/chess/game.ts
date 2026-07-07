@@ -332,7 +332,7 @@ export class WizardGame {
     const soul = this.soulAt(offer.from)
     const res = this.relocate(offer.from, to, true)
     this.usedStunts.add(offer.type)
-    this.moveLog.push(`🎩 ${offer.type === 'disguise' ? 'R' : 'N'}→${to}`)
+    this.moveLog.push(`🌀 ${offer.type === 'disguise' ? 'R' : 'N'}→${to}`)
     this.offer = null
     this.selected = null
     this.resist = null
@@ -370,7 +370,7 @@ export class WizardGame {
       if (this.rng() >= this.settings.chaos) continue
       if (!this.relocate(sq, behind, false)) continue
       this.usedStunts.add('coldfeet')
-      this.moveLog.push(`🎩 ${behind} (cold feet)`)
+      this.moveLog.push(`🌀 ${behind} (cold feet)`)
       return {
         soulId: s.id,
         square: behind,
@@ -413,7 +413,7 @@ export class WizardGame {
       this.lastTo = target
       this.lastMoverId = s.id
       this.lastMoveRisky = false
-      this.moveLog.push(`🎩 ×${target} (tantrum)`)
+      this.moveLog.push(`🌀 ×${target} (tantrum)`)
       return {
         soulId: s.id,
         square: sq,
@@ -443,7 +443,7 @@ export class WizardGame {
       this.lastTo = sq
       this.lastMoverId = s.id
       this.lastMoveRisky = false
-      this.moveLog.push(`🎩 ${sq} defects`)
+      this.moveLog.push(`🌀 ${sq} defects`)
       return {
         soulId: s.id,
         square: sq,
@@ -481,7 +481,7 @@ export class WizardGame {
       const to = this.pick(caps.length ? caps : targets)
       this.relocate(s.square, to, true)
       this.usedStunts.add('aichaos')
-      this.moveLog.push(`🎩 ${type === 'disguise' ? 'R' : 'N'}→${to} (enemy)`)
+      this.moveLog.push(`🌀 ${type === 'disguise' ? 'R' : 'N'}→${to} (enemy)`)
       const line = type === 'disguise' ? 'Who says a rook plays it straight?' : "The enemy's got jetpacks too!"
       const utter: Utterance[] = [{ soulId: s.id, square: to, color: 'b', name: s.persona.name, text: line, tone: 'gloat' }]
       utter.push(

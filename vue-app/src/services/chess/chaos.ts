@@ -31,9 +31,25 @@ function computeCastling(c: Chess): string {
 }
 
 /**
- * Apply an off-book relocation of any geometry. Mutates `c`. Returns the captured
- * piece type (or undefined), or null if the result would be an illegal position
- * (e.g. it leaves the mover's own king in check — chess.js rejects the FEN).
+ * Build + validate the edited position on a throwaway, and only commit it to the
+ * live board `c` once the FEN is known-legal — so a rejected stunt (e.g. an
+ * illegal self-check, or a pawn shoved onto a promotion rank) can never leave the
+ * live game half-mutated and corrupted.
+ */
+function commit(c: Chess, edited: Chess, turn: Color): boolean {
+  const fen = `${edited.fen().split(' ')[0]} ${turn} ${computeCastling(edited)} - 0 1`
+  try {
+    new Chess(fen) // validate without touching `c`
+  } catch {
+    return false
+  }
+  c.load(fen)
+  return true
+}
+
+/**
+ * Apply an off-book relocation of any geometry. Returns the captured piece type
+ * (or undefined), or null if the result would be an illegal position.
  */
 export function applyChaosMove(
   c: Chess,
@@ -47,50 +63,32 @@ export function applyChaosMove(
   if (target?.type === 'k') return null // never capture a king
   const captured = target?.type
 
-  c.remove(from)
-  if (target) c.remove(to)
-  c.put({ type: piece.type, color: piece.color }, to)
+  const edited = new Chess(c.fen())
+  edited.remove(from)
+  if (target) edited.remove(to)
+  edited.put({ type: piece.type, color: piece.color }, to)
 
-  const placement = c.fen().split(' ')[0]
-  const turn = flipTurn ? (piece.color === 'w' ? 'b' : 'w') : piece.color
-  const fen = `${placement} ${turn} ${computeCastling(c)} - 0 1`
-  try {
-    c.load(fen)
-  } catch {
-    return null
-  }
-  return { captured }
-}
-
-/** Rebuild + reload the FEN keeping the given side to move (for board edits that
- * don't consume a turn). Returns false if the result is illegal. */
-function reload(c: Chess, turn: Color): boolean {
-  const placement = c.fen().split(' ')[0]
-  try {
-    c.load(`${placement} ${turn} ${computeCastling(c)} - 0 1`)
-    return true
-  } catch {
-    return false
-  }
+  const turn: Color = flipTurn ? (piece.color === 'w' ? 'b' : 'w') : piece.color
+  return commit(c, edited, turn) ? { captured } : null
 }
 
 /** Flip a piece's allegiance in place (the defector). Keeps the current turn. */
 export function defect(c: Chess, square: Square): boolean {
   const p = c.get(square)
   if (!p || p.type === 'k') return false
-  const turn = c.turn()
-  c.remove(square)
-  c.put({ type: p.type, color: p.color === 'w' ? 'b' : 'w' }, square)
-  return reload(c, turn)
+  const edited = new Chess(c.fen())
+  edited.remove(square)
+  edited.put({ type: p.type, color: p.color === 'w' ? 'b' : 'w' }, square)
+  return commit(c, edited, c.turn())
 }
 
 /** Knock a piece clean off the board (the tantrum). Keeps the current turn. */
 export function knockOff(c: Chess, square: Square): boolean {
   const p = c.get(square)
   if (!p || p.type === 'k') return false
-  const turn = c.turn()
-  c.remove(square)
-  return reload(c, turn)
+  const edited = new Chess(c.fen())
+  edited.remove(square)
+  return commit(c, edited, c.turn())
 }
 
 /** Material balance in points, positive = White ahead. */
