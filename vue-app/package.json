@@ -17,6 +17,7 @@
   "dependencies": {
     "@mdi/font": "^7.4.47",
     "buffer": "^6.0.3",
+    "chess.js": "^1.4.0",
     "pinia": "^3.0.3",
     "sass": "^1.94.0",
     "vite-plugin-vuetify": "^2.1.2",

@@ -84,6 +84,15 @@ const games: GameCard[] = [
     gradient: 'linear-gradient(135deg, rgba(59, 130, 246, 0.35), rgba(34, 197, 94, 0.28))',
   },
   {
+    key: 'wizard-chess',
+    title: 'Wizard Chess',
+    description:
+      'Real chess against an engine — but every piece is a named character with a temper, who gloats, panics, and holds grudges as the battle unfolds.',
+    icon: 'mdi-chess-queen',
+    to: '/wizard-chess',
+    gradient: 'linear-gradient(135deg, rgba(142, 36, 170, 0.42), rgba(15, 23, 42, 0.35))',
+  },
+  {
     key: 'time-since',
     title: 'Time Since',
     description:

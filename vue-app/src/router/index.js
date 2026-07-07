@@ -61,6 +61,12 @@ const router = createRouter({
       meta: { gamePage: true, lockScroll: true },
     },
     {
+      path: '/wizard-chess/:seed?',
+      name: 'wizard-chess',
+      component: () => import('../views/WizardChessView.vue'),
+      meta: { gamePage: true },
+    },
+    {
       path: '/time-since',
       name: 'time-since',
       component: () => import('../views/TimeSinceView.vue'),
