@@ -19,9 +19,13 @@ export function useSquareFit(reserveBottom = 80) {
     const cs = getComputedStyle(parent)
     const availW = parent.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
     const top = node.getBoundingClientRect().top
-    // visualViewport is the most accurate "visible" height on iOS (accounts for
-    // the address bar); fall back to innerHeight elsewhere.
-    const viewportH = window.visualViewport?.height ?? window.innerHeight
+    // Take the SMALLEST of every viewport-height signal — different mobile
+    // browsers report the visible area in different ones, so the min is safest.
+    const viewportH = Math.min(
+      window.visualViewport?.height ?? Infinity,
+      window.innerHeight || Infinity,
+      document.documentElement.clientHeight || Infinity,
+    )
     const availH = viewportH - top - reserveBottom
     px.value = Math.max(140, Math.floor(Math.min(availW, availH)))
   }

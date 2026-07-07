@@ -12,7 +12,8 @@ import { useSquareFit } from '@/composables/useSquareFit'
 
 const { el: boardEl, px: boardPx } = useSquareFit(140)
 
-const PALETTE = ['#ef4444', '#f59e0b', '#eab308', '#22c55e', '#3b82f6', '#a855f7']
+// Distinct hues + lightness so adjacent warm colors don't blur together
+const PALETTE = ['#ef4444', '#f97316', '#facc15', '#22c55e', '#3b82f6', '#a855f7']
 
 const route = useRoute()
 const router = useRouter()

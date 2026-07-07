@@ -10,7 +10,7 @@ import { copyToClipboard } from '@/services/share'
 import { randomSeed, rngFromSeed } from '@/services/seed'
 import { useSquareFit } from '@/composables/useSquareFit'
 
-const { el: boardEl, px: boardPx } = useSquareFit(110)
+const { el: boardEl, px: boardPx } = useSquareFit(160)
 
 interface Cell {
   mine: boolean
