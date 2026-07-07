@@ -50,6 +50,7 @@ describe('WizardGame interaction', () => {
     const g = new WizardGame('sac')
     // White queen d2, black pawn e5: Qd4 is a sacrifice.
     g.reset('sac', '4k3/8/8/4p3/8/8/3Q4/4K3 w - - 0 1')
+    g.settings.agency = 1 // pieces always push back at this setting
     g.playerTap('d2')
     expect(g.selected).toBe('d2')
 
@@ -64,12 +65,15 @@ describe('WizardGame interaction', () => {
     expect(g.chess.get('d4')?.type).toBe('q')
   })
 
-  it('caps mood animations at two pieces', () => {
+  it('caps mood animations by the animation scaler', () => {
     const g = new WizardGame('anim')
     g.reset('anim')
-    // Force everyone into an angry mood; the controller must still surface ≤2.
+    // Force everyone into an angry mood; the controller must still respect the cap.
     for (const s of Object.values(g.society.souls)) s.mood.anger = 1
+    g.settings.animation = 0.5 // cap ~2
     expect(Object.keys(g.animations()).length).toBeLessThanOrEqual(2)
+    g.settings.animation = 0 // still board
+    expect(Object.keys(g.animations()).length).toBe(0)
   })
 
   it('applies an AI move and keeps the turn flowing', () => {

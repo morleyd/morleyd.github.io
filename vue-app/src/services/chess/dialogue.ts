@@ -264,8 +264,10 @@ export function speak(
   events: GameEvent[],
   state: DialogueState,
   rng: Rng,
+  chatter = 0.6,
   max = 2,
 ): Utterance[] {
+  if (chatter <= 0 && !events.some((e) => PRIORITY.has(e.kind))) return []
   const out: Utterance[] = []
   const spokenThisPly = new Set<string>()
   const ranked = [...events].sort((a, b) => b.salience - a.salience)
@@ -282,12 +284,14 @@ export function speak(
     const enemy = speaker.color === 'b' // the player is always White
     if (!priority) {
       // Ambient banter: one per side per call, spaced apart, usually skipped.
-      // The enemy is a touch chattier so it taunts and cries out more often.
+      // The enemy is a touch chattier; the Chattiness scaler widens/narrows both
+      // the gap and the skip chance (0 → effectively silent, 1 → lively).
       if (enemy ? ambientEnemy : ambientAlly) continue
-      const gap = enemy ? 3 : 4
+      const gap = Math.max(1, Math.round((enemy ? 3 : 4) + (0.6 - chatter) * 6))
       const last = enemy ? state.lastAmbientEnemy : state.lastAmbientAlly
       if (society.ply - last < gap) continue
-      if (rng() < (enemy ? 0.4 : 0.6)) continue
+      const skip = Math.min(0.97, Math.max(0.05, (enemy ? 0.4 : 0.6) + (0.6 - chatter)))
+      if (rng() < skip) continue
     }
 
     // Per-piece cooldown so nobody monologues (looser for dramatic moments).

@@ -12,6 +12,7 @@ import { rngFromSeed } from '../seed'
 import { applyMove, createSociety, scanBoard, soulAt, type Society } from './social'
 import { createDialogueState, heckleLine, resistLine, speak, suggestLine, type DialogueState } from './dialogue'
 import { assessMove, bestOpportunity, PIECE_VALUE } from './assess'
+import { DEFAULT_SETTINGS, type WizardSettings } from './settings'
 import type { Color, GameEvent, PieceSoul, Square, Utterance } from './types'
 
 export const PLAYER: Color = 'w'
@@ -33,6 +34,8 @@ interface Resist {
   from: Square
   to: Square
   count: number
+  need: number // taps required, decided once when this target is first tapped
+  sacrifice: boolean
 }
 
 /** How many taps a piece demands before it will make a given move. */
@@ -53,6 +56,7 @@ export class WizardGame {
   lastTo: Square | null = null
   lastMoverId: string | null = null
   lastMoveRisky = false
+  settings: WizardSettings = { ...DEFAULT_SETTINGS }
   private dialogue: DialogueState
   private rng: () => number
   private introduced = new Set<string>()
@@ -108,6 +112,8 @@ export class WizardGame {
    * genuine, legible cause. This is where "restraint" is enforced centrally.
    */
   animations(): Record<Square, AnimClass> {
+    const cap = Math.round(this.settings.animation * 4) // 0 (still) … 4
+    if (cap <= 0) return {}
     interface Cand {
       square: Square
       cls: AnimClass
@@ -148,7 +154,7 @@ export class WizardGame {
     }
     cands.sort((a, b) => b.prio - a.prio)
     const out: Record<Square, AnimClass> = {}
-    for (const c of cands.slice(0, 2)) out[c.square] = c.cls
+    for (const c of cands.slice(0, cap)) out[c.square] = c.cls
     return out
   }
 
@@ -175,7 +181,14 @@ export class WizardGame {
     const def = this.chess.attackers(move.to, mover).length
     this.lastMoveRisky = atk > 0 && def < atk
 
-    return speak(this.society, [...events, ...scanBoard(this.society, this.chess)], this.dialogue, this.rng, 2)
+    return speak(
+      this.society,
+      [...events, ...scanBoard(this.society, this.chess)],
+      this.dialogue,
+      this.rng,
+      this.settings.chatter,
+      2,
+    )
   }
 
   /** Handle a tap on a square: select, deselect, resist, or commit a move. */
@@ -201,30 +214,32 @@ export class WizardGame {
 
     if (this.selected && this.legalTargets().has(square)) {
       const soul = this.soulAt(this.selected)
-      const risk = assessMove(this.chess.fen(), this.selected, square)
-      const need = soul ? requiredTaps(soul, risk) : 1
 
-      if (need > 1) {
-        if (!this.resist || this.resist.from !== this.selected || this.resist.to !== square) {
-          this.resist = { from: this.selected, to: square, count: 0 }
-        }
-        this.resist.count += 1
-        if (this.resist.count < need && soul) {
-          const kind = risk.sacrifice ? 'sacrifice' : 'refuse'
-          return {
-            moved: false,
-            utterances: [
-              {
-                soulId: soul.id,
-                square: this.selected,
-                color: soul.color,
-                name: soul.persona.name,
-                text: resistLine(kind, this.rng),
-                tone: kind === 'sacrifice' ? 'afraid' : 'angry',
-              },
-            ],
-            cue: { soulId: soul.id, type: kind === 'sacrifice' ? 'hop' : 'shake' },
-          }
+      // Decide resistance once per target. The Hints/agency scaler dials how
+      // often a piece bothers to push back at all.
+      if (!this.resist || this.resist.from !== this.selected || this.resist.to !== square) {
+        const risk = assessMove(this.chess.fen(), this.selected, square)
+        let need = soul ? requiredTaps(soul, risk) : 1
+        if (need > 1 && this.rng() > this.settings.agency) need = 1
+        this.resist = { from: this.selected, to: square, count: 0, need, sacrifice: risk.sacrifice }
+      }
+      this.resist.count += 1
+
+      if (this.resist.count < this.resist.need && soul) {
+        const kind = this.resist.sacrifice ? 'sacrifice' : 'refuse'
+        return {
+          moved: false,
+          utterances: [
+            {
+              soulId: soul.id,
+              square: this.selected,
+              color: soul.color,
+              name: soul.persona.name,
+              text: resistLine(kind, this.rng),
+              tone: kind === 'sacrifice' ? 'afraid' : 'angry',
+            },
+          ],
+          cue: { soulId: soul.id, type: kind === 'sacrifice' ? 'hop' : 'shake' },
         }
       }
 
@@ -260,8 +275,9 @@ export class WizardGame {
    */
   suggest(): Utterance | null {
     if (!this.canPlay || this.selected) return null
+    if (this.settings.agency <= 0) return null
     if (this.society.ply - this.lastSuggestPly < 8) return null
-    if (this.rng() > 0.28) return null
+    if (this.rng() > this.settings.agency * 0.4) return null
     const opp = bestOpportunity(this.chess.fen(), PLAYER)
     if (!opp) return null
     const soul = this.soulAt(opp.from)

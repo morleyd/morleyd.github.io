@@ -7,7 +7,7 @@
  * capped and situational (chosen by the controller), banter is paced and
  * delayed, and idle-heckles nudge a dawdling player.
  */
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import GameToolbar from '@/components/GameToolbar.vue'
 import { copyToClipboard } from '@/services/share'
@@ -15,6 +15,7 @@ import { randomSeed } from '@/services/seed'
 import { Engine } from '@/services/chess/engine'
 import { WizardGame } from '@/services/chess/game'
 import { TYPE_NAME } from '@/services/chess/profiles'
+import { loadSettings, saveSettings } from '@/services/chess/settings'
 import type { Color, PieceType, Square, Utterance } from '@/services/chess/types'
 
 const route = useRoute()
@@ -26,6 +27,11 @@ const LEVEL_NAMES = ['', 'Novice', 'Casual', 'Steady', 'Sharp', 'Cunning', 'Ruth
 const engine = new Engine()
 const initialSeed = randomSeed()
 const game = new WizardGame(initialSeed)
+
+// Player-tunable scalers, shared live with the controller and persisted.
+const settings = ref(loadSettings())
+game.settings = settings.value
+watch(settings, (s) => saveSettings(s), { deep: true })
 
 const code = ref(initialSeed)
 const level = ref(3)
@@ -307,6 +313,18 @@ onBeforeUnmount(() => {
               thumb-label
               @update:model-value="setLevel"
             />
+          </div>
+          <div class="slider-wrap">
+            <label class="text-caption text-medium-emphasis">Chattiness</label>
+            <v-slider v-model="settings.chatter" :min="0" :max="1" :step="0.1" hide-details density="compact" />
+          </div>
+          <div class="slider-wrap">
+            <label class="text-caption text-medium-emphasis">Animation</label>
+            <v-slider v-model="settings.animation" :min="0" :max="1" :step="0.1" hide-details density="compact" />
+          </div>
+          <div class="slider-wrap">
+            <label class="text-caption text-medium-emphasis">Hints &amp; opinions</label>
+            <v-slider v-model="settings.agency" :min="0" :max="1" :step="0.1" hide-details density="compact" />
           </div>
           <v-btn variant="tonal" color="primary" prepend-icon="mdi-refresh" @click="newGame">New game</v-btn>
         </div>
@@ -650,6 +668,25 @@ onBeforeUnmount(() => {
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+/* Respect motion sensitivity: still the fidgets and the travel slide, but keep
+   anger legible as a static red aura (and the spinner, which signals activity). */
+@media (prefers-reduced-motion: reduce) {
+  .glyph.anim-tremble,
+  .glyph.anim-bob,
+  .glyph.anim-joy,
+  .glyph.anim-angry,
+  .piece-box.cue-shake,
+  .piece-box.cue-hop {
+    animation: none !important;
+  }
+  .pmove-move {
+    transition: none !important;
+  }
+  .glyph.anim-angry {
+    filter: drop-shadow(0 0 3px #ef4444);
   }
 }
 </style>

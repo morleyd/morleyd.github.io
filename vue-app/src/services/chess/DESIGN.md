@@ -131,3 +131,76 @@ the exceptions, not the ambient state.
   of pieces carry an animating mood class, and that banter volume stays capped.
 - Add controller unit tests for refusal (tap-count acquiescence), sacrifice
   recoil (one hop then obeys), and move-risk classification.
+
+---
+
+## Settings scalers
+
+Player-facing sliders (persisted to localStorage), each a 0–1 scalar the
+controller reads live. They scale the *same* knobs the restraint pass created —
+so "off" is genuinely off and "high" is lively without being noise.
+
+- [x] **Chattiness** — scales `speak()` ambient skip-probability and per-side
+      gaps. 0 = pieces only speak on captures/mates; 1 = a lively peanut gallery.
+- [x] **Animation frequency** — scales the `game.animations()` cap (0 pieces …
+      up to ~4). 0 = still board; default surfaces ~2.
+- [x] **Hints / piece agency** — scales how often pieces `suggest()` a move and
+      how often they `resist()` (refuse / flinch). 0 = pieces never volunteer or
+      push back; high = eager, opinionated helpers.
+- [ ] **Chaos** — scales how often rule-breaking stunts are offered/occur (see
+      below). Shipped once the first stunts land.
+
+**Accessibility (pushback, decided):** a *movement-speed* slider isn't worth the
+UI. But `prefers-reduced-motion` is a real signal (motion sensitivity), so we
+honor it automatically — reduced motion shortens/disables the mood animations and
+the travel transition, no user control needed. The Animation slider remains for
+taste on top of that.
+
+---
+
+## Chaos (rule-breaking stunts)
+
+Rare, delightful rule-bending. The governing rule: **the player keeps a semblance
+of control ~90% of the time.** Most stunts are *offered*, not imposed — a piece
+says "Want me to try something crazy?" and a second tap opts in, without spelling
+out exactly what it'll do (often it just opens up more options; sometimes it
+commits to something wild). A few things simply *happen*, rarely, as flavor. One
+or two can happen *to* you.
+
+Each stunt needs **trigger + telegraph + limit**: a reason (desperation or
+personality), a clear visual tell so it reads as intentional mischief (hat,
+glasses, jetpack flame), and tight rarity. All scaled by the **Chaos** slider
+(0 = never).
+
+### Activation types
+- **Offered (opt-in):** piece highlights the stunt / extra options; a confirming
+  tap commits. The player stays in control. *(disguise rook, jetpack knight,
+  body swap, pep-talk entourage)*
+- **Spontaneous (flavor):** just happens, ~once or twice a game, low stakes.
+  *(cold feet: a scared piece flees an extra square; defector: a disgruntled pawn
+  briefly switches sides when you're losing badly)*
+- **Imposed (no choice):** rare, only at an extreme. *(tantrum: a max-rage piece
+  knocks an adjacent enemy off the board, once per game)*
+
+### Catalog (draft)
+| Stunt | Type | Trigger | Telegraph | Limit |
+|---|---|---|---|---|
+| Disguise rook | Offered | any time | glasses; "Bishop? Never heard of her." | 1×/game, one turn |
+| Jetpack knight | Offered | any time | flame trail | 1×/game, one turn |
+| Pep-talk entourage | Offered | king has ≥2 adjacent allies | king raises banner; group slides together | rare; **whole entourage moves as one turn** |
+| Body swap | Offered | two bonded friends adjacent-ish | "Cover me!" | rare |
+| Cold feet | Spontaneous | terrified piece (high fear) | flees 1 extra square back | 1–2×/game |
+| Defector pawn | Spontaneous | losing badly + low-obedience pawn | black hat; changes colour briefly | 1×/game |
+| Tantrum | Imposed | a piece at max rage | shove animation | 1×/game |
+
+**Pep-talk detail (per feedback):** the king rallies its adjacent entourage to
+**all move together as a single turn** — a small formation shuffle — rather than
+just buffing morale. Needs a bespoke multi-piece move that still yields one reply
+to the engine.
+
+### OPEN QUESTION — framing (being decided)
+Are stunts **random/ambient** (probabilistic each turn, scaled by the slider),
+**situational easter eggs** (only fire in specific states — losing badly, max
+rage, king surrounded), or **earned power-ups** (accrue a "chaos charge" you
+spend)? Likely a blend, but this determines the trigger engine, so it's a
+decision before building the stunt framework.
