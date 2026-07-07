@@ -12,16 +12,23 @@ import { rngFromSeed } from '../seed'
 import { applyMove, createSociety, scanBoard, soulAt, type Society } from './social'
 import { createDialogueState, heckleLine, resistLine, speak, suggestLine, type DialogueState } from './dialogue'
 import { assessMove, bestOpportunity, PIECE_VALUE } from './assess'
+import { applyChaosMove, bishopTargets, jetpackTargets } from './chaos'
 import { DEFAULT_SETTINGS, type WizardSettings } from './settings'
-import type { Color, GameEvent, PieceSoul, Square, Utterance } from './types'
+import type { Color, GameEvent, PieceSoul, PieceType, Square, Utterance } from './types'
 
 export const PLAYER: Color = 'w'
 const opp = (c: Color): Color => (c === 'w' ? 'b' : 'w')
 
 export type AnimClass = 'tremble' | 'bob' | 'angry' | 'joy'
+export type ChaosType = 'disguise' | 'jetpack'
 export interface Cue {
   soulId: string
   type: 'shake' | 'hop'
+}
+interface ChaosOffer {
+  type: ChaosType
+  from: Square
+  targets: Square[]
 }
 export interface TapResult {
   moved: boolean
@@ -62,6 +69,8 @@ export class WizardGame {
   private introduced = new Set<string>()
   private resist: Resist | null = null
   private lastSuggestPly = -99
+  private offer: ChaosOffer | null = null
+  private usedStunts = new Set<string>() // each stunt fires at most once per game
 
   constructor(public seed: string) {
     this.chess = new Chess()
@@ -85,6 +94,8 @@ export class WizardGame {
     this.introduced.clear()
     this.resist = null
     this.lastSuggestPly = -99
+    this.offer = null
+    this.usedStunts.clear()
   }
 
   get turn(): Color {
@@ -200,16 +211,23 @@ export class WizardGame {
       this.resist = null
       if (this.selected === square) {
         this.selected = null
+        this.offer = null
         return { moved: false, utterances: [] }
       }
       this.selected = square
       const soul = this.soulAt(square)
+      this.offer = this.computeOffer(square) // maybe a piece offers something wild
       let introSoul: PieceSoul | null = null
       if (soul && !this.introduced.has(soul.id)) {
         this.introduced.add(soul.id)
         introSoul = soul
       }
       return { moved: false, utterances: [], introSoul }
+    }
+
+    // A tap on an offered chaos target commits the stunt.
+    if (this.offer && this.selected === this.offer.from && this.offer.targets.includes(square)) {
+      return this.doChaosMove(square)
     }
 
     if (this.selected && this.legalTargets().has(square)) {
@@ -247,6 +265,7 @@ export class WizardGame {
       try {
         const move = this.chess.move({ from: this.selected, to: square, promotion: 'q' })
         this.selected = null
+        this.offer = null
         return { moved: true, utterances: this.applyAndVoice(move) }
       } catch {
         this.selected = null
@@ -256,7 +275,116 @@ export class WizardGame {
 
     this.selected = null
     this.resist = null
+    this.offer = null
     return { moved: false, utterances: [] }
+  }
+
+  // ── Chaos: rule-breaking stunts (situational + Chaos-scaler gated) ─────────
+  chaosTargets(): Square[] {
+    return this.offer ? this.offer.targets : []
+  }
+
+  /** Decide (once, at selection) whether this piece offers a wild move. */
+  private computeOffer(from: Square): ChaosOffer | null {
+    if (this.settings.chaos <= 0) return null
+    const piece = this.chess.get(from)
+    if (!piece || piece.color !== PLAYER) return null
+    const fen = this.chess.fen()
+
+    const build = (type: ChaosType, situational: boolean, gen: () => Square[]): ChaosOffer | null => {
+      if (this.usedStunts.has(type) || !situational) return null
+      if (this.rng() >= this.settings.chaos) return null // chaos = probability of offering when eligible
+      const targets = gen().filter((to) => !!applyChaosMove(new Chess(fen), from, to))
+      return targets.length ? { type, from, targets } : null
+    }
+
+    if (piece.type === 'r') {
+      // A frustrated, boxed-in rook tries something diagonal.
+      const mobility = this.chess.moves({ square: from }).length
+      const o = build('disguise', mobility <= 4, () => bishopTargets(this.chess, from))
+      if (o) return o
+    }
+    if (piece.type === 'n') {
+      const leaps = jetpackTargets(this.chess, from)
+      const o = build('jetpack', leaps.length > 0, () => leaps)
+      if (o) return o
+    }
+    return null
+  }
+
+  private doChaosMove(to: Square): TapResult {
+    const offer = this.offer!
+    const soul = this.soulAt(offer.from)
+    const res = this.relocate(offer.from, to, true)
+    this.usedStunts.add(offer.type)
+    this.offer = null
+    this.selected = null
+    this.resist = null
+    if (!res) return { moved: false, utterances: [] }
+    const line = offer.type === 'disguise' ? 'Bishop? Never heard of her.' : 'Hold onto something — JETPACK!'
+    const utterances: Utterance[] = soul
+      ? [{ soulId: soul.id, square: to, color: soul.color, name: soul.persona.name, text: line, tone: 'gloat' }]
+      : []
+    utterances.push(
+      ...speak(this.society, scanBoard(this.society, this.chess), this.dialogue, this.rng, this.settings.chatter, 1),
+    )
+    return { moved: true, utterances }
+  }
+
+  /** A terrified piece flees one square backward on its own (spontaneous). */
+  coldFeet(): Utterance | null {
+    if (!this.canPlay || this.settings.chaos <= 0 || this.usedStunts.has('coldfeet')) return null
+    const scared = Object.values(this.society.souls)
+      .filter((s) => !s.captured && s.color === PLAYER && s.square && s.mood.fear >= 0.7)
+      .sort((a, b) => b.mood.fear - a.mood.fear)
+    for (const s of scared) {
+      const sq = s.square as Square
+      const rank = Number(sq[1])
+      if (rank <= 1) continue
+      if (this.chess.attackers(sq, opp(PLAYER)).length === 0) continue
+      const behind = (sq[0] + (rank - 1)) as Square
+      if (this.chess.get(behind)) continue
+      if (this.rng() >= this.settings.chaos * 0.4) continue
+      if (!this.relocate(sq, behind, false)) continue
+      this.usedStunts.add('coldfeet')
+      return {
+        soulId: s.id,
+        square: behind,
+        color: PLAYER,
+        name: s.persona.name,
+        text: 'Nope! Backing away — nope nope nope.',
+        tone: 'afraid',
+      }
+    }
+    return null
+  }
+
+  /** Move a soul's identity to follow an off-book relocation of the board. */
+  private relocate(from: Square, to: Square, flipTurn: boolean): { captured?: PieceType } | null {
+    const victimId = this.society.bySquare[to]
+    const moverId = this.society.bySquare[from]
+    const res = applyChaosMove(this.chess, from, to, flipTurn)
+    if (!res) return null
+    if (victimId && victimId !== moverId) {
+      const v = this.society.souls[victimId]
+      if (v) {
+        v.captured = true
+        v.square = null
+      }
+      delete this.society.bySquare[to]
+    }
+    if (moverId) {
+      delete this.society.bySquare[from]
+      this.society.bySquare[to] = moverId
+      const m = this.society.souls[moverId]
+      m.square = to
+      m.idleFor = 0
+    }
+    this.lastFrom = from
+    this.lastTo = to
+    this.lastMoverId = moverId ?? null
+    this.lastMoveRisky = false
+    return res
   }
 
   /** Apply the engine's chosen move for the AI side. */

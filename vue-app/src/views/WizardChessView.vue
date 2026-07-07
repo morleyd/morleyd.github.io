@@ -150,6 +150,7 @@ const piecesList = computed<PieceView[]>(() => {
 const animMap = computed(() => (version.value, game.animations()))
 const selectedSquare = computed(() => (version.value, game.selected))
 const legalTargets = computed(() => (version.value, game.legalTargets()))
+const chaosTargets = computed(() => (version.value, new Set(game.chaosTargets())))
 const canPlay = computed(() => (version.value, game.canPlay))
 const thinking = computed(() => (version.value, game.aiThinking))
 const checkSquare = computed<Square | null>(() => {
@@ -242,6 +243,12 @@ async function runAi() {
     enqueue([s], 500)
     bump()
   }
+  // A terrified piece may lose its nerve and shuffle back on its own.
+  const cf = game.coldFeet()
+  if (cf) {
+    enqueue([cf], 350)
+    bump()
+  }
   armIdle()
 }
 
@@ -326,6 +333,10 @@ onBeforeUnmount(() => {
             <label class="text-caption text-medium-emphasis">Hints &amp; opinions</label>
             <v-slider v-model="settings.agency" :min="0" :max="1" :step="0.1" hide-details density="compact" />
           </div>
+          <div class="slider-wrap">
+            <label class="text-caption text-medium-emphasis">Chaos 🎩</label>
+            <v-slider v-model="settings.chaos" :min="0" :max="1" :step="0.1" hide-details density="compact" color="secondary" />
+          </div>
           <v-btn variant="tonal" color="primary" prepend-icon="mdi-refresh" @click="newGame">New game</v-btn>
         </div>
       </template>
@@ -380,6 +391,7 @@ onBeforeUnmount(() => {
             @click="onSquare(squareOf(i))"
           >
             <span v-if="legalTargets.has(squareOf(i))" class="dot"></span>
+            <span v-else-if="chaosTargets.has(squareOf(i))" class="dot dot--chaos"></span>
           </div>
 
           <span v-if="checkSquare" class="check-ring" :style="checkStyle"></span>
@@ -490,6 +502,20 @@ onBeforeUnmount(() => {
   border-radius: 50%;
   background: rgba(15, 23, 42, 0.4);
   pointer-events: none;
+}
+/* A chaos move on offer: a distinctive dashed purple ring. */
+.dot--chaos {
+  width: 62%;
+  height: 62%;
+  background: rgba(192, 132, 252, 0.18);
+  border: 3px dashed #c084fc;
+  animation: chaosPulse 1.1s ease-in-out infinite;
+}
+@keyframes chaosPulse {
+  50% {
+    border-color: #e9d5ff;
+    transform: scale(1.08);
+  }
 }
 .check-ring {
   position: absolute;

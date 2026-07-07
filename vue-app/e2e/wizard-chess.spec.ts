@@ -42,6 +42,28 @@ test.describe('Wizard Chess', () => {
     await page.screenshot({ path: 'e2e/screenshots/desktop.png' })
   })
 
+  test('chaos: a knight takes an off-book leap when Chaos is maxed', async ({ page }) => {
+    // Force the Chaos scaler on before the app boots.
+    await page.addInitScript(() => {
+      localStorage.setItem(
+        'wizard-chess-settings',
+        JSON.stringify({ chatter: 0.6, animation: 0.6, agency: 0.6, chaos: 1 }),
+      )
+    })
+    await page.goto('/wizard-chess')
+
+    await page.locator('[data-square="g1"]').click() // a white knight
+    // A chaos option is offered (dashed purple target).
+    await expect(page.locator('.dot--chaos').first()).toBeVisible()
+    const chaosSq = await page.locator('.sq:has(.dot--chaos)').first().getAttribute('data-square')
+    expect(chaosSq).toBeTruthy()
+
+    // Take the off-book leap; the knight lands where no normal knight could.
+    await page.locator(`[data-square="${chaosSq}"]`).click()
+    await expect(page.locator(`[data-piece="${chaosSq}"]`)).toBeVisible()
+    await page.screenshot({ path: 'e2e/screenshots/chaos.png' })
+  })
+
   test('is playable at a phone viewport', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await page.goto('/wizard-chess')
