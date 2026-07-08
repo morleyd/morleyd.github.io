@@ -163,8 +163,47 @@ checks. Run with `SOAK=1 npx vitest run src/services/chess/soak.spec.ts`
   at the dragger; and a captured mid-escort captor no longer dives-and-returns
   as a corpse.
 
-Deferred canon: none of the big beats remain — future polish: enemy-side
-entourage/swap, defector coax-back, sound.
+### Playtest round 4 (edge graveyard, undo, pinned bubbles, trust that tracks) — shipped
+
+David's notes, all addressed:
+
+- [x] **"The box" is gone → edge graveyard.** No more length-of-the-board charge
+      (which read as alarming). A casualty takes a short haul to the nearest free
+      slot just OFF the board edge and rests there. The frame reserves an 8%
+      gutter all round; 32 perimeter slots; nearest-free-to-death-square,
+      re-derived each render so it's undo-stable. No name tags (the full edge is
+      in use). Lasso loop on the hauled piece; no directional rope.
+- [x] **A full second's beat**: the victim holds on its square (POW/CRUNCH) for
+      1000ms after the capturer lands, THEN hauls out (650ms). The board copy
+      just fades; a transit corpse in a top layer does the visible haul.
+- [x] **Bubbles pinned to the piece** (rendered as a child of its box, like the
+      jetpack flame) so they track it and never divorce from the square it left.
+      Smaller, and **shrunk further on phones** (≤108px). **One bubble per side**
+      at a time (one ally + one enemy max). Authored lines cut to a few words
+      throughout. **Pregame smalltalk halts the instant you make your first move.**
+- [x] **Capture ring**: a legal move onto an enemy shows a big hollow ring
+      hugging the target, distinct from the small "move here" dot.
+- [x] **Undo / redo** (buttons under the board): full-game JSON snapshots taken
+      before every committed player action; undo peels back your move and the
+      enemy's reply, redo re-applies. Restores captured pieces, trust, moods —
+      everything. Disabled during the enemy's turn.
+- [x] **Trust tracks the game harder + rises faster.** Each ply, morale drifts
+      (5%/ply) toward a target set by the running material balance
+      (`50 + balance·3.3`, clamped ~6–97) — so a clean winning game floats into
+      the 80s on its own instead of inching up per-capture. Capture reward up
+      (`+2.5 + val`). Tuned via the soak.
+
+The **tantrum** removal and **no trust-reset** decisions from round 3 stand.
+
+Deferred canon: enemy-side entourage/swap, defector coax-back, sound.
+
+### Self-play soak (`soak.spec.ts`)
+
+Opt-in QA harness — `SOAK=1 npx vitest run src/services/chess/soak.spec.ts`
+(skipped in normal runs). Plays full games through the view's real code paths
+with per-ply invariant checks (board/society mapping, graveyard, turn flow,
+trust bounds) and prints result/plies/stunt/trust distributions. Re-run it after
+any balance change.
 
 ## Canon survey — what Wizard's Chess actually is (HP books/films)
 

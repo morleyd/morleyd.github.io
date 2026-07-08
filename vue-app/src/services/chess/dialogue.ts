@@ -56,148 +56,146 @@ function fill(template: string, ctx: Ctx): string {
 
 // ── Authored line pools ─────────────────────────────────────────────────────
 
+// Lines are kept SHORT on purpose — they surface as speech bubbles pinned over
+// a piece, so on a phone a long line hides the board. Aim for a few words.
 const CAPTURE_TAUNT = [
-  'Down goes {target}! This square is mine now.',
-  'Sorry, {target} — nothing personal. Well, a little personal.',
-  'And that, {target}, is how a {type} does it.',
-  "Checkmate's coming, but you go first, {target}.",
-  'One less {vtype} to worry about.',
-  'Did {target} really think that square was safe?',
-  'Buh-bye, {target}. Give my regards to the box.',
-  'You picked the wrong diagonal, {target}.',
-  'Swept aside like the rest. Next!',
-  "That's what happens when you wander over here, {target}.",
-  'A clean capture. My mother would be proud.',
-  'Timber! Another {vtype} bites the dust.',
+  'Down goes {target}!',
+  'Sorry, {target}. Bit personal.',
+  "That's how a {type} does it.",
+  'You go first, {target}.',
+  'One less {vtype}.',
+  'That square was mine, {target}.',
+  'Buh-bye, {target}.',
+  'Wrong diagonal, {target}.',
+  'Swept aside. Next!',
+  'Should not have wandered over, {target}.',
+  'Clean.',
+  'Timber!',
 ]
 const CAPTURE_REVENGE = [
-  'THAT was for what you did, {target}. We remember.',
-  'You should have stayed on your side, {target}.',
-  'Vengeance is a dish best served from this exact square, {target}.',
-  "I've waited the whole game to take you down, {target}.",
-  'This one was personal, {target}. You know why.',
-  'You started this, {target}. I am finishing it.',
-  'Justice, at last. Sleep well, {target}.',
+  'THAT was for the fallen, {target}.',
+  'Should have stayed home, {target}.',
+  'Payback, {target}.',
+  'Waited all game for you, {target}.',
+  'This one was personal, {target}.',
+  'You started this, {target}.',
+  'Justice. Sleep well, {target}.',
 ]
 const CAPTURE_GLOAT = [
-  "Another one! Who's next? Line up.",
-  "I'm on a rampage and the board knows it.",
-  'They keep sending {vtype}s and I keep collecting them.',
-  'Unstoppable. Simply unstoppable.',
-  'Should I even keep count anymore?',
-  'I could do this all day, honestly.',
-  'Fear me, tremble, etcetera. You know the drill.',
+  "Another! Who's next?",
+  "I'm on a rampage.",
+  'They keep sending {vtype}s.',
+  'Unstoppable.',
+  'Lost count, honestly.',
+  'All day, easy.',
+  'Fear me, etcetera.',
 ]
 
 const DYING_BRAVE = [
-  'Tell my king... I held the line. — {me}',
-  'A good square to fall on. No regrets. — {me}',
-  'You got me, but the war is far from over! — {me}',
-  "Is that all? I've had worse. ...oh. Oh no. — {me}",
-  'Worth it. Every step. — {me}',
-  'I regret nothing! Onward, comrades! — {me}',
-  'Remember me as I was — glorious. — {me}',
+  'I held the line. — {me}',
+  'No regrets. — {me}',
+  'The war goes on! — {me}',
+  "Is that all? ...oh. — {me}",
+  'Worth it. — {me}',
+  'Onward, comrades! — {me}',
+  'Remember me. — {me}',
 ]
 const DYING_TIMID = [
-  'Wait wait WAIT— aaargh! — {me}',
-  'I KNEW I should have stayed home. — {me}',
-  'This is exactly what I was afraid of! — {me}',
-  "Tell {target} I forgive them. Actually, no, I don't. — {me}",
-  'Not like this! Not by a {vtype}! — {me}',
-  'I had so much left to shuffle! — {me}',
-  "Somebody was supposed to be watching me! — {me}",
+  'Wait WAIT— aargh! — {me}',
+  'KNEW I should have stayed home. — {me}',
+  'I was afraid of this! — {me}',
+  'Not by a {vtype}! — {me}',
+  'So much left to shuffle! — {me}',
+  'Someone was WATCHING me?! — {me}',
 ]
 
 const THREATENED_BRAVE = [
-  'Come and take me then, {target}. I dare you.',
-  "You think I'm scared of a {vtype}? Try it.",
-  'I see you eyeing me, {target}. Bring it.',
-  'Threaten all you like — I do not flinch.',
-  'Make your move, {target}. I will be ready.',
-  'Is that supposed to frighten me? Cute.',
-  "You found me, {target}? Good. Saves me the trouble of finding you.",
-  'Over here, {target}. If you think you can.',
+  'Come take me, {target}.',
+  'Scared of a {vtype}? Try it.',
+  'I see you, {target}. Bring it.',
+  'I do not flinch.',
+  'Ready when you are, {target}.',
+  'That supposed to scare me?',
+  'Over here, {target}. If you dare.',
 ]
 const THREATENED_TIMID = [
-  'Um. Is anyone going to defend me? Anyone??',
-  'That {vtype} is looking right at me and I do NOT like it.',
-  'Help! HELP! {target} is going to get me!',
-  "I'd like to file a complaint about my current square.",
-  'Why is nobody moving?! {target} is RIGHT THERE!',
-  'I am too young and too flat to die!',
-  'Is it too late to go back to my starting square?',
-  'Wait — is that {vtype} pointed at ME?!',
-  "They've spotted me! I'm wide open here!",
-  'Retreat! Somebody, cover me!',
-  'Nothing to see here, {target}. Look away. Please look away.',
+  'Anyone going to defend me??',
+  "That {vtype} is eyeing me!",
+  'HELP! {target}!',
+  'I hate this square.',
+  '{target} is RIGHT THERE!',
+  'Too young to die!',
+  'Can I go back?',
+  'Is that pointed at ME?!',
+  "I'm wide open!",
+  'Cover me!',
 ]
 
 const DEFENDED = [
-  "Phew. Thanks for having my back, {target}. I owe you one.",
-  "Knew {target} would come through for me. Close one.",
-  "That was terrifying — bless you, {target}.",
+  'Thanks, {target}. I owe you.',
+  'Knew {target} had my back.',
+  'Bless you, {target}.',
 ]
 
 const PROMOTION = [
-  'I made it to the end! A humble {vtype} no more — bow before your new queen!',
-  'PROMOTION! Years of shuffling forward, all for this crown.',
-  'They doubted a mere pawn. Look at me now.',
-  'From the front line to royalty. What a journey.',
-  'One small step for a pawn, one giant leap onto the back rank!',
-  'Remember when I was nobody? Me neither.',
+  'A {vtype} no more — I am QUEEN!',
+  'PROMOTION!',
+  'Look at me now.',
+  'Front line to royalty!',
+  'Crowned at last!',
 ]
 
 const CHECK = [
-  'Your king looks nervous. As it should.',
-  'Check! Feeling the pressure yet?',
-  "We've got the king on the run, everyone!",
-  'Knock knock. It is your doom calling.',
-  'Better move that king, {target}. While you still can.',
+  'Your king looks nervous.',
+  'Check! Feel it yet?',
+  'King on the run!',
+  'Knock knock, {target}.',
+  'Move that king, {target}.',
 ]
 
 const VICTORY = [
-  'Checkmate. Tell the tavern bards how it ended, {target}.',
-  'And THAT is game. Not even close.',
-  'Your king has nowhere left to run, {target}. Glorious.',
-  'We did it! Every square was worth it!',
-  'Checkmate! Was there ever any doubt?',
+  'Checkmate, {target}.',
+  'And THAT is game.',
+  'Nowhere to run, {target}.',
+  'We did it!',
+  'Any doubt? None.',
 ]
 
 // Grief boiling into vengeance — names the fallen friend and the killer.
 const VENGEANCE = [
-  'You KILLED {fallen}, {target}. I will end you.',
-  '{fallen} was my best friend, {target}. Now you die.',
-  'For {fallen}! {target}, you are already dead — you just don\'t know it.',
-  'They took {fallen}. {target}, I am coming for you and nothing will stop me.',
-  'No... {fallen}! {target}, every step you take, I will be behind you.',
-  '{fallen} deserved better. {target} will get what\'s coming.',
+  'You killed {fallen}, {target}. I will end you.',
+  '{fallen} was my friend. Now you die, {target}.',
+  'For {fallen}! You are done, {target}.',
+  'They took {fallen}. Run, {target}.',
+  'No... {fallen}! I am coming, {target}.',
+  '{fallen} deserved better, {target}.',
 ]
 
 const CASTLE = [
-  'Tucked the king away nice and safe. Smart.',
-  'Castling — the old switcheroo. Cosy in the corner now.',
-  'Right, king is fortified. Now the real work begins.',
+  'King tucked away. Smart.',
+  'Castling — cosy corner now.',
+  'King safe. Now, to work.',
 ]
 
 // The restless-rook arc, escalating with impatience level (from character_notes).
 const IMPATIENT: Record<number, string[]> = {
   1: [
-    "When will it get exciting? I've been forgotten back here.",
-    'Put me in, coach! I can do it!',
-    'Ugh, this is dull. Another game and still stuck in my corner.',
-    "I'm itching to move! The battlefield calls my name!",
+    'Forgotten back here...',
+    'Put me in, coach!',
+    'Ugh, this is dull.',
+    'Itching to move!',
   ],
   2: [
-    "Why keep me back here when there's a kingdom to conquer?",
-    "Every minute I'm stuck here feels like an eternity.",
-    "They're playing without me, and it's maddening!",
-    'My power is wasted while I sit here idly!',
+    "There's a kingdom to conquer!",
+    'This wait is eternal.',
+    "They're playing without me!",
+    "I'm wasted back here!",
   ],
   3: [
-    "Enough is enough! This is pure torture!",
-    "I'll obliterate them all! Release me from this prison!",
-    'My rage burns hotter than a thousand suns!',
-    'I AM THE UNLEASHED WRATH! Prepare for annihilation!',
+    'Enough! This is torture!',
+    'Release me from this corner!',
+    'My rage BURNS!',
+    'I AM THE UNLEASHED WRATH!',
   ],
 }
 
@@ -363,74 +361,69 @@ export function speak(
 // ── Agency lines (piece opinions) ────────────────────────────────────────────
 
 const RESIST_REFUSE = [
-  'Absolutely not. That square is a death trap.',
-  'You want ME to go THERE? Have you lost your mind?',
-  'Nope. Nope nope nope. Pick someone braver.',
-  'I refuse. Tap all you like.',
-  "I'm not moving into that. Try again if you dare.",
+  'No. That square is a trap.',
+  'Me? THERE? Are you mad?',
+  'Nope. Pick someone braver.',
+  'I refuse.',
+  'Not into that. Try again.',
 ]
 const RESIST_SACRIFICE = [
-  "Wait — that's a sacrifice! Are you SURE?",
-  "You're throwing me away?! ...fine. Say it again and I'll go.",
-  "That's suicide! ...is that really the plan?",
-  'If I must be a martyr, you can tell me twice.',
+  "That's a sacrifice! Sure?",
+  "Throwing me away?! ...say it again.",
+  "Suicide! Really?",
+  'A martyr? Tell me twice.',
 ]
 const SUGGEST = [
-  "Psst — I've got a shot from here. Send me in.",
-  'I see an opening. Let me at it!',
-  'Pick me — I can make something happen right now.',
-  "There's material to be had, and I volunteer.",
+  "Psst — I've got a shot.",
+  'I see an opening!',
+  'Pick me — I can strike.',
+  'Material! I volunteer.',
 ]
 const SUGGEST_RECKLESS = [
-  "Forget caution — I'm going in! Just point me!",
-  'Glory or nothing. Choose me, choose me!',
-  "Let's do something gloriously reckless. Me. Now.",
+  "Forget caution — send me!",
+  'Glory! Choose me!',
+  'Something reckless. Me. Now.',
 ]
 // Confident, wrong. Pieces that don't trust your generalship shout bad ideas.
 const BAD_ADVICE = [
-  'Trust me — send me forward. What could go wrong?',
-  "I've got a brilliant plan. Just move me out here. Brilliant, I say!",
-  "Pick me! This is definitely, absolutely the winning move.",
-  "Ignore the others — MY instincts are never wrong. Usually.",
-  "Bold move incoming! Put me right in the thick of it.",
+  'Trust me — send me forward!',
+  "I've a brilliant plan. Move me!",
+  'Pick me! Definitely the winning move.',
+  "MY instincts are never wrong. Usually.",
+  'Put me in the thick of it!',
 ]
 const HECKLE = [
-  "We don't have all day, you know.",
+  "We don't have all day.",
   'Any... century now?',
-  'The enemy will die of old age at this rate.',
-  'Tap tap tap. Please. Anything.',
-  'I could have conquered a kingdom in the time this is taking.',
+  'They will die of old age.',
+  'Tap. Please. Anything.',
+  'So. Slow.',
 ]
 
-// Idle chit-chat before the first move / after the game — light, off-duty banter
-// (not "hurry up" heckling, which only fits mid-game when you're genuinely stalling).
+// Idle chit-chat before the first move — light, off-duty banter.
 const SMALLTALK = [
-  "Lovely day for a battle, isn't it?",
-  'Good luck out there, everyone.',
-  "I hope I don't get sent out first.",
-  'Remember the plan? ...there is a plan, right?',
-  'Stretch those legs, team — long game ahead.',
-  'Whatever happens, it was an honour to serve on this rank.',
-  'Anyone else nervous, or just me?',
+  'Lovely day for a battle.',
+  'Good luck, everyone.',
+  'Hope I go last.',
+  "There is a plan, right?",
+  'Long game ahead, team.',
+  'An honour to serve.',
+  'Anyone else nervous?',
 ]
 // A surviving comrade's faith in the general slips when one of ours is lost —
 // directed at the player (the trust meter's voice), not the killer.
 const LOSE_FAITH = [
-  'We keep dying out here. Do you even have a plan, general?',
-  'Another one gone. I am starting to wonder about your command.',
-  "That's twice now I've trusted your orders. Twice too many.",
-  "Is this what leadership looks like? We're being picked apart.",
-  "I followed you into this. I'm not sure I'd do it again.",
-  "Fewer of us every turn. The ranks are talking, general.",
+  'We keep dying. Any plan, general?',
+  'Another one gone. Really?',
+  "I trusted that order. Mistake.",
+  "We're being picked apart.",
+  "Not sure I'd follow you again.",
+  'The ranks are talking, general.',
 ]
 export const loseFaithLine = (rng: Rng): string => pick(LOSE_FAITH, rng)
 
-const POSTGAME_WIN = [
-  'Told you we had it!',
-  'A famous victory. Drinks are on the king.',
-  'Never doubted you for a second, general.',
-]
-const POSTGAME_LOSS = ["We'll get them next time.", 'Ah well — a good scrap all the same.', 'Regroup, everyone. Heads high.']
+const POSTGAME_WIN = ['Told you we had it!', 'A famous victory!', 'Never doubted you, general.']
+const POSTGAME_LOSS = ["Next time.", 'A good scrap.', 'Heads high, everyone.']
 
 export const resistLine = (kind: 'refuse' | 'sacrifice', rng: Rng): string =>
   pick(kind === 'sacrifice' ? RESIST_SACRIFICE : RESIST_REFUSE, rng)
@@ -458,16 +451,16 @@ const CHAT_REPLY = [
   'Count on it, {target}.',
 ]
 const CHAT_BANTER = [
-  'Remember the last campaign, {target}? You were magnificent.',
-  'If a knight comes for me, {target}, shout first. Loudly.',
-  'Stay off the long diagonals, {target}. That is where they get you.',
-  'I heard the enemy queen is in a MOOD today.',
-  'Watch the flanks, {target}. It is always the flanks.',
-  'I polished my base all morning. Battle-ready.',
-  'If I fall, {target}, avenge me. Dramatically.',
-  'You always say that, {target}. And you are always right.',
-  'The pawns drew straws for who goes first. I lost.',
-  'Keep an eye on the king for me, {target}. He wanders.',
+  'You were magnificent last time, {target}.',
+  'A knight comes for me? Shout, {target}.',
+  'Watch the long diagonals, {target}.',
+  'The enemy queen is in a MOOD.',
+  'Watch the flanks, {target}.',
+  'Polished my base. Battle-ready.',
+  'If I fall, {target}, avenge me.',
+  'You always say that, {target}.',
+  'Drew straws. I go first.',
+  'The king wanders — watch him.',
 ]
 const CHAT_CLOSER = [
   'For the king, {target}.',
@@ -495,8 +488,8 @@ export const chatCloser = (name: string, rng: Rng, used: Set<string>): string =>
 // Enemy stunts arrive in two beats: a telegraph the player can read coming, then
 // the payoff. Neither ever claims the player's own pieces have the same gear.
 const ENEMY_ANNOUNCE: Record<'jetpack' | 'disguise', string[]> = {
-  jetpack: ['You hear that rattle? That is MY contraption warming up.', 'I strapped something to my back before the game. Watch.'],
-  disguise: ['Who says a rook plays it straight?', 'I have been practising diagonals in secret. Observe.'],
+  jetpack: ['Hear that rattle? Watch.', 'Strapped something on. Watch.'],
+  disguise: ['A rook plays it straight? Ha.', 'Been practising diagonals...'],
 }
 const ENEMY_COMMIT: Record<'jetpack' | 'disguise', string[]> = {
   jetpack: ['AIRBORNE! Hahahaha!', 'The sky is MINE!'],

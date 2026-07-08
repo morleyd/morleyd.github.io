@@ -34,6 +34,7 @@ export interface PieceSoul {
   type: PieceType // current type (changes on promotion)
   color: Color
   square: Square | null // null once captured
+  diedAt: Square | null // the square it was captured on (for the edge graveyard)
   persona: Persona
   stamina: number
   sass: number // how much this piece likes to talk (0–1)

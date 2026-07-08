@@ -112,6 +112,65 @@ describe('WizardGame interaction', () => {
     expect(g.canPlay).toBe(true) // human can move again
   })
 
+  it('undoes and redoes a move, restoring the whole position and turn', () => {
+    const g = new WizardGame('undo')
+    g.playerTap('e2')
+    g.playerTap('e4')
+    expect(g.chess.get('e4')?.type).toBe('p')
+    expect(g.turn).toBe('b')
+    expect(g.canUndo).toBe(true)
+
+    g.undo()
+    expect(g.chess.get('e4')).toBeFalsy()
+    expect(g.chess.get('e2')?.type).toBe('p')
+    expect(g.turn).toBe('w')
+    expect(g.canRedo).toBe(true)
+
+    g.redo()
+    expect(g.chess.get('e4')?.type).toBe('p')
+    expect(g.turn).toBe('b')
+  })
+
+  it('undo brings a captured piece back out of the graveyard', () => {
+    const g = new WizardGame('undo-cap')
+    g.reset('undo-cap', '4k3/8/8/3p4/4P3/8/8/4K3 w - - 0 1')
+    g.settings.agency = 0
+    g.playerTap('e4')
+    g.playerTap('d5') // exd5
+    expect(g.chess.get('d5')?.color).toBe('w')
+    expect(g.fallen().length).toBe(1)
+
+    g.undo()
+    expect(g.fallen().length).toBe(0) // the pawn is un-killed
+    expect(g.chess.get('d5')?.color).toBe('b') // back on the board
+    expect(g.chess.get('e4')?.color).toBe('w')
+    expect(Object.values(g.society.souls).filter((s) => s.captured).length).toBe(0)
+  })
+
+  it('trust tracks the running material balance (ahead climbs, behind sinks)', () => {
+    const ahead = new WizardGame('t-ahead')
+    ahead.reset('t-ahead', '4k3/8/8/8/8/8/8/Q3K3 w - - 0 1') // White up a whole queen
+    ahead.trust = 40
+    const shuffleW = ['a1', 'a3', 'a5', 'a3']
+    const shuffleB = ['e8', 'd8', 'e8', 'd8']
+    for (let i = 0; i < 3; i += 1) {
+      ahead.aiApply({ from: shuffleW[i], to: shuffleW[i + 1] })
+      ahead.aiApply({ from: shuffleB[i], to: shuffleB[i + 1] })
+    }
+    expect(ahead.trust).toBeGreaterThan(46) // drifting up toward the ~80 material target
+
+    const behind = new WizardGame('t-behind')
+    behind.reset('t-behind', 'q3k3/8/8/8/8/8/8/4K3 b - - 0 1') // Black up a queen
+    behind.trust = 60
+    const bShuffle = ['a8', 'a6', 'a4', 'a6']
+    const wShuffle = ['e1', 'd1', 'e1', 'd1']
+    for (let i = 0; i < 3; i += 1) {
+      behind.aiApply({ from: bShuffle[i], to: bShuffle[i + 1] })
+      behind.aiApply({ from: wShuffle[i], to: wShuffle[i + 1] })
+    }
+    expect(behind.trust).toBeLessThan(56) // sagging toward the low material target
+  })
+
   it('trust rises when the player wins material and falls when a piece is lost', () => {
     // Player captures a pawn: trust should climb.
     const win = new WizardGame('trust-win')

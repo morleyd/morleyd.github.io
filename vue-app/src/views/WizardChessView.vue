@@ -64,16 +64,26 @@ const snackbar = ref(false)
 const bump = () => (version.value += 1)
 
 // ── Paced banter ────────────────────────────────────────────────────────────
-interface Bubble extends Utterance {
+// Bubbles are pinned to the speaking PIECE (rendered as a child of its box, like
+// the jetpack flame) so they track it as it moves and never divorce from it. At
+// most one bubble per side is visible at a time — one ally + one enemy — so the
+// board never disappears under chatter.
+interface Bubble {
+  soulId: string
+  color: Color
+  name: string
+  text: string
+  tone: Utterance['tone']
   bid: number
 }
 type LogLine = Utterance & { ts: number }
-const bubbles = ref<Bubble[]>([])
+const bubbles = ref<Record<string, Bubble>>({}) // keyed by soulId
 const log = ref<LogLine[]>([])
 let queue: Utterance[] = []
 let pumpTimer: ReturnType<typeof setTimeout> | null = null
 let bubbleId = 0
-const bubbleTimers = new Map<number, ReturnType<typeof setTimeout>>()
+let pregameQueued = false
+const bubbleTimers = new Map<string, ReturnType<typeof setTimeout>>() // keyed by soulId
 
 let pumpInterval = 1000 // gap between revealed lines; wider for unhurried pregame banter
 function enqueue(lines: Utterance[], delay = 0, interval = 1000) {
@@ -97,51 +107,69 @@ function pump(delay: number, interval = 1000) {
   }
   pumpTimer = setTimeout(step, delay)
 }
+/** The moment the player commits their first move, cut the pregame smalltalk —
+ * it must not spill into the game and clutter a mobile screen. */
+function stopPregame() {
+  if (!pregameQueued) return
+  pregameQueued = false
+  queue = []
+  if (pumpTimer) {
+    clearTimeout(pumpTimer)
+    pumpTimer = null
+  }
+}
 const lastSaidBy = new Map<string, number>() // soulId -> last reveal time (ms)
 let recentTexts: string[] = []
 function reveal(u: Utterance) {
   const t = game.now()
-  // One line per piece at a time, and never repeat a recent line — this is what
-  // keeps a dawdling turn from becoming a wall of identical heckles.
+  // One line per piece at a time, and never repeat a recent line.
   if (t - (lastSaidBy.get(u.soulId) ?? -1e9) < 2600) return
   if (recentTexts.includes(u.text)) return
-  lastSaidBy.set(u.soulId, t)
-  recentTexts.push(u.text)
-  if (recentTexts.length > 30) recentTexts.shift()
-
-  if (u.square) {
-    // Replace any existing bubble from the same piece (no double-talk).
-    for (const old of bubbles.value.filter((x) => x.soulId === u.soulId)) clearBubbleTimer(old.bid)
-    bubbles.value = bubbles.value.filter((x) => x.soulId !== u.soulId)
-    const b: Bubble = { ...u, bid: bubbleId++ }
-    bubbles.value.push(b)
-    if (bubbles.value.length > 2) {
-      const dropped = bubbles.value.shift()
-      if (dropped) clearBubbleTimer(dropped.bid)
-    }
-    const timer = setTimeout(() => {
-      bubbles.value = bubbles.value.filter((x) => x.bid !== b.bid)
-      bubbleTimers.delete(b.bid)
-    }, 5600)
-    bubbleTimers.set(b.bid, timer)
+  const soul = game.society.souls[u.soulId]
+  if (u.square && soul && !soul.captured) {
+    lastSaidBy.set(u.soulId, t)
+    recentTexts.push(u.text)
+    if (recentTexts.length > 40) recentTexts.shift()
+    showBubble(u)
   }
   log.value.unshift({ ...u, ts: t })
   if (log.value.length > 40) log.value.length = 40
 }
-function clearBubbleTimer(id: number) {
-  const t = bubbleTimers.get(id)
-  if (t) clearTimeout(t)
-  bubbleTimers.delete(id)
+function showBubble(u: Utterance) {
+  // One per colour: a new speaker silences the previous one on its own side.
+  for (const [id, b] of Object.entries(bubbles.value)) {
+    if (id === u.soulId || b.color === u.color) clearBubble(id)
+  }
+  bubbles.value = {
+    ...bubbles.value,
+    [u.soulId]: { soulId: u.soulId, color: u.color, name: u.name, text: u.text, tone: u.tone, bid: bubbleId++ },
+  }
+  bubbleTimers.set(
+    u.soulId,
+    setTimeout(() => clearBubble(u.soulId), 5000),
+  )
 }
+function clearBubble(soulId: string) {
+  const t = bubbleTimers.get(soulId)
+  if (t) clearTimeout(t)
+  bubbleTimers.delete(soulId)
+  if (bubbles.value[soulId]) {
+    const next = { ...bubbles.value }
+    delete next[soulId]
+    bubbles.value = next
+  }
+}
+const bubbleFor = (soulId: string): Bubble | null => bubbles.value[soulId] ?? null
 function clearBanter() {
   queue = []
+  pregameQueued = false
   if (pumpTimer) {
     clearTimeout(pumpTimer)
     pumpTimer = null
   }
   bubbleTimers.forEach((t) => clearTimeout(t))
   bubbleTimers.clear()
-  bubbles.value = []
+  bubbles.value = {}
   log.value = []
   lastSaidBy.clear()
   recentTexts = []
@@ -218,18 +246,131 @@ watch(version, () => {
     smack.value = { square: game.smack.square, word: game.smack.word }
     if (smackTimer) clearTimeout(smackTimer)
     smackTimer = setTimeout(() => (smack.value = null), 1300)
-    // If the piece that just died WAS mid-escort, stop the escort before the
-    // leaving clone freezes its classes — a corpse must not dive and return.
-    const victimId = game.graveyard[game.graveyard.length - 1]
-    if (victimId && victimId === escortId.value) clearEscort()
-    // A normal drag-off capture also sends the captor down as escort (canon:
-    // the victor drags the fallen to the box, then walks back to its post).
-    if (game.deathFx === 'drag' && game.lastMoverId && game.lastFrom) scheduleEscort(game.lastMoverId)
   }
 })
 const smackStyle = (sq: Square) => {
   const { col, row } = rc(sq)
   return { left: `${((col + 0.5) / 8) * 100}%`, top: `${((row + 0.5) / 8) * 100}%` }
+}
+
+// ── The edge graveyard ──────────────────────────────────────────────────────
+// No more "box" and no more length-of-the-board drag: a captured piece takes a
+// short haul to the nearest free slot just OFF the board edge, and rests there.
+// The frame reserves a gutter (GUT%) all round for these slots.
+const GUT = 8 // % of the board-frame kept as an off-board gutter on each side
+const BSPAN = 100 - 2 * GUT // the playable board spans this % of the frame
+// Board square center, in frame % (the pieces layer lives inside the inset board;
+// the graveyard layer spans the whole frame, so it needs this mapping).
+const framePos = (sq: Square) => {
+  const { col, row } = rc(sq)
+  return { x: GUT + ((col + 0.5) / 8) * BSPAN, y: GUT + ((row + 0.5) / 8) * BSPAN }
+}
+// 32 perimeter slots (8 per edge), enough for all 30 possible casualties.
+const SLOTS: { x: number; y: number }[] = (() => {
+  const s: { x: number; y: number }[] = []
+  const along = (i: number) => GUT + ((i + 0.5) / 8) * BSPAN
+  for (let i = 0; i < 8; i += 1) s.push({ x: along(i), y: GUT / 2 }) // top
+  for (let i = 0; i < 8; i += 1) s.push({ x: 100 - GUT / 2, y: along(i) }) // right
+  for (let i = 0; i < 8; i += 1) s.push({ x: along(i), y: 100 - GUT / 2 }) // bottom
+  for (let i = 0; i < 8; i += 1) s.push({ x: GUT / 2, y: along(i) }) // left
+  return s
+})()
+// Deterministically assign each fallen piece the nearest still-free slot to
+// where it died — so the layout is stable across undo/redo (re-derived, no
+// stored slot state).
+const graveLayout = computed(() => {
+  version.value
+  const used = new Set<number>()
+  const out: { id: string; type: PieceType; color: Color; x: number; y: number; name: string }[] = []
+  for (const f of game.fallen()) {
+    if (!f.diedAt) continue
+    const d = framePos(f.diedAt)
+    let best = -1
+    let bestDist = Infinity
+    for (let i = 0; i < SLOTS.length; i += 1) {
+      if (used.has(i)) continue
+      const dx = SLOTS[i].x - d.x
+      const dy = SLOTS[i].y - d.y
+      const dist = dx * dx + dy * dy
+      if (dist < bestDist) {
+        bestDist = dist
+        best = i
+      }
+    }
+    if (best < 0) continue
+    used.add(best)
+    out.push({ id: f.id, type: f.type, color: f.color, name: f.name, x: SLOTS[best].x, y: SLOTS[best].y })
+  }
+  return out
+})
+const graveSlotOf = (id: string) => graveLayout.value.find((g) => g.id === id) ?? null
+// A piece still being hauled off is drawn by its transit element, not yet as a
+// resting grave — so exclude it here to avoid a double image (its slot stays
+// reserved by graveLayout above).
+const restingGraves = computed(() => {
+  const moving = new Set(transits.value.map((t) => t.id))
+  return graveLayout.value.filter((g) => !moving.has(g.id))
+})
+// A piece currently animating from its death square out to its slot. It holds on
+// the square for a beat (so the capture reads), then hauls to the edge.
+interface Transit {
+  id: string
+  type: PieceType
+  color: Color
+  fromX: number
+  fromY: number
+  toX: number
+  toY: number
+  phase: 'hold' | 'drag'
+}
+const transits = ref<Transit[]>([])
+const transitTimers = new Map<string, ReturnType<typeof setTimeout>[]>()
+let seenFallen = new Set<string>()
+const HOLD_MS = 1000 // the full second between the capturer landing and the haul
+const DRAG_MS = 650
+function cancelTransit(id: string) {
+  ;(transitTimers.get(id) ?? []).forEach(clearTimeout)
+  transitTimers.delete(id)
+  transits.value = transits.value.filter((t) => t.id !== id)
+}
+function beginTransit(id: string) {
+  const f = game.fallen().find((x) => x.id === id)
+  const slot = graveSlotOf(id)
+  if (!f || !f.diedAt || !slot) return
+  const from = framePos(f.diedAt)
+  const t: Transit = { id, type: f.type, color: f.color, fromX: from.x, fromY: from.y, toX: slot.x, toY: slot.y, phase: 'hold' }
+  transits.value = [...transits.value, t]
+  const timers = [
+    setTimeout(() => {
+      const cur = transits.value.find((x) => x.id === id)
+      if (cur) cur.phase = 'drag'
+      transits.value = [...transits.value] // nudge reactivity
+    }, HOLD_MS),
+    setTimeout(() => cancelTransit(id), HOLD_MS + DRAG_MS + 60),
+  ]
+  transitTimers.set(id, timers)
+}
+// New casualties → start a transit each; undone captures → cancel any transit.
+watch(version, () => {
+  const now = new Set(game.graveyard)
+  for (const id of game.graveyard) if (!seenFallen.has(id)) beginTransit(id)
+  for (const id of [...seenFallen]) if (!now.has(id)) cancelTransit(id)
+  seenFallen = now
+})
+function clearGraveyardFx() {
+  transitTimers.forEach((ts) => ts.forEach(clearTimeout))
+  transitTimers.clear()
+  transits.value = []
+  seenFallen = new Set(game.graveyard)
+}
+const graveStyle = (g: { x: number; y: number }) => ({ left: `${g.x}%`, top: `${g.y}%` })
+const transitStyle = (t: Transit) => {
+  const dragging = t.phase === 'drag'
+  return {
+    left: `${dragging ? t.toX : t.fromX}%`,
+    top: `${dragging ? t.toY : t.fromY}%`,
+    '--drag-ms': `${DRAG_MS}ms`,
+  }
 }
 
 // ── Endgame banner ─────────────────────────────────────────────────────────
@@ -246,30 +387,6 @@ const endBanner = computed<{ title: string; sub: string; cls: string } | null>((
   if (game.chess.isStalemate()) return { title: 'STALEMATE', sub: 'Nobody can move — a stiff, awkward draw', cls: 'draw' }
   return { title: 'DRAW', sub: 'Everyone lives to bicker another day', cls: 'draw' }
 })
-
-// ── Capture escort ─────────────────────────────────────────────────────────
-// After the captor's travel slide finishes, it dives down off the board (to the
-// box, along its own file) and climbs back to its square. The victim's leave
-// transition is already headed the same way, so the pair descend together.
-const escortId = ref<string | null>(null)
-let escortStartTimer: ReturnType<typeof setTimeout> | null = null
-let escortEndTimer: ReturnType<typeof setTimeout> | null = null
-function scheduleEscort(moverId: string) {
-  if (escortStartTimer) clearTimeout(escortStartTimer)
-  if (escortEndTimer) clearTimeout(escortEndTimer)
-  escortId.value = null
-  // Wait out the FLIP travel slide first — the escort keyframes own `transform`
-  // and would otherwise cancel the slide mid-flight.
-  escortStartTimer = setTimeout(() => {
-    escortId.value = moverId
-    escortEndTimer = setTimeout(() => (escortId.value = null), 2500)
-  }, 850)
-}
-function clearEscort() {
-  if (escortStartTimer) clearTimeout(escortStartTimer)
-  if (escortEndTimer) clearTimeout(escortEndTimer)
-  escortId.value = null
-}
 
 // ── Stunt accessories ──────────────────────────────────────────────────────
 // The evidence goes ON the piece — both while an offer is on the table (so you
@@ -395,27 +512,7 @@ function moveMs(p: PieceView): number {
 }
 const pieceStyle = (p: PieceView) => {
   const { col, row } = rc(p.square)
-  // A per-piece lateral sway (sign + size hashed from its identity) so no two
-  // drag-offs trace the same path — organic, not robotic.
-  let h = 0
-  for (const ch of p.id) h += ch.charCodeAt(0)
-  const sway = ((h % 29) + 16) * (h % 2 ? 1 : -1)
-  return {
-    left: `${(col / 8) * 100}%`,
-    top: `${(row / 8) * 100}%`,
-    '--move-ms': `${moveMs(p)}ms`,
-    // Distance (in own-heights) from this square down past the board's bottom
-    // edge — where the box sits. Drives both the drag-off exit and the escort.
-    '--exit-y': `${(8 - row) * 100 + 60}%`,
-    '--sway': `${sway}%`,
-  }
-}
-const bubbleStyle = (b: Bubble) => {
-  const { col, row } = rc(b.square as Square)
-  // Anchor the bubble near the piece and place its tail over the piece.
-  const tx = col <= 1 ? '0%' : col >= 6 ? '-100%' : '-50%'
-  const tail = col <= 1 ? '18px' : col >= 6 ? 'calc(100% - 18px)' : '50%'
-  return { left: `${((col + 0.5) / 8) * 100}%`, top: `${(row / 8) * 100}%`, '--tx': tx, '--tail': tail }
+  return { left: `${(col / 8) * 100}%`, top: `${(row / 8) * 100}%`, '--move-ms': `${moveMs(p)}ms` }
 }
 
 // Table talk: resolve the speaker so each line can show its piece image + type.
@@ -446,9 +543,14 @@ const stateClass = (sq: Square) => {
   return s ? 'state-' + s : ''
 }
 const coaxSquare = computed(() => (version.value, game.coaxTarget()))
-// How the next capture leaves the board: dragged to the box (default) or — only
-// for a trampled pawn — spiralling out of existence.
-const deathFx = computed(() => (version.value, game.deathFx))
+// Legal targets that land on an enemy — rendered as a capture RING, not a dot.
+const captureTargets = computed(() => {
+  version.value
+  const out = new Set<Square>()
+  if (!game.selected) return out
+  for (const t of game.legalTargets()) if (game.chess.get(t)) out.add(t)
+  return out
+})
 
 // Team trust (persists across games): its opinion of your generalship.
 const trustPct = computed(() => (version.value, Math.round(game.trust)))
@@ -474,7 +576,6 @@ const trustColor = computed(() => {
   const t = trustPct.value
   return t < 30 ? '#ef4444' : t < 55 ? '#f59e0b' : t < 75 ? '#eab308' : '#22c55e'
 })
-const fallenList = computed(() => (version.value, game.fallen()))
 watch(version, () => saveTrust(game.trust)) // persist as the team's opinion shifts
 const checkStyle = computed(() => {
   if (!checkSquare.value) return {}
@@ -578,7 +679,7 @@ function onSquare(square: Square) {
     })
   }
   if (res.cue) triggerCue(res.cue.soulId, res.cue.type)
-  if (res.moved && escortId.value) clearEscort() // don't fight the FLIP slide of a re-moved captor
+  if (res.moved) stopPregame() // first move cuts any lingering pregame smalltalk
   enqueue(res.utterances, res.moved ? 650 : 0)
   bump()
   armIdle()
@@ -677,11 +778,12 @@ function start(fen?: string) {
   smack.value = null
   if (smackTimer) clearTimeout(smackTimer)
   lastSmackSeq = -1
-  clearEscort()
+  clearGraveyardFx()
   postSaid = false
   bump()
   // Adjacent pieces get properly acquainted (multi-turn conversations that form
   // bonds) — an unhurried scene, so the idle heckle waits until it's over.
+  pregameQueued = true
   enqueue(game.pregameChatter(), 800, 2600)
   armIdle(50_000)
 }
@@ -693,6 +795,36 @@ function newGame() {
 function setLevel(v: number) {
   level.value = v
   syncUrl()
+}
+
+// ── Undo / redo ────────────────────────────────────────────────────────────
+// Only on your own turn (never mid-thought). Undo peels back your last move and
+// the enemy's reply to it; redo puts them back.
+const canUndo = computed(() => (version.value, canPlay.value && game.canUndo))
+const canRedo = computed(() => (version.value, canPlay.value && game.canRedo))
+function afterJump() {
+  // Tear down every in-flight animation/timer — the board just teleported.
+  clearBanter()
+  stuntFx.value = null
+  if (fxTimer) clearTimeout(fxTimer)
+  lastFxSeq = game.fx ? game.fx.seq : -1
+  smack.value = null
+  if (smackTimer) clearTimeout(smackTimer)
+  lastSmackSeq = game.smack ? game.smack.seq : -1
+  if (followUpTimer) {
+    clearTimeout(followUpTimer)
+    followUpTimer = null
+  }
+  clearGraveyardFx()
+  postSaid = false
+  bump()
+  armIdle()
+}
+function doUndo() {
+  if (game.undo()) afterJump()
+}
+function doRedo() {
+  if (game.redo()) afterJump()
 }
 
 async function share() {
@@ -724,7 +856,7 @@ onBeforeUnmount(() => {
   if (fxTimer) clearTimeout(fxTimer)
   if (followUpTimer) clearTimeout(followUpTimer)
   if (smackTimer) clearTimeout(smackTimer)
-  clearEscort()
+  clearGraveyardFx()
   cueTimers.forEach((t) => clearTimeout(t))
 })
 </script>
@@ -791,11 +923,12 @@ onBeforeUnmount(() => {
           <li>Now and then a bold piece <span class="k">volunteers</span> for a move it likes.</li>
           <li>The cowardly <span class="k">tremble</span> when cornered; the restless <span class="k">fidget</span>; grudges <span class="k">smoulder</span>.</li>
         </ul>
-        <h3>Team trust &amp; the box</h3>
+        <h3>Team trust</h3>
         <ul>
-          <li>Your army keeps a <span class="k">trust</span> meter (starts at 50, persists between games). Sharp play raises it; blunders and lost games drop it.</li>
-          <li>Low trust → pieces argue more and shout <span class="k">bad advice</span>. High trust → they defer to you.</li>
-          <li>The fallen wait in <span class="k">the box</span> below the moves.</li>
+          <li>Your army keeps a <span class="k">trust</span> meter (starts at 50, persists between games). It tracks how the game is going — being ahead on material lifts it, losing pieces drops it.</li>
+          <li>Low trust → pieces argue more and shout <span class="k">bad advice</span>. High trust → they follow orders without a word.</li>
+          <li>The fallen are <span class="k">dragged off</span> to the nearest edge of the board and rest there.</li>
+          <li>Made a mess? <span class="k">Undo</span> / <span class="k">redo</span> under the board take back your move (and the reply).</li>
         </ul>
         <h3>Feature tour (see everything fast)</h3>
         <p>Open settings (⚙): Difficulty <span class="k">1</span>, Chaos and Hints to <span class="k">max</span>. New game, then:</p>
@@ -803,7 +936,7 @@ onBeforeUnmount(() => {
           <li>Tap your <span class="k">g1 knight</span> — a dashed purple square appears; tap it for a jetpack leap.</li>
           <li><span class="k">Long-press</span> (or right-click) any piece for its character sheet.</li>
           <li>Move your <span class="k">queen next to an enemy pawn</span> — it balks; tap again to insist.</li>
-          <li>Capture something — hear the taunt and watch it land in the box.</li>
+          <li>Capture something — hear the taunt and watch it get hauled off to the edge.</li>
           <li>Dawdle ~15s on your turn — a piece heckles you.</li>
         </ul>
         <p>Cold feet, tantrums, defections and vengeance are <em>emergent</em> — max Chaos makes them likely within a few captures.</p>
@@ -823,123 +956,135 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div class="board" :class="{ waiting: !canPlay }">
-          <!-- squares: colours, highlights, dots, clicks -->
-          <div
-            v-for="(cell, i) in 64"
-            :key="i"
-            class="sq"
-            :data-square="squareOf(i)"
-            :class="{
-              dark: ((i % 8) + Math.floor(i / 8)) % 2 === 1,
-              sel: squareOf(i) === selectedSquare,
-              from: squareOf(i) === game.lastFrom,
-              to: squareOf(i) === game.lastTo,
-            }"
-            @click="onSquare(squareOf(i))"
-            @pointerdown="startPress(squareOf(i))"
-            @pointerup="endPress"
-            @pointerleave="endPress"
-            @pointercancel="endPress"
-            @contextmenu.prevent="openSheetAt(squareOf(i))"
-          >
-            <!-- special rings outrank the plain move dot (an entourage/rage target
-                 can ALSO be a legal square — the stunt is what a tap commits) -->
-            <span v-if="squareOf(i) === coaxSquare" class="dot dot--coax" title="Coax back to post"></span>
-            <span v-else-if="chaosTargets.has(squareOf(i))" class="dot" :class="rageOffer ? 'dot--rage' : 'dot--chaos'"></span>
-            <span v-else-if="legalTargets.has(squareOf(i))" class="dot"></span>
-          </div>
-
-          <span v-if="checkSquare" class="check-ring" :style="checkStyle"></span>
-
-          <!-- lingering stunt FX: ghost at origin, ring at destination, label -->
-          <template v-if="stuntFx">
-            <span v-if="stuntFx.from" class="stunt-ring stunt-ring--from" :style="fxRingStyle(stuntFx.from)"></span>
-            <span class="stunt-ring" :class="'fx-' + stuntFx.kind" :style="fxRingStyle(stuntFx.to)"></span>
-            <span class="stunt-label" :class="'fx-' + stuntFx.kind" :style="fxLabelStyle(stuntFx.to)">{{
-              FX_LABEL[stuntFx.kind]
-            }}</span>
-          </template>
-
-          <!-- pieces: animated overlay -->
-          <TransitionGroup name="pmove" tag="div" class="pieces" :class="'death-' + deathFx">
-            <span
-              v-for="p in piecesList"
-              :key="p.id"
-              class="piece-box"
-              :data-piece="p.square"
-              :class="[cueClass(p.id), { escorting: p.id === escortId }]"
-              :style="pieceStyle(p)"
+        <!-- frame reserves a gutter all round for the edge graveyard -->
+        <div class="board-frame">
+          <div class="board" :class="{ waiting: !canPlay }">
+            <!-- squares: colours, highlights, dots, clicks -->
+            <div
+              v-for="(cell, i) in 64"
+              :key="i"
+              class="sq"
+              :data-square="squareOf(i)"
+              :class="{
+                dark: ((i % 8) + Math.floor(i / 8)) % 2 === 1,
+                sel: squareOf(i) === selectedSquare,
+                from: squareOf(i) === game.lastFrom,
+                to: squareOf(i) === game.lastTo,
+              }"
+              @click="onSquare(squareOf(i))"
+              @pointerdown="startPress(squareOf(i))"
+              @pointerup="endPress"
+              @pointerleave="endPress"
+              @pointercancel="endPress"
+              @contextmenu.prevent="openSheetAt(squareOf(i))"
             >
-              <img
-                class="glyph"
-                :class="[p.colorClass, animClass(p.square), stateClass(p.square)]"
-                :src="imgOf(p.color, p.type)"
-                :alt="`${p.colorClass} ${TYPE_NAME[p.type]}`"
-                draggable="false"
-              />
-              <!-- stunt accessories: worn while the FX lingers -->
-              <svg v-if="accessoryOf(p) === 'flame'" class="acc acc-flame" viewBox="5.5 11 13 19.5" preserveAspectRatio="none" aria-hidden="true">
-                <path d="M12 30 C6 24 7 18 12 12 C17 18 18 24 12 30 Z" fill="#f97316" />
-                <path d="M12 28 C9 24 9.5 20 12 16 C14.5 20 15 24 12 28 Z" fill="#fbbf24" />
-                <path d="M12 26 C10.6 23.5 10.8 21 12 19 C13.2 21 13.4 23.5 12 26 Z" fill="#fef3c7" />
-              </svg>
-              <svg v-else-if="accessoryOf(p) === 'glasses'" class="acc acc-glasses" viewBox="0 0 40 14" aria-hidden="true">
-                <circle cx="10" cy="7" r="6" fill="rgba(30,41,59,0.35)" stroke="#0f172a" stroke-width="2.4" />
-                <circle cx="30" cy="7" r="6" fill="rgba(30,41,59,0.35)" stroke="#0f172a" stroke-width="2.4" />
-                <line x1="16" y1="7" x2="24" y2="7" stroke="#0f172a" stroke-width="2.4" />
-                <line x1="0" y1="5" x2="4" y2="6" stroke="#0f172a" stroke-width="2.4" />
-                <line x1="40" y1="5" x2="36" y2="6" stroke="#0f172a" stroke-width="2.4" />
-              </svg>
-              <svg v-else-if="accessoryOf(p) === 'hat'" class="acc acc-hat" viewBox="0 0 36 18" aria-hidden="true">
-                <ellipse cx="18" cy="15" rx="17" ry="3" fill="#0f172a" />
-                <rect x="9" y="2" width="18" height="13" rx="2" fill="#1e293b" />
-                <rect x="9" y="10" width="18" height="3" fill="#7f1d1d" />
-              </svg>
-              <svg v-else-if="accessoryOf(p) === 'banner'" class="acc acc-banner" viewBox="0 0 20 30" aria-hidden="true">
-                <line x1="3" y1="0" x2="3" y2="30" stroke="#78350f" stroke-width="2.6" />
-                <path d="M4 1 L19 5 L4 11 Z" fill="#dc2626" stroke="#7f1d1d" stroke-width="1" />
-              </svg>
+              <!-- special rings outrank the plain move dot (an entourage/rage target
+                   can ALSO be a legal square — the stunt is what a tap commits) -->
+              <span v-if="squareOf(i) === coaxSquare" class="dot dot--coax" title="Coax back to post"></span>
+              <span v-else-if="chaosTargets.has(squareOf(i))" class="dot" :class="rageOffer ? 'dot--rage' : 'dot--chaos'"></span>
+              <span v-else-if="captureTargets.has(squareOf(i))" class="dot dot--capture"></span>
+              <span v-else-if="legalTargets.has(squareOf(i))" class="dot"></span>
+            </div>
+
+            <span v-if="checkSquare" class="check-ring" :style="checkStyle"></span>
+
+            <!-- lingering stunt FX: ghost at origin, ring at destination, label -->
+            <template v-if="stuntFx">
+              <span v-if="stuntFx.from" class="stunt-ring stunt-ring--from" :style="fxRingStyle(stuntFx.from)"></span>
+              <span class="stunt-ring" :class="'fx-' + stuntFx.kind" :style="fxRingStyle(stuntFx.to)"></span>
+              <span class="stunt-label" :class="'fx-' + stuntFx.kind" :style="fxLabelStyle(stuntFx.to)">{{
+                FX_LABEL[stuntFx.kind]
+              }}</span>
+            </template>
+
+            <!-- pieces: animated overlay -->
+            <TransitionGroup name="pmove" tag="div" class="pieces">
+              <span
+                v-for="p in piecesList"
+                :key="p.id"
+                class="piece-box"
+                :data-piece="p.square"
+                :class="[cueClass(p.id), { talking: !!bubbleFor(p.id) }]"
+                :style="pieceStyle(p)"
+              >
+                <img
+                  class="glyph"
+                  :class="[p.colorClass, animClass(p.square), stateClass(p.square)]"
+                  :src="imgOf(p.color, p.type)"
+                  :alt="`${p.colorClass} ${TYPE_NAME[p.type]}`"
+                  draggable="false"
+                />
+                <!-- speech bubble, pinned to the speaking piece -->
+                <div v-if="bubbleFor(p.id)" class="bubble" :class="'tone-' + bubbleFor(p.id)!.tone">
+                  {{ bubbleFor(p.id)!.text }}
+                </div>
+                <!-- stunt accessories: worn while an offer is up or the FX lingers -->
+                <svg v-if="accessoryOf(p) === 'flame'" class="acc acc-flame" viewBox="5.5 11 13 19.5" preserveAspectRatio="none" aria-hidden="true">
+                  <path d="M12 30 C6 24 7 18 12 12 C17 18 18 24 12 30 Z" fill="#f97316" />
+                  <path d="M12 28 C9 24 9.5 20 12 16 C14.5 20 15 24 12 28 Z" fill="#fbbf24" />
+                  <path d="M12 26 C10.6 23.5 10.8 21 12 19 C13.2 21 13.4 23.5 12 26 Z" fill="#fef3c7" />
+                </svg>
+                <svg v-else-if="accessoryOf(p) === 'glasses'" class="acc acc-glasses" viewBox="0 0 40 14" aria-hidden="true">
+                  <circle cx="10" cy="7" r="6" fill="rgba(30,41,59,0.35)" stroke="#0f172a" stroke-width="2.4" />
+                  <circle cx="30" cy="7" r="6" fill="rgba(30,41,59,0.35)" stroke="#0f172a" stroke-width="2.4" />
+                  <line x1="16" y1="7" x2="24" y2="7" stroke="#0f172a" stroke-width="2.4" />
+                  <line x1="0" y1="5" x2="4" y2="6" stroke="#0f172a" stroke-width="2.4" />
+                  <line x1="40" y1="5" x2="36" y2="6" stroke="#0f172a" stroke-width="2.4" />
+                </svg>
+                <svg v-else-if="accessoryOf(p) === 'hat'" class="acc acc-hat" viewBox="0 0 36 18" aria-hidden="true">
+                  <ellipse cx="18" cy="15" rx="17" ry="3" fill="#0f172a" />
+                  <rect x="9" y="2" width="18" height="13" rx="2" fill="#1e293b" />
+                  <rect x="9" y="10" width="18" height="3" fill="#7f1d1d" />
+                </svg>
+                <svg v-else-if="accessoryOf(p) === 'banner'" class="acc acc-banner" viewBox="0 0 20 30" aria-hidden="true">
+                  <line x1="3" y1="0" x2="3" y2="30" stroke="#78350f" stroke-width="2.6" />
+                  <path d="M4 1 L19 5 L4 11 Z" fill="#dc2626" stroke="#7f1d1d" stroke-width="1" />
+                </svg>
+              </span>
+            </TransitionGroup>
+
+            <!-- comic-book capture burst -->
+            <span v-if="smack" class="smack" :style="smackStyle(smack.square)">{{ smack.word }}</span>
+
+            <!-- endgame banner: unmissable -->
+            <div v-if="endBanner" class="endgame" :class="endBanner.cls">
+              <div class="endgame-title">{{ endBanner.title }}</div>
+              <div class="endgame-sub">{{ endBanner.sub }}</div>
+            </div>
+          </div>
+
+          <!-- edge graveyard: the fallen rest just off the board (under the board
+               layer, out in the gutters) -->
+          <div class="graves">
+            <img
+              v-for="g in restingGraves"
+              :key="g.id"
+              class="grave-piece"
+              :class="g.color === 'w' ? 'ours' : 'theirs'"
+              :src="imgOf(g.color, g.type)"
+              :style="graveStyle(g)"
+              :title="`${g.name} — ${g.color === 'w' ? 'yours' : 'enemy'} ${TYPE_NAME[g.type]}`"
+              draggable="false"
+            />
+          </div>
+          <!-- a fresh casualty holds on its square a beat, then hauls out to its
+               slot — rendered above the board so it's visible the whole way -->
+          <div class="transit-layer">
+            <span
+              v-for="t in transits"
+              :key="'t-' + t.id"
+              class="grave-transit"
+              :class="[t.color === 'w' ? 'ours' : 'theirs', t.phase]"
+              :style="transitStyle(t)"
+            >
+              <img :src="imgOf(t.color, t.type)" :alt="TYPE_NAME[t.type]" draggable="false" />
             </span>
-          </TransitionGroup>
-
-          <!-- comic-book capture burst -->
-          <span v-if="smack" class="smack" :style="smackStyle(smack.square)">{{ smack.word }}</span>
-
-          <!-- endgame banner: unmissable -->
-          <div v-if="endBanner" class="endgame" :class="endBanner.cls">
-            <div class="endgame-title">{{ endBanner.title }}</div>
-            <div class="endgame-sub">{{ endBanner.sub }}</div>
           </div>
-
-          <div
-            v-for="b in bubbles"
-            :key="b.bid"
-            class="bubble"
-            :class="['tone-' + b.tone, b.color === 'w' ? 'ours' : 'theirs']"
-            :style="bubbleStyle(b)"
-          >
-            <span class="bubble-name">{{ b.name }}:</span> {{ b.text }}
-          </div>
-        </div>
-
-        <!-- The box (graveyard) sits right under the board; the dragged-off fall here. -->
-        <div class="box box--rail">
-          <span class="box-label">The box</span>
-          <span
-            v-for="f in fallenList"
-            :key="f.id"
-            class="grave"
-            :class="f.color === 'w' ? 'ours' : 'theirs'"
-            :title="`${f.name} (${f.color === 'w' ? 'your' : 'enemy'} ${TYPE_NAME[f.type]})`"
-          >
-            <img class="grave-glyph" :src="imgOf(f.color, f.type)" :alt="TYPE_NAME[f.type]" draggable="false" />
-            <span class="grave-name">{{ f.name }}</span>
-          </span>
-          <span v-if="fallenList.length === 0" class="text-medium-emphasis text-caption">empty — no one's fallen</span>
         </div>
 
         <div class="d-flex justify-center ga-2 mt-3">
+          <v-btn variant="tonal" size="small" icon="mdi-undo" :disabled="!canUndo" title="Undo" @click="doUndo" />
+          <v-btn variant="tonal" size="small" icon="mdi-redo" :disabled="!canRedo" title="Redo" @click="doRedo" />
           <v-btn variant="tonal" size="small" prepend-icon="mdi-refresh" @click="newGame">New game</v-btn>
         </div>
       </div>
@@ -1050,20 +1195,84 @@ onBeforeUnmount(() => {
   min-width: 240px;
 }
 
-.board {
+/* The frame is the square sizing box; it reserves an 8% gutter all round for the
+   edge graveyard. The board itself is inset into the middle. */
+.board-frame {
   position: relative;
+  width: 100%;
+  max-width: min(82vh, 600px);
+  aspect-ratio: 1 / 1;
+  margin: 0 auto;
+}
+.board {
+  position: absolute;
+  inset: 8%;
+  z-index: 2;
   display: grid;
   grid-template-columns: repeat(8, 1fr);
   grid-template-rows: repeat(8, 1fr);
-  width: 100%;
-  max-width: min(78vh, 560px);
-  aspect-ratio: 1 / 1;
-  margin: 0 auto;
-  border-radius: 10px;
+  border-radius: 8px;
   overflow: visible;
   box-shadow: 0 8px 30px rgba(2, 6, 23, 0.45);
   user-select: none;
-  container-type: size;
+}
+/* Resting fallen: out in the gutters, below the board layer. */
+.graves {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+.grave-piece {
+  position: absolute;
+  width: 9%;
+  height: 9%;
+  transform: translate(-50%, -50%);
+  object-fit: contain;
+  opacity: 0.9;
+  filter: grayscale(0.4) drop-shadow(0 1px 1px rgba(0, 0, 0, 0.5));
+}
+/* Hauling casualty: above the board so the short drag to the edge is visible. */
+.transit-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+.grave-transit {
+  position: absolute;
+  width: 10.5%;
+  height: 10.5%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    left var(--drag-ms, 650ms) cubic-bezier(0.5, 0, 0.7, 0.5),
+    top var(--drag-ms, 650ms) cubic-bezier(0.5, 0, 0.7, 0.5),
+    width var(--drag-ms, 650ms) ease,
+    height var(--drag-ms, 650ms) ease;
+}
+.grave-transit.drag {
+  width: 9%;
+  height: 9%;
+}
+.grave-transit img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.5));
+}
+/* a lasso loop around the piece being hauled off */
+.grave-transit::before {
+  content: '';
+  position: absolute;
+  left: 12%;
+  top: 34%;
+  width: 76%;
+  height: 30%;
+  border: 3px solid #b45309;
+  border-radius: 50%;
 }
 .sq {
   position: relative;
@@ -1119,6 +1328,18 @@ onBeforeUnmount(() => {
   background: rgba(239, 68, 68, 0.16);
   border: 3px dashed #ef4444;
   animation: chaosPulse 0.7s ease-in-out infinite;
+}
+/* A capture: a big hollow ring hugging the target piece, so it reads as "take
+   this" rather than the small "move here" dot. */
+.dot--capture {
+  width: 90%;
+  height: 90%;
+  background: none;
+  border: 4px solid rgba(15, 23, 42, 0.42);
+  box-sizing: border-box;
+}
+.sq.dark .dot--capture {
+  border-color: rgba(15, 23, 42, 0.5);
 }
 
 /* Lingering stunt FX: after any rule-breaking moment, a ghost ring marks where
@@ -1276,30 +1497,6 @@ onBeforeUnmount(() => {
   }
 }
 
-/* The rope: drag-off victims get lassoed and hauled down to the box — a loop
-   around the waist and a taut line pulling from below. */
-.pieces:not(.death-spiral) .piece-box.pmove-leave-active::before {
-  content: '';
-  position: absolute;
-  left: 14%;
-  top: 40%;
-  width: 72%;
-  height: 26%;
-  border: 3px solid #b45309;
-  border-radius: 50%;
-  z-index: 4;
-}
-.pieces:not(.death-spiral) .piece-box.pmove-leave-active::after {
-  content: '';
-  position: absolute;
-  left: calc(50% - 2px);
-  top: 62%;
-  width: 4px;
-  height: 150%; /* short + taut: it reaches the captor diving just ahead/below */
-  background: repeating-linear-gradient(180deg, #d97706 0 7px, #92400e 7px 14px);
-  z-index: 2;
-}
-
 /* Endgame banner: the game being over is unmissable. */
 .endgame {
   position: absolute;
@@ -1406,74 +1603,15 @@ onBeforeUnmount(() => {
 .pmove-move {
   transition: transform var(--move-ms, 300ms) cubic-bezier(0.22, 0.61, 0.36, 1);
 }
-/* Capture = hauled off the board, all the way down past the bottom edge to the
-   box, slow and heavy — and NOT in a straight line: each victim staggers and
-   sways on its own path (--sway is hashed per piece). Canon: dragged, not
-   vanished. */
+/* When a piece is captured it simply fades from the board — the edge-graveyard
+   transit corpse (in its own layer) is what visibly gets hauled off, so the
+   board copy just needs to bow out quickly without a jarring pop. */
 .pmove-leave-active {
-  z-index: 3;
-  /* The 0.95s delay makes the CAPTOR lead: it slides in, lassoes the victim
-     (rope on during the hold), dives for the box first — and the victim is
-     yanked down after it, trailing on the rope. Dragger in front, dragged
-     behind: the rope now points at the piece doing the dragging. */
-  animation: dragOff 1.6s cubic-bezier(0.4, 0.08, 0.7, 0.5) 0.95s both;
+  z-index: 1;
+  transition: opacity 0.25s ease-out;
 }
-@keyframes dragOff {
-  0% {
-    transform: translate(0, 0) rotate(0deg);
-    opacity: 1;
-  }
-  22% {
-    transform: translate(calc(var(--sway, 20%) * -0.55), calc(var(--exit-y, 300%) * 0.14)) rotate(-9deg);
-  }
-  48% {
-    transform: translate(var(--sway, 20%), calc(var(--exit-y, 300%) * 0.46)) rotate(11deg);
-    opacity: 1;
-  }
-  74% {
-    transform: translate(calc(var(--sway, 20%) * -0.6), calc(var(--exit-y, 300%) * 0.78)) rotate(-7deg);
-    opacity: 0.95;
-  }
-  100% {
-    transform: translate(calc(var(--sway, 20%) * 0.3), var(--exit-y, 300%)) rotate(8deg);
-    opacity: 0;
-  }
-}
-/* The captor escorts the fallen down to the box, then climbs back to its post —
-   leaning into the haul on the way down, dusting itself off on the way up. */
-.piece-box.escorting {
-  z-index: 4;
-  animation: escort 2.5s cubic-bezier(0.45, 0.05, 0.55, 0.95) both;
-}
-@keyframes escort {
-  0% {
-    transform: translate(0, 0) rotate(0deg);
-  }
-  18% {
-    transform: translate(calc(var(--sway, 20%) * 0.5), calc(var(--exit-y, 300%) * 0.28)) rotate(5deg);
-  }
-  46% {
-    transform: translate(calc(var(--sway, 20%) * -0.2), var(--exit-y, 300%)) rotate(-3deg);
-  }
-  58% {
-    transform: translate(calc(var(--sway, 20%) * -0.2), var(--exit-y, 300%)) rotate(0deg);
-  }
-  82% {
-    transform: translate(calc(var(--sway, 20%) * -0.45), calc(var(--exit-y, 300%) * 0.3)) rotate(-5deg);
-  }
-  100% {
-    transform: translate(0, 0) rotate(0deg);
-  }
-}
-/* The ONE exception: a trampled pawn spirals out of existence underfoot. */
-.pieces.death-spiral .pmove-leave-active {
-  animation: spiralOut 0.95s ease-in both;
-}
-@keyframes spiralOut {
-  100% {
-    transform: rotate(660deg) scale(0);
-    opacity: 0;
-  }
+.pmove-leave-to {
+  opacity: 0;
 }
 
 /* Mood animations — capped to ~2 pieces by the controller, so rare by design.
@@ -1536,24 +1674,30 @@ onBeforeUnmount(() => {
   }
 }
 
+/* A talking piece floats above its neighbours so its bubble is never clipped. */
+.piece-box.talking {
+  z-index: 6;
+}
+/* Bubble is a CHILD of the piece box, so it tracks the piece as it moves and can
+   never divorce from it. Centred above the piece; compact so it doesn't bury the
+   board on a phone. */
 .bubble {
   position: absolute;
-  transform: translate(var(--tx, -50%), -118%);
-  max-width: 180px;
-  padding: 6px 10px;
-  border-radius: 12px;
-  font-size: 0.8rem;
-  line-height: 1.3;
+  left: 50%;
+  bottom: 104%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 150px;
+  padding: 4px 8px;
+  border-radius: 10px;
+  font-size: 0.72rem;
+  line-height: 1.25;
+  text-align: center;
   color: #0f172a;
   background: #fef9c3;
   box-shadow: 0 4px 14px rgba(2, 6, 23, 0.45);
-  z-index: 5;
   pointer-events: none;
-  animation: pop 0.18s ease-out;
-}
-.bubble-name {
-  font-weight: 700;
-  opacity: 0.75;
+  animation: pop 0.16s ease-out;
 }
 .tone-gloat { background: #fde68a; }
 .tone-sad { background: #cbd5e1; }
@@ -1566,9 +1710,9 @@ onBeforeUnmount(() => {
   content: '';
   position: absolute;
   bottom: -5px;
-  left: var(--tail, 50%);
-  width: 12px;
-  height: 12px;
+  left: 50%;
+  width: 11px;
+  height: 11px;
   transform: translateX(-50%) rotate(45deg);
   background-color: inherit;
   border-radius: 0 0 3px 0;
@@ -1576,7 +1720,7 @@ onBeforeUnmount(() => {
 @keyframes pop {
   from {
     opacity: 0;
-    transform: translate(var(--tx, -50%), -98%) scale(0.9);
+    transform: translateX(-50%) scale(0.9);
   }
 }
 
@@ -1647,28 +1791,6 @@ onBeforeUnmount(() => {
   font-size: 0.78rem;
   font-weight: 700;
 }
-.box {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  border-radius: 10px;
-  background: rgba(2, 6, 23, 0.35);
-  padding: 8px;
-}
-/* Box as a rail directly under the board — where dragged-off pieces land. */
-.box--rail {
-  align-items: center;
-  margin: 10px auto 0;
-  max-width: min(78vh, 560px);
-  min-height: 40px;
-}
-.box-label {
-  font-size: 0.68rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: rgba(148, 163, 184, 0.7);
-  margin-right: 4px;
-}
 .chaos-pip {
   flex: 0 0 auto;
   width: 7px;
@@ -1676,27 +1798,6 @@ onBeforeUnmount(() => {
   border-radius: 2px;
   background: #c084fc;
   transform: rotate(45deg);
-}
-.grave {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px 2px 4px;
-  border-radius: 999px;
-  font-size: 0.78rem;
-  background: rgba(148, 163, 184, 0.12);
-}
-.grave-glyph {
-  width: 18px;
-  height: 18px;
-  object-fit: contain;
-  filter: grayscale(0.35) drop-shadow(0 1px 1px rgba(0, 0, 0, 0.4));
-}
-.grave.ours .grave-name {
-  color: #fde68a;
-}
-.grave.theirs .grave-name {
-  color: #fca5a5;
 }
 .move-row2 {
   display: flex;
@@ -1758,6 +1859,16 @@ onBeforeUnmount(() => {
   }
 }
 
+/* Phone: bubbles shrink so a single line of chatter can't bury the board. */
+@media (max-width: 560px) {
+  .bubble {
+    max-width: 108px;
+    font-size: 0.62rem;
+    padding: 3px 6px;
+    border-radius: 8px;
+  }
+}
+
 /* Respect motion sensitivity: still the fidgets and the travel slide, but keep
    anger legible as a static red aura (and the spinner, which signals activity). */
 @media (prefers-reduced-motion: reduce) {
@@ -1769,15 +1880,13 @@ onBeforeUnmount(() => {
   .piece-box.cue-hop {
     animation: none !important;
   }
-  .pmove-move {
+  .pmove-move,
+  .grave-transit {
     transition: none !important;
   }
-  .pmove-leave-active,
-  .pieces.death-spiral .pmove-leave-active,
   .stunt-ring,
   .stunt-ring.fx-telegraph,
   .stunt-label,
-  .piece-box.escorting,
   .acc-flame,
   .acc-banner,
   .endgame {

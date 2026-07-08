@@ -89,6 +89,26 @@ interface Resist {
   sacrifice: boolean
 }
 
+/** A full-game undo point. Everything mutable is captured as plain JSON so a
+ * snapshot is a frozen deep copy; the chess position rides along as a FEN. */
+interface Snapshot {
+  fen: string
+  society: Society
+  lastFrom: Square | null
+  lastTo: Square | null
+  lastMoverId: string | null
+  lastMoveRisky: boolean
+  moveLog: MoveEntry[]
+  graveyard: string[]
+  trust: number
+  dialogue: DialogueState
+  introduced: string[]
+  lastSuggestPly: number
+  usedStunts: string[]
+  spooked: { soulId: string; home: Square; until: number; kind: 'fled' | 'wayward' } | null
+  spontaneousCount: number
+}
+
 /** How many taps a piece demands before it will make a given move. */
 export function requiredTaps(soul: PieceSoul, r: ReturnType<typeof assessMove>): number {
   let n = 1
@@ -125,6 +145,8 @@ export class WizardGame {
   // A piece that moved itself (fled in fear, or charged off in a breakout) and
   // can be coaxed back to its post for a while — the recourse for misbehaviour.
   private spooked: { soulId: string; home: Square; until: number; kind: 'fled' | 'wayward' } | null = null
+  private history: Snapshot[] = [] // undo stack (states just before a committed player action)
+  private future: Snapshot[] = [] // redo stack
 
   constructor(public seed: string) {
     this.chess = new Chess()
@@ -139,6 +161,83 @@ export class WizardGame {
   }
   private logMove(san: string, side: Color, chaos: boolean) {
     this.moveLog.push({ san, ts: this.now(), side, chaos })
+  }
+
+  // ── Undo / redo ────────────────────────────────────────────────────────────
+  private captureSnapshot(): Snapshot {
+    // One JSON round-trip deep-copies the whole mutable graph (society, dialogue,
+    // moveLog…); Sets are stored as arrays. The result is frozen — future
+    // mutations of the live game can't touch it.
+    return JSON.parse(
+      JSON.stringify({
+        fen: this.chess.fen(),
+        society: this.society,
+        lastFrom: this.lastFrom,
+        lastTo: this.lastTo,
+        lastMoverId: this.lastMoverId,
+        lastMoveRisky: this.lastMoveRisky,
+        moveLog: this.moveLog,
+        graveyard: this.graveyard,
+        trust: this.trust,
+        dialogue: this.dialogue,
+        introduced: [...this.introduced],
+        lastSuggestPly: this.lastSuggestPly,
+        usedStunts: [...this.usedStunts],
+        spooked: this.spooked,
+        spontaneousCount: this.spontaneousCount,
+      }),
+    )
+  }
+  private applySnapshot(snap: Snapshot) {
+    const s: Snapshot = JSON.parse(JSON.stringify(snap)) // fresh copy so redo can reuse the stored one
+    this.chess = new Chess(s.fen)
+    this.society = s.society
+    this.lastFrom = s.lastFrom
+    this.lastTo = s.lastTo
+    this.lastMoverId = s.lastMoverId
+    this.lastMoveRisky = s.lastMoveRisky
+    this.moveLog = s.moveLog
+    this.graveyard = s.graveyard
+    this.trust = s.trust
+    this.dialogue = s.dialogue
+    this.introduced = new Set(s.introduced)
+    this.lastSuggestPly = s.lastSuggestPly
+    this.usedStunts = new Set(s.usedStunts)
+    this.spooked = s.spooked
+    this.spontaneousCount = s.spontaneousCount
+    // Transient interaction/animation state never survives a jump.
+    this.selected = null
+    this.resist = null
+    this.offer = null
+    this.aiThinking = false
+    this.fx = null
+    this.smack = null
+    this.deathFx = 'drag'
+  }
+  /** Record a restore point just before a committed action. */
+  private checkpoint() {
+    this.history.push(this.captureSnapshot())
+    if (this.history.length > 80) this.history.shift()
+    this.future = []
+  }
+  get canUndo(): boolean {
+    return this.history.length > 0
+  }
+  get canRedo(): boolean {
+    return this.future.length > 0
+  }
+  /** Step back to before your last move/stunt (and the enemy's reply to it). */
+  undo(): boolean {
+    if (!this.history.length) return false
+    this.future.push(this.captureSnapshot())
+    this.applySnapshot(this.history.pop() as Snapshot)
+    return true
+  }
+  redo(): boolean {
+    if (!this.future.length) return false
+    this.history.push(this.captureSnapshot())
+    this.applySnapshot(this.future.pop() as Snapshot)
+    return true
   }
   private setTrust(v: number) {
     this.trust = Math.max(0, Math.min(100, v))
@@ -175,7 +274,7 @@ export class WizardGame {
     const victim = this.society.souls[cap.soulId]
     const val = victim ? PIECE_VALUE[victim.type] : move.captured ? PIECE_VALUE[move.captured] : 3
     if (mover === PLAYER) {
-      this.setTrust(this.trust + 2 + val * 0.9) // you won material — the ranks cheer up
+      this.setTrust(this.trust + 2.5 + val) // you won material — the ranks cheer up
       return null
     }
     // A comrade has fallen on your watch. Loss aversion: it stings a bit more
@@ -246,6 +345,8 @@ export class WizardGame {
     this.deathFx = 'drag'
     this.smack = null
     this.spontaneousCount = 0
+    this.history = []
+    this.future = []
   }
 
   private fxSeq = 0
@@ -352,10 +453,15 @@ export class WizardGame {
     if (this.chess.isCheckmate() && moverId) events.push({ kind: 'checkmate', soulId: moverId, salience: 120 })
     else if (this.chess.isCheck() && moverId) events.push({ kind: 'check', soulId: moverId, salience: 54 })
 
-    // Morale drifts back toward neutral a little every ply — grudges (and
-    // adoration) fade with time, so a bad opening can still become a story of
-    // redemption instead of a locked-in mutiny.
-    this.setTrust(this.trust + (50 - this.trust) * 0.012)
+    // Every ply, morale drifts toward a target set by how the game is actually
+    // going — the running material balance. Ahead a rook? The army expects to
+    // win and floats up toward the 70s; down material and it sags. This is what
+    // makes trust *track the game*: a clean winning game climbs to the 80s on
+    // its own, rather than inching up only on discrete captures. Grudges and
+    // adoration still fade toward this baseline, so a rough opening can be
+    // redeemed. (Tuned via self-play — see the soak.)
+    const target = Math.max(6, Math.min(97, 50 + materialBalance(this.chess) * 3.3))
+    this.setTrust(this.trust + (target - this.trust) * 0.05)
     // Material swings move trust the most; capture the "losing faith" voice too.
     const faith = this.trustFromMove(move, events)
     // Game verdict swings trust several notches (the side to move is the loser).
@@ -433,7 +539,7 @@ export class WizardGame {
             square,
             color: soul.color,
             name: soul.persona.name,
-            text: 'Well… since you asked nicely. Back to my post.',
+            text: 'Fine, since you asked nicely.',
             tone: 'warm',
           },
         ],
@@ -477,6 +583,7 @@ export class WizardGame {
       this.resist = null
       const before = this.chess.fen()
       const from = this.selected
+      this.checkpoint() // snapshot "player to move" so this move can be undone
       try {
         const move = this.chess.move({ from, to: square, promotion: 'q' })
         this.selected = null
@@ -484,6 +591,7 @@ export class WizardGame {
         this.scoreTrust(before, from, square)
         return { moved: true, utterances: this.applyAndVoice(move) }
       } catch {
+        this.history.pop() // the move didn't happen — discard the checkpoint
         this.selected = null
         return { moved: false, utterances: [] }
       }
@@ -622,6 +730,7 @@ export class WizardGame {
 
   private doChaosMove(to: Square): TapResult {
     const offer = this.offer!
+    this.checkpoint() // every opted-in stunt is undoable
     if (offer.type === 'rage') return this.doRageStrike(offer.from, to)
     if (offer.type === 'entourage') return this.doEntourage(offer.from, to)
     if (offer.type === 'swap') return this.doSwap(offer.from, to)
@@ -635,7 +744,7 @@ export class WizardGame {
     this.selected = null
     this.resist = null
     if (!res) return { moved: false, utterances: [] }
-    const line = offer.type === 'disguise' ? 'Bishop? Never heard of her.' : 'Hold onto something — JETPACK!'
+    const line = offer.type === 'disguise' ? 'Bishop? Never heard of her.' : 'JETPACK!'
     const utterances: Utterance[] = soul
       ? [{ soulId: soul.id, square: to, color: soul.color, name: soul.persona.name, text: line, tone: 'gloat' }]
       : []
@@ -675,13 +784,13 @@ export class WizardGame {
     this.logMove(`K+${moves.length - 1}→${to} (entourage)`, PLAYER, true)
     const king = kingId ? this.society.souls[kingId] : null
     const utterances: Utterance[] = king
-      ? [{ soulId: king.id, square: to, color: king.color, name: king.persona.name, text: 'To me, friends — we move as ONE!', tone: 'gloat' }]
+      ? [{ soulId: king.id, square: to, color: king.color, name: king.persona.name, text: 'To me — as ONE!', tone: 'gloat' }]
       : []
     // One marcher answers the rally.
     const fellow = marchers.find((m) => m.id && m.id !== kingId)
     if (fellow?.id) {
       const s = this.society.souls[fellow.id]
-      utterances.push({ soulId: s.id, square: s.square, color: s.color, name: s.persona.name, text: 'Right behind you, sire!', tone: 'warm' })
+      utterances.push({ soulId: s.id, square: s.square, color: s.color, name: s.persona.name, text: 'With you, sire!', tone: 'warm' })
     }
     return { moved: true, utterances }
   }
@@ -722,7 +831,7 @@ export class WizardGame {
     }
     if (bId) {
       const b = this.society.souls[bId]
-      utterances.push({ soulId: b.id, square: from, color: b.color, name: b.persona.name, text: 'On it. Nobody saw a thing.', tone: 'warm' })
+      utterances.push({ soulId: b.id, square: from, color: b.color, name: b.persona.name, text: 'Nobody saw a thing.', tone: 'warm' })
     }
     return { moved: true, utterances }
   }
@@ -745,6 +854,7 @@ export class WizardGame {
       const v = this.society.souls[victimId]
       if (v) {
         v.captured = true
+        v.diedAt = target
         v.square = null
       }
       delete this.society.bySquare[target]
@@ -764,7 +874,7 @@ export class WizardGame {
       soul.kills += 1
     }
     const utterances: Utterance[] = soul
-      ? [{ soulId: soul.id, square: from, color: soul.color, name: soul.persona.name, text: 'For the fallen — GET OFF MY BOARD!', tone: 'angry' }]
+      ? [{ soulId: soul.id, square: from, color: soul.color, name: soul.persona.name, text: 'For the fallen — OFF!', tone: 'angry' }]
       : []
     utterances.push(
       ...speak(this.society, scanBoard(this.society, this.chess), this.dialogue, this.rng, this.settings.chatter, 1),
@@ -878,6 +988,7 @@ export class WizardGame {
           const pawn = this.society.souls[pawnId]
           if (pawn) {
             pawn.captured = true
+            pawn.diedAt = pawnSq
             pawn.square = null
           }
           delete this.society.bySquare[pawnSq]
@@ -899,7 +1010,7 @@ export class WizardGame {
         square: choice.dest,
         color: s.color,
         name: s.persona.name,
-        text: trample ? 'MOVE or be trampled — I waited long enough!' : 'Out of my way — coming through!',
+        text: trample ? 'MOVE or be trampled!' : 'Out of my way!',
         tone: 'angry',
       }
     }
@@ -933,7 +1044,7 @@ export class WizardGame {
         square: behind,
         color: s.color,
         name: s.persona.name,
-        text: 'Nope! Backing away — nope nope nope.',
+        text: 'Nope nope NOPE!',
         tone: 'afraid',
       }
     }
@@ -964,7 +1075,7 @@ export class WizardGame {
         square: sq,
         color: 'b',
         name: s.persona.name,
-        text: "Management's been terrible. Hello, other side!",
+        text: 'New management! Bye!',
         tone: 'gloat',
       }
     }
@@ -1054,6 +1165,7 @@ export class WizardGame {
       const v = this.society.souls[victimId]
       if (v) {
         v.captured = true
+        v.diedAt = to
         v.square = null
       }
       delete this.society.bySquare[to]
@@ -1221,12 +1333,13 @@ export class WizardGame {
     }
   }
 
-  /** The fallen, in the order they were taken — for the graveyard ("the box"). */
-  fallen(): { id: string; name: string; type: PieceType; color: Color }[] {
+  /** The fallen, in the order they were taken, with the square each fell on —
+   * the view drags them to the nearest off-board slot from there. */
+  fallen(): { id: string; name: string; type: PieceType; color: Color; diedAt: Square | null }[] {
     return this.graveyard
       .map((id) => this.society.souls[id])
       .filter(Boolean)
-      .map((s) => ({ id: s.id, name: s.persona.name, type: s.type, color: s.color }))
+      .map((s) => ({ id: s.id, name: s.persona.name, type: s.type, color: s.color, diedAt: s.diedAt }))
   }
 
   /** Names of the player's surviving pieces (for the share message). */

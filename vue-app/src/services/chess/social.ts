@@ -87,6 +87,7 @@ export function createSociety(chess: Chess, rng: Rng): Society {
         sass: fixedSass(color, type, i),
         captured: false,
         mood: { impatience: 0, fear: 0, anger: 0, confidence: 0.4, joy: 0.35 },
+        diedAt: null,
         idleFor: 0,
         kills: 0,
         bonds: {},
@@ -156,6 +157,7 @@ export function applyMove(society: Society, move: MoveInfo): GameEvent[] {
     if (victimId) {
       const victim = society.souls[victimId]
       victim.captured = true
+      victim.diedAt = victimSquare
       victim.square = null
       delete society.bySquare[victimSquare]
       events.push({ kind: 'captured', soulId: victimId, otherId: moverId, salience: 66 })
