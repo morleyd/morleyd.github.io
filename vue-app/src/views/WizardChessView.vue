@@ -280,7 +280,7 @@ const SLOTS: { x: number; y: number }[] = (() => {
 // where it died — so the layout is stable across undo/redo (re-derived, no
 // stored slot state).
 const graveLayout = computed(() => {
-  version.value
+  void version.value
   const used = new Set<number>()
   const out: { id: string; type: PieceType; color: Color; x: number; y: number; name: string; diedAt: Square; fromX: number; fromY: number }[] = []
   for (const f of game.fallen()) {
@@ -403,7 +403,7 @@ const escortVars = computed(() => {
 // The game being over must be unmissable: a big banner across the board,
 // green for a win, red for a loss, slate for a draw.
 const endBanner = computed<{ title: string; sub: string; cls: string } | null>(() => {
-  version.value
+  void version.value
   if (!game.gameOver) return null
   if (game.chess.isCheckmate()) {
     return game.turn !== 'w'
@@ -462,7 +462,7 @@ interface PieceView {
   square: Square
 }
 const piecesList = computed<PieceView[]>(() => {
-  version.value
+  void version.value
   return Object.values(game.society.souls)
     .filter((s) => !s.captured && s.square)
     .map((s) => ({
@@ -481,7 +481,7 @@ const rageOffer = computed(() => (version.value, game.chaosOfferType() === 'rage
 const canPlay = computed(() => (version.value, game.canPlay))
 const thinking = computed(() => (version.value, game.aiThinking))
 const checkSquare = computed<Square | null>(() => {
-  version.value
+  void version.value
   if (!game.chess.isCheck()) return null
   return kingSquare(game.chess, game.chess.turn())
 })
@@ -492,7 +492,7 @@ const selectedName = computed(() => {
   return s ? `${s.persona.name} the ${TYPE_NAME[s.type]}` : null
 })
 const status = computed(() => {
-  version.value
+  void version.value
   if (game.chess.isCheckmate()) return game.turn === 'w' ? 'Checkmate — your king has fallen.' : 'Checkmate! You win.'
   if (game.chess.isStalemate()) return 'Stalemate — a stiff, awkward draw.'
   if (game.chess.isDraw()) return "It's a draw. Everyone lives to bicker another day."
@@ -579,7 +579,7 @@ const fmt = (ms: number) => `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 
 // Move tracker: chronological + timestamped (chaos/spontaneous plies flagged),
 // which also sidesteps the old white/black column mis-pairing.
 const moveRows = computed(() => {
-  version.value
+  void version.value
   return game.moveLog.map((m) => ({ ...m, time: fmt(m.ts) }))
 })
 
@@ -594,7 +594,7 @@ const coaxSquare = computed(() => (version.value, game.coaxTarget()))
 const reprimandSquare = computed(() => (version.value, game.reprimandTarget()))
 // Legal targets that land on an enemy — rendered as a capture RING, not a dot.
 const captureTargets = computed(() => {
-  version.value
+  void version.value
   const out = new Set<Square>()
   if (!game.selected) return out
   for (const t of game.legalTargets()) if (game.chess.get(t)) out.add(t)
