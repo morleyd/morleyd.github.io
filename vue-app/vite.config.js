@@ -31,6 +31,18 @@ export default defineConfig({
   build: {
     outDir: './dist',
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        // Split the big framework deps out of the eager entry chunk: they change
+        // rarely (better long-term caching) and it keeps each chunk under Vite's
+        // 500 kB warning threshold. Route views are already lazy-loaded.
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return
+          if (id.includes('vuetify')) return 'vuetify'
+          if (id.includes('/vue/') || id.includes('vue-router') || id.includes('/@vue/') || id.includes('pinia')) return 'vue'
+        },
+      },
+    },
   },
   publicDir: 'public',
 })
