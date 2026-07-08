@@ -16,12 +16,15 @@ import {
   chatCloser,
   chatOpener,
   chatReply,
+  balkLine,
   createDialogueState,
   enemyStuntAnnounce,
   enemyStuntCommit,
   heckleLine,
   postGameLine,
   loseFaithLine,
+  missedReprimandLine,
+  pineLine,
   resistLine,
   smallTalkLine,
   speak,
@@ -344,6 +347,7 @@ export class WizardGame {
     this.introduced.clear()
     this.resist = null
     this.lastSuggestPly = -99
+    this.lastPinePly = -99
     this.offer = null
     this.usedStunts.clear()
     this.spooked = null
@@ -418,9 +422,10 @@ export class WizardGame {
         continue
       }
       // Tremble: under attack AND (cowardly, or completely exposed) — and never
-      // for the reckless/bold.
+      // for the reckless/bold, nor for the piece that JUST moved/captured onto
+      // this square (cowering the instant after a bold capture reads as a bug).
       const attackers = this.chess.attackers(s.square, opp(s.color)).length
-      if (attackers > 0 && !reckless) {
+      if (attackers > 0 && !reckless && s.square !== this.lastTo) {
         const defenders = this.chess.attackers(s.square, s.color).length
         const cowardly = bravery < 0.4
         const hanging = defenders < attackers
@@ -508,6 +513,18 @@ export class WizardGame {
     // Reprimand: tap the glowing home square of a cheated enemy piece to send it
     // back there. Checked first (the home square is otherwise empty).
     if (square === this.reprimandTarget()) return this.doReprimand()
+
+    // Too late: tapping the cheat after its reprimand window has closed just gets
+    // a gloat — the chance to enforce the rule is gone.
+    if (this.cheat && this.society.ply > this.cheat.until && this.society.ply <= this.cheat.until + 4) {
+      const c = this.society.souls[this.cheat.soulId]
+      if (c && !c.captured && c.square === square) {
+        return {
+          moved: false,
+          utterances: [{ soulId: c.id, square, color: c.color, name: c.persona.name, text: missedReprimandLine(this.rng), tone: 'gloat' }],
+        }
+      }
+    }
 
     // A tap on an offered chaos target commits the stunt. Checked BEFORE the
     // own-piece branch: a body-swap target IS one of your own pieces, and must
@@ -793,9 +810,11 @@ export class WizardGame {
     }
 
     if (piece.type === 'r') {
-      // A cooped-up rook fancies a diagonal.
+      // A rook that's already ranging freely (≥ 6 legal moves) gets cocky enough
+      // to try a diagonal — combined with the dramatic-target filter below, a
+      // deliberate flourish rather than a desperate scramble.
       const mobility = this.chess.moves({ square: from }).length
-      const o = build('disguise', mobility <= 6, () => bishopTargets(this.chess, from))
+      const o = build('disguise', mobility >= 6, () => bishopTargets(this.chess, from))
       if (o) return o
     }
     if (piece.type === 'n') {
@@ -811,16 +830,25 @@ export class WizardGame {
       if (o) return o
     }
 
-    // Pep-talk entourage: the king, with friends at his side, rallies the whole
-    // formation to march one step together (his move for the turn). Not gated on
-    // drama — the rally IS the drama.
+    // Pep-talk entourage: the king rallies his flanking friends to march one step
+    // together — but only when there's a REASON (David's calls 1 & 2): the
+    // endgame (few pieces left, so a king march is sound), or the king is exposed
+    // (in check, or the enemy is closing on adjacent squares) and wants to huddle.
     if (piece.type === 'k' && !this.usedStunts.has('entourage') && this.rng() < this.settings.chaos) {
       const allies = adjacentSquares(from).filter((s) => this.chess.get(s)?.color === PLAYER)
       if (allies.length >= 2) {
-        const targets = adjacentSquares(from).filter(
-          (to) => !this.chess.get(to) && !!entourageShift(new Chess(fen), from, to),
-        )
-        if (targets.length) return { type: 'entourage', from, targets }
+        let pieceCount = 0
+        for (const row of this.chess.board()) for (const cell of row) if (cell) pieceCount += 1
+        const endgame = pieceCount <= 12
+        const exposed =
+          this.chess.attackers(from, opp(PLAYER)).length > 0 ||
+          adjacentSquares(from).some((a) => this.chess.attackers(a, opp(PLAYER)).length > 0)
+        if (endgame || exposed) {
+          const targets = adjacentSquares(from).filter(
+            (to) => !this.chess.get(to) && !!entourageShift(new Chess(fen), from, to),
+          )
+          if (targets.length) return { type: 'entourage', from, targets }
+        }
       }
     }
 
@@ -982,6 +1010,7 @@ export class WizardGame {
     this.logMove(`×${target} (rage)`, PLAYER, true)
     if (soul) {
       soul.avenging = null
+      soul.mourning = null
       soul.vengefulUntil = -1 // rage spent — the red clears
       soul.mood.anger = Math.max(0, soul.mood.anger - 0.6)
       soul.kills += 1
@@ -1348,6 +1377,39 @@ export class WizardGame {
   }
 
   /**
+   * A timid enemy piece gets cold feet about a bad capture: if the engine's move
+   * is a capture that loses material (capturing a guarded, cheaper piece) and the
+   * mover is a coward, it sometimes thinks better of it and shrinks back to a
+   * safe square instead — costing its turn, with a line. Returns the replacement
+   * move to play (and its utterance), or null to let the engine's move stand.
+   * (Fixes the "captured a defended piece then trembled in fear" nonsense.)
+   */
+  timidBalk(move: { from: Square; to: Square }): { move: { from: Square; to: Square }; utterance: Utterance } | null {
+    if (this.settings.chaos <= 0 || this.usedStunts.has('balk')) return null
+    if (!this.chess.get(move.to)) return null // not a capture
+    const mover = this.chess.get(move.from)
+    if (!mover || mover.color === PLAYER) return null // only the enemy balks (never punishes the player)
+    if (!assessMove(this.chess.fen(), move.from, move.to).sacrifice) return null // the capture is actually fine
+    const soul = this.soulAt(move.from)
+    if (!soul || (soul.persona.bravery ?? 0.5) >= 0.4) return null // only cowards lose their nerve
+    if (this.rng() >= this.settings.chaos * 0.6) return null
+    // Find a quiet square to shrink back to (unattacked, no fresh loss).
+    const legal = this.chess.moves({ square: move.from, verbose: true }) as unknown as { from: Square; to: Square }[]
+    const fen = this.chess.fen()
+    const retreat = legal.find((m) => {
+      if (this.chess.get(m.to)) return false // a quiet retreat, not another lunge
+      const r = assessMove(fen, m.from, m.to)
+      return r.risk === 0 && !r.hanging
+    })
+    if (!retreat) return null // nowhere safe to retreat — go through with the capture
+    this.usedStunts.add('balk')
+    return {
+      move: { from: retreat.from, to: retreat.to },
+      utterance: { soulId: soul.id, square: retreat.to, color: soul.color, name: soul.persona.name, text: balkLine(this.rng), tone: 'afraid' },
+    }
+  }
+
+  /**
    * Occasionally a piece pipes up and pre-selects itself with advice — GOOD (a
    * real opportunity) or, when the team doesn't trust your generalship, confident
    * BAD advice (a blundering move). Rare (cooldown + chance).
@@ -1483,6 +1545,28 @@ export class WizardGame {
       tone: 'angry',
     }
   }
+
+  /** A vengeful piece pines for its fallen friend across the turns before it
+   * strikes — so the rage-strike, when it lands, is a story we've been hearing,
+   * not a bolt from the blue. Rate-limited to one lament every couple of plies. */
+  pine(): Utterance | null {
+    if (!this.canPlay || this.society.ply - this.lastPinePly < 2) return null
+    const mourners = Object.values(this.society.souls).filter(
+      (s) => !s.captured && s.square && s.color === PLAYER && s.vengefulUntil >= this.society.ply && s.mourning,
+    )
+    if (!mourners.length) return null
+    const s = this.pick(mourners)
+    this.lastPinePly = this.society.ply
+    return {
+      soulId: s.id,
+      square: s.square,
+      color: s.color,
+      name: s.persona.name,
+      text: pineLine(s.mourning as string, this.rng),
+      tone: 'angry',
+    }
+  }
+  private lastPinePly = -99
 
   /** The fallen, in the order they were taken, with the square each fell on —
    * the view drags them to the nearest off-board slot from there. */

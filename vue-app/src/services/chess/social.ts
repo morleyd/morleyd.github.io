@@ -94,6 +94,7 @@ export function createSociety(chess: Chess, rng: Rng): Society {
         kills: 0,
         bonds: {},
         avenging: null,
+        mourning: null,
         vengefulUntil: -1, // -1 = never; must be > 0 or ply-0 pieces all read "vengeful"
       }
       bySquare[square] = id
@@ -193,6 +194,7 @@ export function applyMove(society: Society, move: MoveInfo): GameEvent[] {
         // the killer, with a line that names the fallen.
         if (topGriever && topFondness >= 0.45) {
           topGriever.avenging = moverId
+          topGriever.mourning = victim.persona.name
           topGriever.vengefulUntil = society.ply + 6
           topGriever.mood.anger = 1
           topGriever.mood.fear = 0

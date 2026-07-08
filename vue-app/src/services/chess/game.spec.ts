@@ -393,9 +393,50 @@ describe('WizardGame interaction', () => {
     let plan2 = null
     for (let i = 0; i < 60 && !plan2; i += 1) plan2 = g2.aiChaosPlan()
     g2.aiChaosCommit(plan2!)
+    const cheatSq = g2.reprimandSquare() as Square
     g2.playerTap('e1')
     g2.playerTap('e2') // the player moves instead of reprimanding
     expect(g2.reprimandTarget()).toBeNull() // too late now
+    g2.aiApply({ from: 'e8', to: 'd8' }) // black replies; control returns to White
+    // …tapping the cheat now just gets a gloat about the missed chance.
+    const missed = g2.playerTap(cheatSq)
+    expect(missed.moved).toBe(false)
+    expect(missed.utterances[0]?.text).toBeTruthy()
+  })
+
+  it('a vengeful piece pines for its fallen friend (building up to the strike)', () => {
+    const g = new WizardGame('pine')
+    g.reset('pine', '4k3/8/8/8/8/8/4Q3/4K3 w - - 0 1')
+    g.society.ply = 4
+    const q = g.soulAt('e2')!
+    q.vengefulUntil = 12
+    q.mourning = 'Dennis'
+    const u = g.pine()
+    expect(u).toBeTruthy()
+    expect(u!.text).toContain('Dennis')
+  })
+
+  it('a timid enemy piece balks a losing capture and retreats instead', () => {
+    const g = new WizardGame('balk')
+    // Black bishop f4 can take the e3 pawn, but it's defended by d2 → a bad trade.
+    g.reset('balk', '4k3/8/8/8/5b2/4P3/3P4/4K3 b - - 0 1')
+    g.settings.chaos = 1
+    g.soulAt('f4')!.persona.bravery = 0.2 // a coward
+    let balk = null
+    for (let i = 0; i < 50 && !balk; i += 1) balk = g.timidBalk({ from: 'f4', to: 'e3' })
+    expect(balk).toBeTruthy()
+    expect(balk!.move.from).toBe('f4')
+    expect(balk!.move.to).not.toBe('e3') // it shrinks back somewhere safe instead
+    expect(balk!.utterance.tone).toBe('afraid')
+
+    // A brave piece takes the trade without flinching.
+    const brave = new WizardGame('brave')
+    brave.reset('brave', '4k3/8/8/8/5b2/4P3/3P4/4K3 b - - 0 1')
+    brave.settings.chaos = 1
+    brave.soulAt('f4')!.persona.bravery = 0.9
+    let braveBalk = null
+    for (let i = 0; i < 20 && !braveBalk; i += 1) braveBalk = brave.timidBalk({ from: 'f4', to: 'e3' })
+    expect(braveBalk).toBeNull()
   })
 
   it('rallies the pep-talk entourage: king + friends march one step as one turn', () => {

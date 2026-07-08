@@ -422,6 +422,37 @@ const LOSE_FAITH = [
 ]
 export const loseFaithLine = (rng: Rng): string => pick(LOSE_FAITH, rng)
 
+// A vengeful piece pines for its fallen friend across the turns before it
+// strikes — so the rage-strike, when it comes, is clearly earned. {fallen} = name.
+const PINING = [
+  'I still hear {fallen} sometimes.',
+  "{fallen}… I haven't forgotten.",
+  'This one is for you, {fallen}.',
+  'They took {fallen}. They will pay.',
+  'Rest easy, {fallen}. I have this.',
+  'Every square reminds me of {fallen}.',
+  'Soon, {fallen}. Soon.',
+]
+export const pineLine = (fallen: string, rng: Rng): string => pick(PINING, rng).replace(/\{fallen\}/g, fallen)
+
+// Too late: the player tapped a cheat after the window to send it home closed.
+const MISSED_REPRIMAND = [
+  'Too slow! I am staying RIGHT here.',
+  'Your chance to send me back? Gone.',
+  "Should have acted sooner. I'm home now.",
+  'Ha! You blinked. I keep the square.',
+]
+export const missedReprimandLine = (rng: Rng): string => pick(MISSED_REPRIMAND, rng)
+
+// A timid piece thinks better of a reckless capture and pulls back instead.
+const BALK = [
+  'Nearly! ...no. Too well guarded.',
+  'On second thought — falling back.',
+  "That's a trap. I'm out.",
+  'Ooh— actually, no thank you.',
+]
+export const balkLine = (rng: Rng): string => pick(BALK, rng)
+
 const POSTGAME_WIN = ['Told you we had it!', 'A famous victory!', 'Never doubted you, general.']
 const POSTGAME_LOSS = ["Next time.", 'A good scrap.', 'Heads high, everyone.']
 

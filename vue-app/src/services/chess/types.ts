@@ -55,6 +55,7 @@ export interface PieceSoul {
   bonds: Record<string, number>
   /** Vengeance: set when a bonded friend is killed — a real, lasting state. */
   avenging: string | null // id of the killer this piece is out to get
+  mourning: string | null // name of the fallen friend being avenged (for pining lines)
   vengefulUntil: number // ply until which the vengeful power-up lasts
 }
 

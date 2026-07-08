@@ -40,15 +40,16 @@ describe('chaos moves', () => {
 })
 
 describe('chaos offers and limits (controller)', () => {
-  it('offers a disguise to a boxed-in rook and executes it once', () => {
+  it('offers a disguise to an active rook with a dramatic diagonal, once', () => {
     const g = new WizardGame('chaos')
-    // White rook a1 with open diagonal; black king far away. Rook has few moves.
-    g.reset('chaos', '4k3/8/8/8/8/8/P7/RN2K3 w - - 0 1')
+    // Active rook d4 (plenty of moves) with a diagonal capture on f6.
+    g.reset('chaos', '4k3/8/5p2/8/3R4/8/8/4K3 w - - 0 1')
     g.settings.chaos = 1 // always offer when eligible
-    const r = g.playerTap('a1')
+    const r = g.playerTap('d4')
     expect(r.introSoul).toBeTruthy()
     const targets = g.chaosTargets()
     expect(targets.length).toBeGreaterThan(0) // diagonal options offered
+    expect(g.chaosOfferType()).toBe('disguise')
 
     const to = targets[0]
     const done = g.playerTap(to)

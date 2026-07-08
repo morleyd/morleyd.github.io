@@ -265,14 +265,15 @@ Audit of why each rule-break is allowed to happen:
 | Stunt | Reason it's offered/fires |
 |---|---|
 | Jetpack (knight) | rescue the king (in check), "wings" (trust ≥ 82), or a real build-up (idle & ranting) — **and** a dramatic target (capture/check/escape) |
-| Disguise (rook) | rook is cooped up (≤6 legal moves) **and** the diagonal target is dramatic |
+| Disguise (rook) | rook is **active** (≥ 6 legal moves — a confident flourish) **and** the diagonal target is dramatic |
 | **Body swap** | **REWORKED**: never between same types; only when a clearly cheaper piece shields a clearly more valuable one that's hanging (and the cheap one was safe), or the swap gives check |
 | Rage-strike | the piece is in its vengeful window with an enemy adjacent |
 | Breakout | middlegame (ply ≥ 16), side deployed, and it has ranted ≥ 4× |
 | Cold feet | genuinely terrified (fear ≥ 0.6) and under attack |
 | Defector | **now** only when team trust has collapsed (< 33) |
 | Enemy chaos | never in the opening; only to capture material |
-| Pep-talk entourage | king + ≥2 adjacent allies — *the one whose "reason" is weakest; flagged for David* |
+| Pep-talk entourage | king + ≥2 adjacent allies **and** (endgame ≤ 12 pieces, or the king is exposed — in check / enemy on an adjacent square) |
+| Timid balk | a cowardly ENEMY piece (bravery < 0.4) about to make a losing capture shrinks back to safety instead — costs its turn, with a line (fixes "captured a guarded piece then trembled") |
 
 Round 8 changes:
 - [x] **Body swap gated** to genuine gain (shield an endangered valuable piece, or
@@ -285,8 +286,32 @@ Round 8 changes:
       (`escortHaul`, ~2.3s round trip; enemy waits ~4.2s to recapture).
 - [x] **Glow dialed down** a touch (grave halo + vengeful/cheated pulses).
 
-Deferred canon: enemy-side entourage/swap, defector coax-back, sound, and a
-decision on whether pep-talk entourage needs a firmer reason.
+### Playtest round 9 (audit follow-ups) — shipped + decisions recorded
+
+- [x] **Disguise** now requires an **active** rook (≥ 6 moves), not a boxed one
+      (David's call — flipped the threshold).
+- [x] **Rage-strike build-up**: a vengeful piece now **pines for its fallen
+      friend** across the turns before it strikes (`pine()` + `mourning` name on
+      the soul + PINING lines), so the strike is a story we've been hearing. It
+      fires as the once-per-turn follow-up beat (after spontaneous chaos, before
+      suggestions), rate-limited.
+- [x] **Missed-window taunt**: tapping a cheated enemy after its reprimand window
+      has closed now gets a gloat ("Too slow!") instead of nothing.
+- [x] **"Captured a guarded piece then trembled" fixed** two ways: (1) a piece
+      **never trembles on the ply it just moved/captured onto** (`s.square !==
+      lastTo`); (2) a **timid enemy piece balks a losing capture** and retreats to
+      safety instead, costing its turn, with a line (`timidBalk`, once/game).
+- [x] **Pep-talk entourage** gated to David's ideas 1 & 2 (endgame **or** an
+      exposed king).
+- [x] **Defector** keeps its black hat for life (confirmed) — set via the
+      `defected` flag, shown persistently by `accessoryOf`, survives promotion.
+
+**DECISIONS on record**: swap = shield-a-valuable-piece **or** give-check only;
+defector only at trust < 33; disguise needs an active rook; entourage needs
+endgame-or-exposed-king; the player may reprimand enemy cheats until their next
+move (multiplayer would let the opponent enforce yours). Open: swap "check in an
+obvious turn or two" is currently immediate-check only; enemy-side entourage/swap
+and defector coax-back still deferred; sound still deferred.
 
 ### Self-play soak (`soak.spec.ts`)
 

@@ -788,7 +788,16 @@ async function runAi() {
 async function engineMove() {
   const best = await engine.bestMove(game.chess.fen(), level.value)
   game.aiThinking = false
-  if (best && !game.gameOver) enqueue(game.aiApply(best), 650)
+  if (best && !game.gameOver) {
+    // A timid enemy piece may lose its nerve and shrink back instead of making a
+    // bad capture (with a line) — no more "capture a guarded piece, then cower".
+    const balk = game.timidBalk(best)
+    if (balk) {
+      enqueue([balk.utterance, ...game.aiApply(balk.move)], 650)
+    } else {
+      enqueue(game.aiApply(best), 650)
+    }
+  }
   bump()
   maybePostGame()
   armIdle()
@@ -797,23 +806,17 @@ async function engineMove() {
 
 // At most ONE follow-up beat per enemy turn, arriving as its own scene a couple
 // of seconds after the move so big moments never land on top of each other: a
-// spontaneous stunt (tantrum / breakout / cold feet / defection), or failing
-// that, a piece volunteering advice. Never both.
+// spontaneous stunt (breakout / cold feet / defection), else a vengeful piece
+// pining for its fallen friend, else a piece volunteering advice. Never several.
 let followUpTimer: ReturnType<typeof setTimeout> | null = null
 function scheduleFollowUp() {
   if (followUpTimer) clearTimeout(followUpTimer)
   followUpTimer = setTimeout(() => {
     followUpTimer = null
     if (game.gameOver) return
-    const sp = game.spontaneousChaos()
-    if (sp) {
-      enqueue([sp])
-      bump()
-      return
-    }
-    const s = game.suggest()
-    if (s) {
-      enqueue([s])
+    const beat = game.spontaneousChaos() ?? game.pine() ?? game.suggest()
+    if (beat) {
+      enqueue([beat])
       bump()
     }
   }, 2600)
