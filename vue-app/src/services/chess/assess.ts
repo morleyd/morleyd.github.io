@@ -5,6 +5,7 @@
  * travel animation.
  */
 import { Chess } from 'chess.js'
+import { opponent } from './types'
 import type { Color, Square } from './types'
 
 export const PIECE_VALUE: Record<string, number> = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 100 }
@@ -26,7 +27,7 @@ export function assessMove(fen: string, from: Square, to: Square): MoveRisk {
     return { gain: 0, risk: 0, hanging: false, sacrifice: false }
   }
   const me = played.color as Color
-  const enemy: Color = me === 'w' ? 'b' : 'w'
+  const enemy = opponent(me)
   const gain = played.captured ? PIECE_VALUE[played.captured] : 0
 
   const attackers = c.attackers(to, enemy)

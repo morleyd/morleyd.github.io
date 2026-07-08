@@ -140,6 +140,7 @@ const remainingCandidates = computed(() =>
 // whole answer bank), so we only compute it when the analysis dialog opens.
 const analysis = ref<GameAnalysis | null>(null)
 const analyzing = ref(false)
+let analysisTimeout: ReturnType<typeof setTimeout> | null = null
 
 watch(analysisDialog, (open) => {
   if (!open) {
@@ -149,7 +150,7 @@ watch(analysisDialog, (open) => {
   // open animation stays smooth instead of freezing on the main-thread compute.
   analyzing.value = true
   analysis.value = null
-  setTimeout(() => {
+  analysisTimeout = setTimeout(() => {
     analysis.value = analyzeGame(
       guesses.value.map((entry) => ({ guess: entry.guess, statuses: entry.statuses })),
       [targetWord.value],
@@ -698,6 +699,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keyup', handlePhysicalKey)
+  if (saveTimeout) clearTimeout(saveTimeout)
+  if (analysisTimeout) clearTimeout(analysisTimeout)
 })
 </script>
 

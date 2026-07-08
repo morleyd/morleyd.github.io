@@ -4,7 +4,7 @@
  * Corners are locked anchors; moves scored vs the optimal (min swaps).
  * Deterministic per seed (shareable). Drag a tile onto another, or tap two.
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import GameToolbar from '@/components/GameToolbar.vue'
 import { copyToClipboard } from '@/services/share'
@@ -163,6 +163,12 @@ const onDown = (i: number) => {
   window.addEventListener('pointermove', onMove)
   window.addEventListener('pointerup', onUp)
 }
+// If the view unmounts mid-drag, onUp never runs — drop the global listeners so
+// they don't outlive the component.
+onBeforeUnmount(() => {
+  window.removeEventListener('pointermove', onMove)
+  window.removeEventListener('pointerup', onUp)
+})
 
 const share = async () => {
   const url = window.location.origin + route.fullPath

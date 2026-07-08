@@ -6,6 +6,7 @@
  */
 import { Chess } from 'chess.js'
 import { PIECE_VALUE } from './assess'
+import { opponent } from './types'
 import type { Color, PieceType, Square } from './types'
 
 const FILES = 'abcdefgh'
@@ -13,8 +14,11 @@ const toSquare = (f: number, r: number): Square => FILES[f] + (r + 1)
 const onBoard = (f: number, r: number) => f >= 0 && f < 8 && r >= 0 && r < 8
 const coords = (s: Square): [number, number] => [s.charCodeAt(0) - 97, Number(s[1]) - 1]
 
-/** Recompute castling rights purely from where the kings and rooks sit. Slightly
- * generous (ignores prior movement history) but always yields a valid FEN. */
+/** The castling rights structurally possible in a position, from where the kings
+ * and rooks sit. This is only an upper bound — rights already lost to move history
+ * can't be read off the board, so `commit` intersects this with the prior rights
+ * rather than trusting it outright (otherwise a stunt could resurrect a right the
+ * side had legally forfeited by moving its king or rook and returning it). */
 function computeCastling(c: Chess): string {
   let s = ''
   const wk = c.get('e1')
@@ -36,16 +40,15 @@ function computeCastling(c: Chess): string {
  * illegal self-check, or a pawn shoved onto a promotion rank) can never leave the
  * live game half-mutated and corrupted.
  */
-const other = (c: Color): Color => (c === 'w' ? 'b' : 'w')
-
-function kingSquare(c: Chess, color: Color): Square | null {
+/** The square `color`'s king stands on, or null. */
+export function kingSquare(c: Chess, color: Color): Square | null {
   for (const row of c.board()) for (const cell of row) if (cell && cell.type === 'k' && cell.color === color) return cell.square
   return null
 }
 /** Is `color`'s king attacked in this position? */
 function sideInCheck(c: Chess, color: Color): boolean {
   const k = kingSquare(c, color)
-  return k ? c.attackers(k, other(color)).length > 0 : false
+  return k ? c.attackers(k, opponent(color)).length > 0 : false
 }
 
 function commit(c: Chess, edited: Chess, turn: Color): boolean {
@@ -53,8 +56,13 @@ function commit(c: Chess, edited: Chess, turn: Color): boolean {
   // their own king exposed (or ignored an existing check), an illegal position.
   // chess.js's FEN validator does NOT catch this, so we must. (This is what let a
   // knight "jetpack" while its king was in check, then hang the game.)
-  if (sideInCheck(edited, other(turn))) return false
-  const fen = `${edited.fen().split(' ')[0]} ${turn} ${computeCastling(edited)} - 0 1`
+  if (sideInCheck(edited, opponent(turn))) return false
+  // Keep only rights the side still holds AND that are structurally intact after
+  // the stunt — never re-grant one lost earlier in the game.
+  const prev = c.fen().split(' ')[2]
+  const structural = computeCastling(edited)
+  const rights = prev === '-' ? '-' : [...prev].filter((ch) => structural.includes(ch)).join('') || '-'
+  const fen = `${edited.fen().split(' ')[0]} ${turn} ${rights} - 0 1`
   try {
     new Chess(fen) // validate without touching `c`
   } catch {
@@ -89,7 +97,7 @@ export function applyChaosMove(
   // turn it currently is — NOT the moved piece's colour (a black piece getting
   // cold feet on White's turn must leave it White's turn).
   const cur = c.turn() as Color
-  const turn: Color = flipTurn ? (cur === 'w' ? 'b' : 'w') : cur
+  const turn: Color = flipTurn ? opponent(cur) : cur
   return commit(c, edited, turn) ? { captured } : null
 }
 
@@ -99,7 +107,7 @@ export function defect(c: Chess, square: Square): boolean {
   if (!p || p.type === 'k') return false
   const edited = new Chess(c.fen())
   edited.remove(square)
-  edited.put({ type: p.type, color: p.color === 'w' ? 'b' : 'w' }, square)
+  edited.put({ type: p.type, color: opponent(p.color) }, square)
   return commit(c, edited, c.turn())
 }
 
@@ -112,7 +120,7 @@ export function knockOff(c: Chess, square: Square, flipTurn = false): boolean {
   const edited = new Chess(c.fen())
   edited.remove(square)
   const cur = c.turn() as Color
-  const turn: Color = flipTurn ? (cur === 'w' ? 'b' : 'w') : cur
+  const turn: Color = flipTurn ? opponent(cur) : cur
   return commit(c, edited, turn)
 }
 
@@ -146,7 +154,7 @@ export function swapPieces(c: Chess, a: Square, b: Square): boolean {
   edited.put({ type: pa.type, color: pa.color }, b)
   edited.put({ type: pb.type, color: pb.color }, a)
   const cur = c.turn() as Color
-  return commit(c, edited, cur === 'w' ? 'b' : 'w')
+  return commit(c, edited, opponent(cur))
 }
 
 /** The pep-talk entourage: the king and his adjacent allies all shuffle one
@@ -187,7 +195,7 @@ export function entourageShift(c: Chess, kingSq: Square, to: Square): { from: Sq
   if (!moves.some((m) => m.from === kingSq)) return null // the king must lead
   if (moves.length < 2) return null // no entourage came — not a rally
   const cur = c.turn() as Color
-  return commit(c, edited, cur === 'w' ? 'b' : 'w') ? moves : null
+  return commit(c, edited, opponent(cur)) ? moves : null
 }
 
 /** Material balance in points, positive = White ahead. */

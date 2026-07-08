@@ -45,10 +45,10 @@ import {
   swapPieces,
 } from './chaos'
 import { DEFAULT_SETTINGS, DEFAULT_TRUST, type WizardSettings } from './settings'
+import { opponent } from './types'
 import type { Color, GameEvent, MoveEntry, PieceSoul, PieceType, Square, Utterance } from './types'
 
 export const PLAYER: Color = 'w'
-const opp = (c: Color): Color => (c === 'w' ? 'b' : 'w')
 const nowMs = () => Date.now()
 
 export type AnimClass = 'tremble' | 'bob' | 'angry' | 'joy'
@@ -111,6 +111,8 @@ interface Snapshot {
   usedStunts: string[]
   spooked: { soulId: string; home: Square; until: number; kind: 'fled' | 'wayward' } | null
   spontaneousCount: number
+  lastPinePly: number
+  cheat: { soulId: string; home: Square; to: Square; victimId: string | null; until: number } | null
 }
 
 /** How many taps a piece demands before it will make a given move. */
@@ -194,11 +196,14 @@ export class WizardGame {
         usedStunts: [...this.usedStunts],
         spooked: this.spooked,
         spontaneousCount: this.spontaneousCount,
+        lastPinePly: this.lastPinePly,
+        cheat: this.cheat,
       }),
     )
   }
-  private applySnapshot(snap: Snapshot) {
-    const s: Snapshot = JSON.parse(JSON.stringify(snap)) // fresh copy so redo can reuse the stored one
+  // Callers (undo/redo) hand over a snapshot they've already popped off its
+  // stack, so the live game can take ownership of it directly — no extra clone.
+  private applySnapshot(s: Snapshot) {
     this.chess = new Chess(s.fen)
     this.society = s.society
     this.lastFrom = s.lastFrom
@@ -214,6 +219,8 @@ export class WizardGame {
     this.usedStunts = new Set(s.usedStunts)
     this.spooked = s.spooked
     this.spontaneousCount = s.spontaneousCount
+    this.lastPinePly = s.lastPinePly
+    this.cheat = s.cheat
     // Transient interaction/animation state never survives a jump.
     this.selected = null
     this.resist = null
@@ -424,7 +431,7 @@ export class WizardGame {
       // Tremble: under attack AND (cowardly, or completely exposed) — and never
       // for the reckless/bold, nor for the piece that JUST moved/captured onto
       // this square (cowering the instant after a bold capture reads as a bug).
-      const attackers = this.chess.attackers(s.square, opp(s.color)).length
+      const attackers = this.chess.attackers(s.square, opponent(s.color)).length
       if (attackers > 0 && !reckless && s.square !== this.lastTo) {
         const defenders = this.chess.attackers(s.square, s.color).length
         const cowardly = bravery < 0.4
@@ -489,10 +496,7 @@ export class WizardGame {
     this.lastFrom = move.from
     this.lastTo = move.to
     this.lastMoverId = moverId ?? null
-    const mover = move.color as Color
-    const atk = this.chess.attackers(move.to, opp(mover)).length
-    const def = this.chess.attackers(move.to, mover).length
-    this.lastMoveRisky = atk > 0 && def < atk
+    this.lastMoveRisky = this.hangingOn(this.chess, move.to, move.color as Color)
 
     const said = speak(
       this.society,
@@ -739,7 +743,7 @@ export class WizardGame {
   /** Is the piece on `sq` hanging — attacked by the enemy with fewer defenders
    * than attackers (i.e. it'd come off worse in the exchange)? */
   private hangingOn(c: Chess, sq: Square, color: Color): boolean {
-    const atk = c.attackers(sq, opp(color)).length
+    const atk = c.attackers(sq, opponent(color)).length
     const def = c.attackers(sq, color).length
     return atk > 0 && def < atk
   }
@@ -794,7 +798,7 @@ export class WizardGame {
     // A stunt is only *offered* at a dramatic moment: it captures, gives check, or
     // the piece is escaping an attack on its own square. Idle repositioning never
     // triggers an offer — so chaos reads as a real turning point, not noise.
-    const underAttack = this.chess.attackers(from, opp(PLAYER)).length > 0
+    const underAttack = this.chess.attackers(from, opponent(PLAYER)).length > 0
     const build = (type: ChaosType, situational: boolean, gen: () => Square[]): ChaosOffer | null => {
       if (this.usedStunts.has(type) || !situational) return null
       if (this.rng() >= this.settings.chaos) return null // chaos = probability of offering when eligible
@@ -841,8 +845,8 @@ export class WizardGame {
         for (const row of this.chess.board()) for (const cell of row) if (cell) pieceCount += 1
         const endgame = pieceCount <= 12
         const exposed =
-          this.chess.attackers(from, opp(PLAYER)).length > 0 ||
-          adjacentSquares(from).some((a) => this.chess.attackers(a, opp(PLAYER)).length > 0)
+          this.chess.attackers(from, opponent(PLAYER)).length > 0 ||
+          adjacentSquares(from).some((a) => this.chess.attackers(a, opponent(PLAYER)).length > 0)
         if (endgame || exposed) {
           const targets = adjacentSquares(from).filter(
             (to) => !this.chess.get(to) && !!entourageShift(new Chess(fen), from, to),
@@ -1040,7 +1044,9 @@ export class WizardGame {
     // Snapshot BEFORE the stunt so the player can take it back — a breakout or a
     // retreat is undoable right up until they make their own next move (after
     // which reverting it means undoing that move too). Discard the restore point
-    // if nothing actually happened.
+    // if nothing actually happened — and put back the redo stack checkpoint()
+    // clears, since a no-op must leave undo/redo exactly as it found them.
+    const savedFuture = this.future
     this.checkpoint()
     const u = this.breakout() ?? this.coldFeet() ?? this.defector()
     if (u) {
@@ -1048,6 +1054,7 @@ export class WizardGame {
       return u
     }
     this.history.pop()
+    this.future = savedFuture
     return null
   }
   private spontaneousCount = 0
@@ -1198,7 +1205,7 @@ export class WizardGame {
       const rank = Number(sq[1])
       const back = s.color === 'w' ? rank - 1 : rank + 1
       if (back < 1 || back > 8) continue
-      if (this.chess.attackers(sq, opp(s.color)).length === 0) continue
+      if (this.chess.attackers(sq, opponent(s.color)).length === 0) continue
       const behind = (sq[0] + back) as Square
       if (this.chess.get(behind)) continue
       if (this.rng() >= this.settings.chaos) continue

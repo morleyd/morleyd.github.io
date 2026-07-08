@@ -4,6 +4,9 @@ export type PieceType = 'p' | 'n' | 'b' | 'r' | 'q' | 'k'
 export type Color = 'w' | 'b'
 export type Square = string // e.g. "e4"
 
+/** The opposing colour. */
+export const opponent = (c: Color): Color => (c === 'w' ? 'b' : 'w')
+
 /** A concrete engine move request/response. */
 export interface EngineMove {
   from: Square

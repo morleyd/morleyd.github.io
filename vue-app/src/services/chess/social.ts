@@ -11,7 +11,9 @@
  */
 import type { Chess } from 'chess.js'
 import { strToSeed } from '../seed'
+import { PIECE_VALUE } from './assess'
 import { ROSTER, BELOVED, DISLIKED } from './profiles'
+import { opponent } from './types'
 import type { PieceSoul, GameEvent, Color, PieceType, Square, Persona } from './types'
 
 type Rng = () => number
@@ -22,8 +24,6 @@ export interface Society {
   ply: number
 }
 
-const VALUE: Record<PieceType, number> = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 100 }
-const opp = (c: Color): Color => (c === 'w' ? 'b' : 'w')
 const clamp = (v: number) => Math.max(0, Math.min(1, v))
 const clampBond = (v: number) => Math.max(-1, Math.min(1, v))
 
@@ -172,7 +172,7 @@ export function applyMove(society: Society, move: MoveInfo): GameEvent[] {
         mover.mood.fear = clamp(mover.mood.fear - 0.2)
         mover.mood.anger = clamp(mover.mood.anger - 0.15)
         // Joy only spikes into a visible celebration for a big scalp.
-        mover.mood.joy = clamp(mover.mood.joy + (VALUE[victim.type] >= 5 ? 0.7 : 0.3))
+        mover.mood.joy = clamp(mover.mood.joy + (PIECE_VALUE[victim.type] >= 5 ? 0.7 : 0.3))
         events.push({ kind: 'capture', soulId: moverId, otherId: victimId, salience: 60 })
 
         // The victim's comrades take it personally — grudge + anger toward the
@@ -267,7 +267,7 @@ export function scanBoard(society: Society, chess: Chess): GameEvent[] {
   for (const s of Object.values(society.souls)) {
     if (s.captured || !s.square) continue
     const prevFear = s.mood.fear
-    const attackers = chess.attackers(s.square, opp(s.color))
+    const attackers = chess.attackers(s.square, opponent(s.color))
     const defenders = chess.attackers(s.square, s.color)
 
     if (attackers.length > 0) {
@@ -275,7 +275,7 @@ export function scanBoard(society: Society, chess: Chess): GameEvent[] {
       s.mood.fear = clamp(s.mood.fear + (underDefended ? 0.28 : 0.1) * (1 - (s.persona.bravery ?? 0.5)))
       if (underDefended) {
         // A trembling queen is funnier than a trembling pawn — weight by value.
-        events.push({ kind: 'threatened', soulId: s.id, salience: 34 + VALUE[s.type] })
+        events.push({ kind: 'threatened', soulId: s.id, salience: 34 + PIECE_VALUE[s.type] })
       }
     } else {
       s.mood.fear = clamp(s.mood.fear - 0.2)

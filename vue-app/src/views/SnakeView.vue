@@ -58,6 +58,7 @@ const placeFood = (snk: Cell[] = snake.value) => {
 }
 
 const reset = () => {
+  stopTimer() // any in-flight tick (e.g. from a live game being resized) must stop
   const c = Math.floor(size.value / 2)
   snake.value = [
     { x: c, y: c },

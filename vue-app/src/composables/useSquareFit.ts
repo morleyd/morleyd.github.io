@@ -31,6 +31,8 @@ export function useSquareFit(reserveBottom = 80) {
   }
 
   const onResize = () => recompute()
+  // Re-measure once more after the rotation settles (the address bar animates).
+  const onOrient = () => setTimeout(recompute, 300)
   const vv = window.visualViewport
 
   onMounted(() => {
@@ -41,13 +43,14 @@ export function useSquareFit(reserveBottom = 80) {
     setTimeout(recompute, 500)
     window.addEventListener('resize', onResize)
     window.addEventListener('orientationchange', onResize)
-    window.addEventListener('orientationchange', () => setTimeout(recompute, 300))
+    window.addEventListener('orientationchange', onOrient)
     vv?.addEventListener('resize', onResize)
     vv?.addEventListener('scroll', onResize)
   })
   onBeforeUnmount(() => {
     window.removeEventListener('resize', onResize)
     window.removeEventListener('orientationchange', onResize)
+    window.removeEventListener('orientationchange', onOrient)
     vv?.removeEventListener('resize', onResize)
     vv?.removeEventListener('scroll', onResize)
   })

@@ -12,6 +12,7 @@ import { useRoute, useRouter } from 'vue-router'
 import GameToolbar from '@/components/GameToolbar.vue'
 import { copyToClipboard } from '@/services/share'
 import { randomSeed } from '@/services/seed'
+import { kingSquare } from '@/services/chess/chaos'
 import { Engine } from '@/services/chess/engine'
 import { WizardGame, type StuntFx } from '@/services/chess/game'
 import { TYPE_NAME } from '@/services/chess/profiles'
@@ -281,7 +282,7 @@ const SLOTS: { x: number; y: number }[] = (() => {
 const graveLayout = computed(() => {
   version.value
   const used = new Set<number>()
-  const out: { id: string; type: PieceType; color: Color; x: number; y: number; name: string }[] = []
+  const out: { id: string; type: PieceType; color: Color; x: number; y: number; name: string; diedAt: Square; fromX: number; fromY: number }[] = []
   for (const f of game.fallen()) {
     if (!f.diedAt) continue
     const d = framePos(f.diedAt)
@@ -299,7 +300,7 @@ const graveLayout = computed(() => {
     }
     if (best < 0) continue
     used.add(best)
-    out.push({ id: f.id, type: f.type, color: f.color, name: f.name, x: SLOTS[best].x, y: SLOTS[best].y })
+    out.push({ id: f.id, type: f.type, color: f.color, name: f.name, x: SLOTS[best].x, y: SLOTS[best].y, diedAt: f.diedAt, fromX: d.x, fromY: d.y })
   }
   return out
 })
@@ -336,13 +337,11 @@ function cancelTransit(id: string) {
   transits.value = transits.value.filter((t) => t.id !== id)
 }
 function beginTransit(id: string) {
-  const f = game.fallen().find((x) => x.id === id)
-  const slot = graveSlotOf(id)
-  if (!f || !f.diedAt || !slot) return
-  const from = framePos(f.diedAt)
+  const slot = graveSlotOf(id) // the cached layout already knows death square + slot
+  if (!slot) return
   // Whoever just moved onto the victim's square is the one hauling it off.
-  const tuggerId = game.lastMoverId && game.society.souls[game.lastMoverId]?.square === f.diedAt ? game.lastMoverId : null
-  const t: Transit = { id, tuggerId, type: f.type, color: f.color, fromX: from.x, fromY: from.y, toX: slot.x, toY: slot.y, phase: 'hold' }
+  const tuggerId = game.lastMoverId && game.society.souls[game.lastMoverId]?.square === slot.diedAt ? game.lastMoverId : null
+  const t: Transit = { id, tuggerId, type: slot.type, color: slot.color, fromX: slot.fromX, fromY: slot.fromY, toX: slot.x, toY: slot.y, phase: 'hold' }
   transits.value = [...transits.value, t]
   const timers = [
     setTimeout(() => {
@@ -484,9 +483,7 @@ const thinking = computed(() => (version.value, game.aiThinking))
 const checkSquare = computed<Square | null>(() => {
   version.value
   if (!game.chess.isCheck()) return null
-  const turn = game.chess.turn()
-  for (const c of game.chess.board().flat()) if (c && c.type === 'k' && c.color === turn) return c.square
-  return null
+  return kingSquare(game.chess, game.chess.turn())
 })
 const selectedName = computed(() => {
   const sq = selectedSquare.value
@@ -712,6 +709,18 @@ function endPress() {
 }
 
 // ── Turn flow ────────────────────────────────────────────────────────────
+// The enemy's scheduled move + staged stunt-commit are timers, so a New Game,
+// an undo, or unmount can leave one armed. Tracked here so those transitions can
+// cancel a pending enemy turn — otherwise it fires on the fresh/rewound board (a
+// ghost move) or reaches into a disposed engine.
+let aiTimer: ReturnType<typeof setTimeout> | null = null
+let commitTimer: ReturnType<typeof setTimeout> | null = null
+let alive = true
+function cancelAiTurn() {
+  if (aiTimer) clearTimeout(aiTimer)
+  if (commitTimer) clearTimeout(commitTimer)
+  aiTimer = commitTimer = null
+}
 function onSquare(square: Square) {
   if (suppressClick) {
     suppressClick = false
@@ -742,7 +751,7 @@ function onSquare(square: Square) {
     // back (~3.3s) plus a beat settled on its square, before the enemy marches in
     // to drag IT off in turn.
     const captured = game.graveyard.length > graveBefore
-    window.setTimeout(runAi, captured ? 4200 : 420)
+    aiTimer = window.setTimeout(runAi, captured ? 4200 : 420)
   }
 }
 
@@ -756,6 +765,7 @@ function maybePostGame() {
 }
 
 async function runAi() {
+  aiTimer = null
   if (game.gameOver) return
   game.aiThinking = true
   bump()
@@ -767,7 +777,8 @@ async function runAi() {
     enqueue([plan.announce], 400)
     stuntMark({ kind: 'telegraph', from: null, to: plan.from })
     bump()
-    window.setTimeout(() => {
+    commitTimer = window.setTimeout(() => {
+      commitTimer = null
       const lines = game.aiChaosCommit(plan)
       if (!lines.length) {
         void engineMove() // the plan died on an illegal position — play it straight
@@ -787,6 +798,7 @@ async function runAi() {
 
 async function engineMove() {
   const best = await engine.bestMove(game.chess.fen(), level.value)
+  if (!alive) return // the view unmounted while the worker was thinking
   game.aiThinking = false
   if (best && !game.gameOver) {
     // A timid enemy piece may lose its nerve and shrink back instead of making a
@@ -826,7 +838,10 @@ function scheduleFollowUp() {
 const syncUrl = () => router.replace({ name: 'wizard-chess', params: { seed: `${level.value}.${code.value}` } })
 function start(fen?: string) {
   game.reset(code.value, fen)
+  cancelAiTurn() // a pending enemy turn must not land on the fresh board
   clearBanter()
+  cueTimers.forEach((t) => clearTimeout(t))
+  cueTimers.clear()
   cueMap.value = {}
   stuntFx.value = null
   if (fxTimer) clearTimeout(fxTimer)
@@ -864,7 +879,11 @@ const canUndo = computed(() => (version.value, canPlay.value && game.canUndo))
 const canRedo = computed(() => (version.value, canPlay.value && game.canRedo))
 function afterJump() {
   // Tear down every in-flight animation/timer — the board just teleported.
+  cancelAiTurn() // a pending enemy turn belongs to the timeline we just left
   clearBanter()
+  cueTimers.forEach((t) => clearTimeout(t))
+  cueTimers.clear()
+  cueMap.value = {}
   stuntFx.value = null
   if (fxTimer) clearTimeout(fxTimer)
   lastFxSeq = game.fx ? game.fx.seq : -1
@@ -909,6 +928,8 @@ onMounted(() => {
   start(fen)
 })
 onBeforeUnmount(() => {
+  alive = false
+  cancelAiTurn()
   engine.dispose()
   clearBanter()
   if (idleTimer) clearTimeout(idleTimer)
@@ -1903,6 +1924,7 @@ onBeforeUnmount(() => {
   pointer-events: auto; /* tappable to dismiss */
   cursor: pointer;
   animation: pop 0.16s ease-out;
+  isolation: isolate; /* own stacking context so the tail can sit behind the text */
 }
 .tone-gloat { --tone: #fbbf24; }
 .tone-sad { --tone: #94a3b8; }
@@ -1911,7 +1933,9 @@ onBeforeUnmount(() => {
 .tone-warm,
 .tone-joy { --tone: #4ade80; }
 .tone-calm { --tone: #c084fc; }
-/* Tail pointing down at the speaker; matches the dark card + tone edge. */
+/* Tail pointing down at the speaker; matches the dark card + tone edge. The
+   diamond's upper half overlaps the card, so it sits BEHIND the text (z-index)
+   to keep the last line legible — its lower half still shows below the card. */
 .bubble::after {
   content: '';
   position: absolute;
@@ -1924,6 +1948,7 @@ onBeforeUnmount(() => {
   border-right: 1.5px solid var(--tone, #fbbf24);
   border-bottom: 1.5px solid var(--tone, #fbbf24);
   border-radius: 0 0 3px 0;
+  z-index: -1;
 }
 @keyframes pop {
   from {
