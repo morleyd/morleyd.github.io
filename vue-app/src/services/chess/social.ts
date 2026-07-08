@@ -89,6 +89,7 @@ export function createSociety(chess: Chess, rng: Rng): Society {
         mood: { impatience: 0, fear: 0, anger: 0, confidence: 0.4, joy: 0.35 },
         diedAt: null,
         idleFor: 0,
+        rants: 0,
         kills: 0,
         bonds: {},
         avenging: null,
@@ -213,6 +214,7 @@ export function applyMove(society: Society, move: MoveInfo): GameEvent[] {
     society.bySquare[to] = moverId
     mover.square = to
     mover.idleFor = 0
+    mover.rants = 0 // it got to move — no more grievance about being left behind
     mover.mood.impatience = 0
     if (flags.includes('p')) {
       mover.type = promotion ?? 'q'
@@ -286,8 +288,11 @@ export function scanBoard(society: Society, chess: Chess): GameEvent[] {
     }
 
     // The restless-rook arc: escalating impatience once a piece has been idle.
+    // Each ply spent audibly complaining bumps its rant tally — a breakout only
+    // pays off a grievance the player has actually heard a few times.
     if (s.mood.impatience > 0.5 && s.idleFor >= 4) {
       const level = s.mood.impatience > 0.85 ? 3 : s.mood.impatience > 0.68 ? 2 : 1
+      s.rants += 1
       events.push({ kind: 'impatient', soulId: s.id, salience: 18 + level * 7, data: { level } })
     }
   }

@@ -195,6 +195,28 @@ David's notes, all addressed:
 
 The **tantrum** removal and **no trust-reset** decisions from round 3 stand.
 
+### Playtest round 5 (breakout discipline, undo scope, rope physics, purple/gold) — shipped
+
+- [x] **Breakout only when earned.** No longer fires in the opening: requires
+      `ply ≥ 16`, the piece's own side to be **deployed** (≥2 non-pawn pieces off
+      the back rank), and — the key ask — that the piece has **complained out
+      loud a few times** first. New per-soul `rants` counter bumps each ply it
+      voices impatience (reset when it finally moves); breakout needs `rants ≥ 4`.
+- [x] **Undo covers chaotic events.** Spontaneous stunts (breakout / cold-feet /
+      defect) now snapshot before firing, so the player can take them back — right
+      up until they make their own next move, after which reverting means undoing
+      that move too (the normal stack behaviour). Enemy stunts revert with the
+      move they answered.
+- [x] **Rope + wobble physics restored** on the edge haul: the dragged piece
+      **tumbles and lurches** (`haulWobble`) on a **taut rope** that points the way
+      it's being yanked (`--rope-angle` toward its slot) — the "being pulled" feel
+      David liked, now on the short edge drag.
+- [x] **Board themed to the app palette.** Green → **muted purple** dark squares
+      + **warm gold parchment** light squares; the frame is a deep-purple panel
+      with a gold hairline so the gutter has colour; each resting casualty sits on
+      a gold-ringed chip so **black pieces no longer vanish** into the dark edge.
+- [x] **Tap a speech bubble to dismiss it** (bubbles are now interactive).
+
 Deferred canon: enemy-side entourage/swap, defector coax-back, sound.
 
 ### Self-play soak (`soak.spec.ts`)

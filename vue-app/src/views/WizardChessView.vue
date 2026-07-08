@@ -366,10 +366,13 @@ function clearGraveyardFx() {
 const graveStyle = (g: { x: number; y: number }) => ({ left: `${g.x}%`, top: `${g.y}%` })
 const transitStyle = (t: Transit) => {
   const dragging = t.phase === 'drag'
+  // The rope points the way the piece is being yanked — toward its edge slot.
+  const angle = (Math.atan2(t.toY - t.fromY, t.toX - t.fromX) * 180) / Math.PI
   return {
     left: `${dragging ? t.toX : t.fromX}%`,
     top: `${dragging ? t.toY : t.fromY}%`,
     '--drag-ms': `${DRAG_MS}ms`,
+    '--rope-angle': `${angle}deg`,
   }
 }
 
@@ -1014,8 +1017,15 @@ onBeforeUnmount(() => {
                   :alt="`${p.colorClass} ${TYPE_NAME[p.type]}`"
                   draggable="false"
                 />
-                <!-- speech bubble, pinned to the speaking piece -->
-                <div v-if="bubbleFor(p.id)" class="bubble" :class="'tone-' + bubbleFor(p.id)!.tone">
+                <!-- speech bubble, pinned to the speaking piece; tap to dismiss -->
+                <div
+                  v-if="bubbleFor(p.id)"
+                  class="bubble"
+                  :class="'tone-' + bubbleFor(p.id)!.tone"
+                  title="Tap to dismiss"
+                  @click.stop="clearBubble(p.id)"
+                  @pointerdown.stop
+                >
                   {{ bubbleFor(p.id)!.text }}
                 </div>
                 <!-- stunt accessories: worn while an offer is up or the FX lingers -->
@@ -1077,6 +1087,7 @@ onBeforeUnmount(() => {
               :class="[t.color === 'w' ? 'ours' : 'theirs', t.phase]"
               :style="transitStyle(t)"
             >
+              <span class="haul-rope"></span>
               <img :src="imgOf(t.color, t.type)" :alt="TYPE_NAME[t.type]" draggable="false" />
             </span>
           </div>
@@ -1196,13 +1207,21 @@ onBeforeUnmount(() => {
 }
 
 /* The frame is the square sizing box; it reserves an 8% gutter all round for the
-   edge graveyard. The board itself is inset into the middle. */
+   edge graveyard. Themed to the app's palette — a deep purple panel with a gold
+   hairline — so the gutter has colour and the fallen (black ones especially)
+   don't vanish into the dark background. */
 .board-frame {
   position: relative;
   width: 100%;
   max-width: min(82vh, 600px);
   aspect-ratio: 1 / 1;
   margin: 0 auto;
+  padding: 0;
+  border-radius: 16px;
+  background: radial-gradient(circle at 50% 35%, #2c1e52 0%, #1a1330 78%);
+  box-shadow:
+    inset 0 0 0 1px rgba(250, 204, 21, 0.28),
+    0 10px 34px rgba(2, 6, 23, 0.5);
 }
 .board {
   position: absolute;
@@ -1211,12 +1230,15 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: repeat(8, 1fr);
   grid-template-rows: repeat(8, 1fr);
-  border-radius: 8px;
+  border-radius: 6px;
   overflow: visible;
-  box-shadow: 0 8px 30px rgba(2, 6, 23, 0.45);
+  box-shadow:
+    0 0 0 2px rgba(250, 204, 21, 0.45),
+    0 6px 22px rgba(2, 6, 23, 0.5);
   user-select: none;
 }
-/* Resting fallen: out in the gutters, below the board layer. */
+/* Resting fallen: out in the gutters, below the board layer. Each sits on a
+   soft gold-ringed chip so both colours read against the purple panel. */
 .graves {
   position: absolute;
   inset: 0;
@@ -1229,8 +1251,14 @@ onBeforeUnmount(() => {
   height: 9%;
   transform: translate(-50%, -50%);
   object-fit: contain;
-  opacity: 0.9;
-  filter: grayscale(0.4) drop-shadow(0 1px 1px rgba(0, 0, 0, 0.5));
+  padding: 1%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(233, 226, 199, 0.22) 62%, transparent 70%);
+  box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.32);
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
+}
+.grave-piece.theirs {
+  background: radial-gradient(circle, rgba(216, 180, 254, 0.26) 62%, transparent 70%);
 }
 /* Hauling casualty: above the board so the short drag to the edge is visible. */
 .transit-layer {
@@ -1261,7 +1289,29 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   object-fit: contain;
-  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.5));
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.6));
+}
+/* Being hauled: the piece tumbles and lurches on the rope so it reads as
+   physically dragged, not slid on rails. */
+.grave-transit.drag img {
+  animation: haulWobble var(--drag-ms, 650ms) ease-in-out;
+}
+@keyframes haulWobble {
+  0% {
+    transform: rotate(0deg) translateY(0);
+  }
+  22% {
+    transform: rotate(-15deg) translateY(6%);
+  }
+  50% {
+    transform: rotate(11deg) translateY(-4%);
+  }
+  74% {
+    transform: rotate(-8deg) translateY(3%);
+  }
+  100% {
+    transform: rotate(4deg) translateY(0);
+  }
 }
 /* a lasso loop around the piece being hauled off */
 .grave-transit::before {
@@ -1271,26 +1321,45 @@ onBeforeUnmount(() => {
   top: 34%;
   width: 76%;
   height: 30%;
-  border: 3px solid #b45309;
+  border: 3px solid #d97706;
   border-radius: 50%;
+  z-index: 1;
 }
+/* the taut rope, pointing the way the piece is being yanked (toward its slot) */
+.haul-rope {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 120%;
+  height: 4px;
+  transform-origin: 0 50%;
+  transform: rotate(var(--rope-angle, 0deg));
+  background: repeating-linear-gradient(90deg, #d97706 0 6px, #92400e 6px 12px);
+  opacity: 0;
+  border-radius: 2px;
+}
+.grave-transit.drag .haul-rope {
+  opacity: 0.95;
+}
+/* Board palette: warm gold parchment + muted purple, matching the app's
+   purple/gold theme (green replaced). */
 .sq {
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #eeeed2;
+  background: #efe3c0;
   cursor: pointer;
 }
 .sq.dark {
-  background: #6f9654;
+  background: #6b5498;
 }
 .sq.sel {
   box-shadow: inset 0 0 0 3px #facc15;
 }
 .sq.from,
 .sq.to {
-  background-image: linear-gradient(rgba(250, 204, 21, 0.4), rgba(250, 204, 21, 0.4));
+  background-image: linear-gradient(rgba(250, 204, 21, 0.42), rgba(250, 204, 21, 0.42));
 }
 .dot {
   width: 26%;
@@ -1696,7 +1765,8 @@ onBeforeUnmount(() => {
   color: #0f172a;
   background: #fef9c3;
   box-shadow: 0 4px 14px rgba(2, 6, 23, 0.45);
-  pointer-events: none;
+  pointer-events: auto; /* tappable to dismiss */
+  cursor: pointer;
   animation: pop 0.16s ease-out;
 }
 .tone-gloat { background: #fde68a; }
@@ -1889,6 +1959,7 @@ onBeforeUnmount(() => {
   .stunt-label,
   .acc-flame,
   .acc-banner,
+  .grave-transit.drag img,
   .endgame {
     animation: none !important;
   }

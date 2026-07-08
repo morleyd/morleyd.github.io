@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { WizardGame } from './game'
+import type { Square } from './types'
 
 describe('WizardGame interaction', () => {
   it('selects a piece and then moves it to a legal square', () => {
@@ -225,13 +226,24 @@ describe('WizardGame interaction', () => {
     expect(g.fallen().some((f) => f.type === 'p')).toBe(true) // the victim is in the box
   })
 
+  // A middlegame board: rook boxed at a1, but the side is deployed (Bc4, Nf4).
+  const BREAKOUT_FEN = '4k3/8/8/8/2B2N2/8/P7/R3K3 w - - 0 1'
+  // Nudge a soul into the "earned a breakout" state: long-idle, loudly ranting,
+  // and the game is past the opening.
+  const primeBreakout = (g: WizardGame, sq: Square) => {
+    g.settings.chaos = 1
+    g.society.ply = 20 // middlegame
+    const s = g.soulAt(sq)!
+    s.idleFor = 20
+    s.mood.impatience = 1
+    s.rants = 6 // it has complained a good few times
+    return s
+  }
+
   it('charges a long-idle piece up its file, shoving or trampling its pawn', () => {
     const g = new WizardGame('breakout')
-    g.reset('breakout', '4k3/8/8/8/8/8/P7/R3K3 w - - 0 1') // white rook a1 boxed by pawn a2
-    g.settings.chaos = 1
-    const rook = g.soulAt('a1')!
-    rook.idleFor = 20 // stuck for ages...
-    rook.mood.impatience = 1 // ...and the player has heard it ranting about it
+    g.reset('breakout', BREAKOUT_FEN)
+    primeBreakout(g, 'a1')
 
     const line = g.spontaneousChaos()
     expect(line).toBeTruthy()
@@ -253,35 +265,26 @@ describe('WizardGame interaction', () => {
   })
 
   it('never tramples the PLAYER\'s own pawn, and never breaks a castling rook', () => {
-    // Boxed in with zero runway (own knight right above the pawn): a player
-    // piece will NOT smash its own pawn to get out.
+    // Boxed in with zero runway (own knight right above the pawn) — but deployed
+    // elsewhere (Bc4): a player piece will NOT smash its own pawn to get out.
     const boxed = new WizardGame('breakout-boxed')
-    boxed.reset('breakout-boxed', '4k3/8/8/8/8/N7/P7/R3K3 w - - 0 1')
-    boxed.settings.chaos = 1
-    const r1 = boxed.soulAt('a1')!
-    r1.idleFor = 20
-    r1.mood.impatience = 1
+    boxed.reset('breakout-boxed', '4k3/8/8/8/2B5/N7/P7/R3K3 w - - 0 1')
+    primeBreakout(boxed, 'a1')
     expect(boxed.spontaneousChaos()).toBeNull()
     expect(boxed.chess.get('a2')?.type).toBe('p') // pawn untouched
 
     // A rook the king could still castle with stays put, no matter how bored.
     const castle = new WizardGame('breakout-castle')
-    castle.reset('breakout-castle', '4k3/8/8/8/8/8/P7/R3K3 w Q - 0 1') // Q right live
-    castle.settings.chaos = 1
-    const r2 = castle.soulAt('a1')!
-    r2.idleFor = 20
-    r2.mood.impatience = 1
+    castle.reset('breakout-castle', '4k3/8/8/8/2B2N2/8/P7/R3K3 w Q - 0 1') // Q right live
+    primeBreakout(castle, 'a1')
     expect(castle.spontaneousChaos()).toBeNull()
     expect(castle.chess.get('a1')?.type).toBe('r')
   })
 
   it('a wayward breakout piece can be coaxed back to its post', () => {
     const g = new WizardGame('breakout-coax')
-    g.reset('breakout-coax', '4k3/8/8/8/8/8/P7/R3K3 w - - 0 1')
-    g.settings.chaos = 1
-    const rook = g.soulAt('a1')!
-    rook.idleFor = 20
-    rook.mood.impatience = 1
+    g.reset('breakout-coax', BREAKOUT_FEN)
+    const rook = primeBreakout(g, 'a1')
     expect(g.spontaneousChaos()).toBeTruthy()
     const dest = rook.square as string
     expect(dest).not.toBe('a1')
@@ -293,14 +296,32 @@ describe('WizardGame interaction', () => {
     expect(g.chess.get('a1')?.type).toBe('r') // back at its post
   })
 
-  it('keeps quiet pieces from breaking out — the rant must come first', () => {
-    const g = new WizardGame('breakout-quiet')
-    g.reset('breakout-quiet', '4k3/8/8/8/8/8/P7/R3K3 w - - 0 1')
-    g.settings.chaos = 1
-    const rook = g.soulAt('a1')!
-    rook.idleFor = 20
-    rook.mood.impatience = 0.2 // long-idle but hasn't been complaining
-    expect(g.spontaneousChaos()).toBeNull()
+  it('lets the player undo a spontaneous breakout', () => {
+    const g = new WizardGame('breakout-undo')
+    g.reset('breakout-undo', BREAKOUT_FEN)
+    primeBreakout(g, 'a1')
+    expect(g.spontaneousChaos()).toBeTruthy()
+    expect(g.chess.get('a1')).toBeFalsy()
+    expect(g.canUndo).toBe(true)
+    g.undo()
+    expect(g.chess.get('a1')?.type).toBe('r') // charger back in its corner
+    expect(g.chess.get('a2')?.type).toBe('p') // pawn back where it was
+  })
+
+  it('holds a breakout until the piece has ranted, deployed, and left the opening', () => {
+    // Everything primed EXCEPT the rant count → no eruption (must complain first).
+    const quiet = new WizardGame('breakout-quiet')
+    quiet.reset('breakout-quiet', BREAKOUT_FEN)
+    const r = primeBreakout(quiet, 'a1')
+    r.rants = 1 // barely grumbled
+    expect(quiet.spontaneousChaos()).toBeNull()
+
+    // Fully ranted but still the opening (ply < 16) → still no eruption.
+    const early = new WizardGame('breakout-early')
+    early.reset('breakout-early', BREAKOUT_FEN)
+    primeBreakout(early, 'a1')
+    early.society.ply = 6
+    expect(early.spontaneousChaos()).toBeNull()
   })
 
   it('never lets the enemy stunt in the opening, and only for a capture', () => {

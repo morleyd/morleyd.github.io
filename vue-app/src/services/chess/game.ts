@@ -895,9 +895,18 @@ export class WizardGame {
     // circus, not seasoning. (Offered stunts are the player's choice; only the
     // uninvited kind is capped here.)
     if (this.spontaneousCount >= 2) return null
+    // Snapshot BEFORE the stunt so the player can take it back — a breakout or a
+    // retreat is undoable right up until they make their own next move (after
+    // which reverting it means undoing that move too). Discard the restore point
+    // if nothing actually happened.
+    this.checkpoint()
     const u = this.breakout() ?? this.coldFeet() ?? this.defector()
-    if (u) this.spontaneousCount += 1
-    return u
+    if (u) {
+      this.spontaneousCount += 1
+      return u
+    }
+    this.history.pop()
+    return null
   }
   private spontaneousCount = 0
 
@@ -925,15 +934,33 @@ export class WizardGame {
    * wayward charger can be coaxed back to its post. */
   private breakout(): Utterance | null {
     if (this.usedStunts.has('breakout')) return null
+    if (this.society.ply < 16) return null // never in the opening — this is a middlegame beat
     const castling = this.chess.fen().split(' ')[2]
-    // Only a piece whose impatience the player has *heard* (the escalating
-    // rant lines fire from ~0.68) gets to erupt — the charge pays off a story
-    // the player was already following, instead of arriving from nowhere.
+    // A piece only erupts once it has genuinely earned it: it has been left behind
+    // deep enough into the game that its side is DEPLOYED, and it has *complained
+    // out loud a few times* (rants ≥ 4) — so the charge pays off a grievance the
+    // player has actually been hearing, never arriving out of nowhere.
     const stuck = Object.values(this.society.souls)
-      .filter((s) => !s.captured && s.square && s.type !== 'p' && s.type !== 'k' && s.idleFor >= 12 && s.mood.impatience >= 0.7)
-      .sort((a, b) => b.mood.impatience - a.mood.impatience)
+      .filter(
+        (s) =>
+          !s.captured &&
+          s.square &&
+          s.type !== 'p' &&
+          s.type !== 'k' &&
+          s.idleFor >= 14 &&
+          s.mood.impatience >= 0.7 &&
+          s.rants >= 4,
+      )
+      .sort((a, b) => b.rants - a.rants)
     for (const s of stuck) {
       const sq = s.square as Square
+      // Its own side must be out on the field first — no charging while everyone
+      // else is still home in the opening lineup.
+      const backRank = s.color === 'w' ? 1 : 8
+      const deployed = Object.values(this.society.souls).filter(
+        (o) => !o.captured && o.square && o.color === s.color && o.type !== 'p' && o.type !== 'k' && Number((o.square as Square)[1]) !== backRank,
+      ).length
+      if (deployed < 2) continue
       // Never break a rook the king may still castle with — the player would
       // rightly resent a stunt that costs them the option.
       if (s.type === 'r') {
@@ -1000,6 +1027,7 @@ export class WizardGame {
       }
       if (!this.relocate(sq, choice.dest, false)) continue // the charge itself, keeping our turn
       s.mood.impatience = 0
+      s.rants = 0 // grievance discharged
       this.usedStunts.add('breakout')
       this.setFx('breakout', sq, choice.dest)
       this.logMove(`${choice.dest}${trample ? ' (breakout, trampled)' : ' (breakout)'}`, s.color, true)
