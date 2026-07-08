@@ -38,6 +38,7 @@ import {
   jetpackTargets,
   knockOff,
   materialBalance,
+  reprimandMove,
   swapPieces,
 } from './chaos'
 import { DEFAULT_SETTINGS, DEFAULT_TRUST, type WizardSettings } from './settings'
@@ -145,6 +146,11 @@ export class WizardGame {
   // A piece that moved itself (fled in fear, or charged off in a breakout) and
   // can be coaxed back to its post for a while — the recourse for misbehaviour.
   private spooked: { soulId: string; home: Square; until: number; kind: 'fled' | 'wayward' } | null = null
+  // An ENEMY piece that just cheated (jetpack/disguise/retreat) the player may
+  // reprimand back to its legal home — a rule the player enforces (and, in a
+  // future multiplayer, the opponent could enforce on yours). Valid only until
+  // the player makes their own next move.
+  private cheat: { soulId: string; home: Square; to: Square; victimId: string | null; until: number } | null = null
   private history: Snapshot[] = [] // undo stack (states just before a committed player action)
   private future: Snapshot[] = [] // redo stack
 
@@ -341,6 +347,7 @@ export class WizardGame {
     this.offer = null
     this.usedStunts.clear()
     this.spooked = null
+    this.cheat = null
     this.fx = null
     this.deathFx = 'drag'
     this.smack = null
@@ -498,6 +505,10 @@ export class WizardGame {
   playerTap(square: Square): TapResult {
     if (!this.canPlay) return { moved: false, utterances: [] }
 
+    // Reprimand: tap the glowing home square of a cheated enemy piece to send it
+    // back there. Checked first (the home square is otherwise empty).
+    if (square === this.reprimandTarget()) return this.doReprimand()
+
     // A tap on an offered chaos target commits the stunt. Checked BEFORE the
     // own-piece branch: a body-swap target IS one of your own pieces, and must
     // commit the swap rather than re-select the friend.
@@ -612,8 +623,8 @@ export class WizardGame {
   }
 
   /** Persistent per-piece states the view badges with an icon. */
-  states(): Record<Square, 'vengeful' | 'spooked'> {
-    const out: Record<Square, 'vengeful' | 'spooked'> = {}
+  states(): Record<Square, 'vengeful' | 'spooked' | 'cheated'> {
+    const out: Record<Square, 'vengeful' | 'spooked' | 'cheated'> = {}
     for (const s of Object.values(this.society.souls)) {
       if (s.captured || !s.square) continue
       if (s.vengefulUntil >= this.society.ply) out[s.square] = 'vengeful'
@@ -624,7 +635,71 @@ export class WizardGame {
       const s = this.society.souls[this.spooked.soulId]
       if (s && !s.captured && s.square) out[s.square] = 'spooked'
     }
+    const cheatSq = this.reprimandSquare()
+    if (cheatSq) out[cheatSq] = 'cheated'
     return out
+  }
+
+  /** The square a just-cheated enemy piece currently sits on (badge it), or null. */
+  reprimandSquare(): Square | null {
+    if (!this.cheat || this.society.ply > this.cheat.until) return null
+    const s = this.society.souls[this.cheat.soulId]
+    return s && !s.captured && s.square ? (s.square as Square) : null
+  }
+
+  /** The legal home an outstanding cheat can be reprimanded back to (empty), or
+   * null. The player enforces the rule by tapping this square. */
+  reprimandTarget(): Square | null {
+    if (!this.reprimandSquare()) return null
+    const home = this.cheat!.home
+    return this.chess.get(home) ? null : home // home must be clear to send it back
+  }
+
+  /** Send a cheated enemy piece back to its legal home (the player's rule
+   * enforcement), resurrecting any piece its cheat captured. Free — it doesn't
+   * cost the player their move. */
+  private doReprimand(): TapResult {
+    const cheat = this.cheat!
+    const soul = this.society.souls[cheat.soulId]
+    const from = soul?.square as Square | undefined
+    const victim = cheat.victimId ? this.society.souls[cheat.victimId] : null
+    this.checkpoint()
+    const ok =
+      !!from &&
+      reprimandMove(this.chess, from, cheat.home, victim ? { type: victim.type, color: victim.color, square: cheat.to } : null)
+    if (!ok) {
+      this.history.pop()
+      this.cheat = null
+      this.selected = null
+      return { moved: false, utterances: [] }
+    }
+    // Society: march the offender home…
+    delete this.society.bySquare[from as Square]
+    this.society.bySquare[cheat.home] = soul.id
+    soul.square = cheat.home
+    soul.idleFor = 0
+    // …and un-kill its victim, back on the square it was grabbed from.
+    if (victim) {
+      victim.captured = false
+      victim.diedAt = null
+      victim.square = cheat.to
+      this.society.bySquare[cheat.to] = victim.id
+      this.graveyard = this.graveyard.filter((id) => id !== victim.id)
+    }
+    this.setFx('telegraph', from as Square, cheat.home)
+    this.logMove(`${cheat.home} (reprimanded)`, soul.color, true)
+    this.lastFrom = from as Square
+    this.lastTo = cheat.home
+    this.lastMoverId = soul.id
+    this.lastMoveRisky = false
+    this.cheat = null
+    this.selected = null
+    return {
+      moved: false,
+      utterances: [
+        { soulId: soul.id, square: cheat.home, color: soul.color, name: soul.persona.name, text: 'Ugh — FINE. Back I go.', tone: 'sad' },
+      ],
+    }
   }
 
   /** The player's coaxable runaway (fled or charged off), if any — so the view
@@ -1065,8 +1140,10 @@ export class WizardGame {
       this.usedStunts.add('coldfeet')
       this.setFx('coldfeet', sq, behind)
       this.logMove(`${behind} (cold feet)`, s.color, true)
-      // The player can coax their own spooked piece back to its post for a while.
+      // The player can coax their OWN spooked piece back to its post; an ENEMY
+      // that lost its nerve can be reprimanded back to where it bolted from.
       if (s.color === PLAYER) this.spooked = { soulId: s.id, home, until: this.society.ply + 6, kind: 'fled' }
+      else this.cheat = { soulId: s.id, home, to: behind, victimId: null, until: this.society.ply }
       return {
         soulId: s.id,
         square: behind,
@@ -1162,9 +1239,14 @@ export class WizardGame {
     const s = this.society.souls[plan.soulId]
     if (!s || s.captured || s.square !== plan.from) return [] // the world changed under the plan
     this.deathFx = 'drag'
+    const graveBefore = this.graveyard.length
     if (!this.relocate(plan.from, plan.to, true)) return []
+    const victimId = this.graveyard.length > graveBefore ? this.graveyard[this.graveyard.length - 1] : null
     this.usedStunts.add('aichaos')
     this.setFx(plan.type, plan.from, plan.to)
+    // The player can reprimand this cheat back to its legal home (until they move),
+    // resurrecting any piece it grabbed on the way.
+    this.cheat = { soulId: plan.soulId, home: plan.from, to: plan.to, victimId, until: this.society.ply }
     this.logMove(`${plan.type === 'disguise' ? 'R' : 'N'}→${plan.to} (enemy)`, 'b', true)
     const utter: Utterance[] = [
       { soulId: s.id, square: plan.to, color: 'b', name: s.persona.name, text: enemyStuntCommit(plan.type, this.rng), tone: 'gloat' },

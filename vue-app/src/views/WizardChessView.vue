@@ -315,6 +315,7 @@ const restingGraves = computed(() => {
 // the square for a beat (so the capture reads), then hauls to the edge.
 interface Transit {
   id: string
+  tuggerId: string | null // the piece doing the dragging (stays on the board, heaving)
   type: PieceType
   color: Color
   fromX: number
@@ -338,7 +339,9 @@ function beginTransit(id: string) {
   const slot = graveSlotOf(id)
   if (!f || !f.diedAt || !slot) return
   const from = framePos(f.diedAt)
-  const t: Transit = { id, type: f.type, color: f.color, fromX: from.x, fromY: from.y, toX: slot.x, toY: slot.y, phase: 'hold' }
+  // Whoever just moved onto the victim's square is the one hauling it off.
+  const tuggerId = game.lastMoverId && game.society.souls[game.lastMoverId]?.square === f.diedAt ? game.lastMoverId : null
+  const t: Transit = { id, tuggerId, type: f.type, color: f.color, fromX: from.x, fromY: from.y, toX: slot.x, toY: slot.y, phase: 'hold' }
   transits.value = [...transits.value, t]
   const timers = [
     setTimeout(() => {
@@ -366,8 +369,9 @@ function clearGraveyardFx() {
 const graveStyle = (g: { x: number; y: number }) => ({ left: `${g.x}%`, top: `${g.y}%` })
 const transitStyle = (t: Transit) => {
   const dragging = t.phase === 'drag'
-  // The rope points the way the piece is being yanked — toward its edge slot.
-  const angle = (Math.atan2(t.toY - t.fromY, t.toX - t.fromX) * 180) / Math.PI
+  // The rope points BACK to the captor (still on the victim's old square), so it
+  // reads as a taut line the dragging piece is hauling on.
+  const angle = (Math.atan2(t.fromY - t.toY, t.fromX - t.toX) * 180) / Math.PI
   return {
     left: `${dragging ? t.toX : t.fromX}%`,
     top: `${dragging ? t.toY : t.fromY}%`,
@@ -375,6 +379,8 @@ const transitStyle = (t: Transit) => {
     '--rope-angle': `${angle}deg`,
   }
 }
+// The captors currently heaving on a rope (their victim is mid-haul).
+const tuggingIds = computed(() => new Set(transits.value.filter((t) => t.phase === 'drag' && t.tuggerId).map((t) => t.tuggerId as string)))
 
 // ── Endgame banner ─────────────────────────────────────────────────────────
 // The game being over must be unmissable: a big banner across the board,
@@ -489,6 +495,12 @@ const status = computed(() => {
     }
     return `Holding ${selectedName.value} — pick a square.`
   }
+  // An enemy piece just cheated: point the player at the reprimand.
+  const cheatSq = game.reprimandSquare()
+  if (cheatSq && reprimandSquare.value) {
+    const c = game.soulAt(cheatSq)
+    return `${c?.persona.name ?? 'That piece'} cheated! Tap the gold ring to march it back to the rules.`
+  }
   // A runaway on the loose: point the player at the fix before anything else.
   const runaway = game.waywardSoul()
   if (runaway) return `${runaway.persona.name} moved on its own — select it to order it back.`
@@ -546,6 +558,8 @@ const stateClass = (sq: Square) => {
   return s ? 'state-' + s : ''
 }
 const coaxSquare = computed(() => (version.value, game.coaxTarget()))
+// The glowing home square a cheated enemy piece can be marched back to.
+const reprimandSquare = computed(() => (version.value, game.reprimandTarget()))
 // Legal targets that land on an enemy — rendered as a capture RING, not a dot.
 const captureTargets = computed(() => {
   version.value
@@ -669,6 +683,7 @@ function onSquare(square: Square) {
     return
   }
   if (!canPlay.value) return
+  const graveBefore = game.graveyard.length
   const res = game.playerTap(square)
   if (res.introSoul) {
     log.value.unshift({
@@ -688,7 +703,10 @@ function onSquare(square: Square) {
   armIdle()
   if (res.moved) {
     maybePostGame()
-    window.setTimeout(runAi, 420)
+    // After a capture, give the victor a beat to haul its victim off and settle
+    // on the square before the enemy can march in and drag IT away.
+    const captured = game.graveyard.length > graveBefore
+    window.setTimeout(runAi, captured ? 2600 : 420)
   }
 }
 
@@ -984,6 +1002,7 @@ onBeforeUnmount(() => {
               <!-- special rings outrank the plain move dot (an entourage/rage target
                    can ALSO be a legal square — the stunt is what a tap commits) -->
               <span v-if="squareOf(i) === coaxSquare" class="dot dot--coax" title="Coax back to post"></span>
+              <span v-else-if="squareOf(i) === reprimandSquare" class="dot dot--reprimand" title="Send the cheat home"></span>
               <span v-else-if="chaosTargets.has(squareOf(i))" class="dot" :class="rageOffer ? 'dot--rage' : 'dot--chaos'"></span>
               <span v-else-if="captureTargets.has(squareOf(i))" class="dot dot--capture"></span>
               <span v-else-if="legalTargets.has(squareOf(i))" class="dot"></span>
@@ -1007,7 +1026,7 @@ onBeforeUnmount(() => {
                 :key="p.id"
                 class="piece-box"
                 :data-piece="p.square"
-                :class="[cueClass(p.id), { talking: !!bubbleFor(p.id) }]"
+                :class="[cueClass(p.id), { talking: !!bubbleFor(p.id), tugging: tuggingIds.has(p.id) }]"
                 :style="pieceStyle(p)"
               >
                 <img
@@ -1251,14 +1270,10 @@ onBeforeUnmount(() => {
   height: 9%;
   transform: translate(-50%, -50%);
   object-fit: contain;
-  padding: 1%;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(233, 226, 199, 0.22) 62%, transparent 70%);
-  box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.32);
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
-}
-.grave-piece.theirs {
-  background: radial-gradient(circle, rgba(216, 180, 254, 0.26) 62%, transparent 70%);
+  /* A soft light halo (no hard ring) lifts the fallen — black pieces especially
+     — off the dark purple gutter without looking like a clunky circle. */
+  background: radial-gradient(circle, rgba(233, 232, 240, 0.34) 50%, transparent 72%);
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55));
 }
 /* Hauling casualty: above the board so the short drag to the edge is visible. */
 .transit-layer {
@@ -1289,6 +1304,8 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(233, 232, 240, 0.28) 46%, transparent 68%);
   filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.6));
 }
 /* Being hauled: the piece tumbles and lurches on the rope so it reads as
@@ -1341,6 +1358,21 @@ onBeforeUnmount(() => {
 .grave-transit.drag .haul-rope {
   opacity: 0.95;
 }
+/* The captor stays on the square and HEAVES on the rope while its victim is
+   dragged off — so there's visibly a dragging piece, not just a dragged one. */
+.piece-box.tugging {
+  z-index: 5;
+  animation: heave 0.42s ease-in-out infinite;
+}
+@keyframes heave {
+  0%,
+  100% {
+    transform: rotate(-7deg) scale(1.04);
+  }
+  50% {
+    transform: rotate(6deg) scale(0.98);
+  }
+}
 /* Board palette: warm gold parchment + muted purple, matching the app's
    purple/gold theme (green replaced). */
 .sq {
@@ -1390,6 +1422,14 @@ onBeforeUnmount(() => {
   border: 3px dashed #22c55e;
   animation: chaosPulse 1.1s ease-in-out infinite;
 }
+/* "Send the cheat home" — a gold rule-enforcement target on the enemy's home. */
+.dot--reprimand {
+  width: 66%;
+  height: 66%;
+  background: rgba(250, 204, 21, 0.16);
+  border: 3px dashed #facc15;
+  animation: chaosPulse 0.9s ease-in-out infinite;
+}
 /* Rage-strike target — an angry red ring around the enemy about to be smashed. */
 .dot--rage {
   width: 74%;
@@ -1398,17 +1438,22 @@ onBeforeUnmount(() => {
   border: 3px dashed #ef4444;
   animation: chaosPulse 0.7s ease-in-out infinite;
 }
-/* A capture: a big hollow ring hugging the target piece, so it reads as "take
-   this" rather than the small "move here" dot. */
+/* A capture: four corner triangles closing in on the target square (cleaner than
+   a ring, and it doesn't fight the piece art). Colour flips per square so it
+   reads on both the parchment and the purple. */
 .dot--capture {
-  width: 90%;
-  height: 90%;
-  background: none;
-  border: 4px solid rgba(15, 23, 42, 0.42);
-  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  background:
+    linear-gradient(to bottom right, var(--capc) 0 22%, transparent 22%) top left / 42% 42% no-repeat,
+    linear-gradient(to bottom left, var(--capc) 0 22%, transparent 22%) top right / 42% 42% no-repeat,
+    linear-gradient(to top right, var(--capc) 0 22%, transparent 22%) bottom left / 42% 42% no-repeat,
+    linear-gradient(to top left, var(--capc) 0 22%, transparent 22%) bottom right / 42% 42% no-repeat;
+  --capc: rgba(24, 18, 43, 0.5);
 }
 .sq.dark .dot--capture {
-  border-color: rgba(15, 23, 42, 0.5);
+  --capc: rgba(250, 240, 210, 0.6);
 }
 
 /* Lingering stunt FX: after any rule-breaking moment, a ghost ring marks where
@@ -1665,6 +1710,15 @@ onBeforeUnmount(() => {
   opacity: 0.55;
   filter: grayscale(0.6) drop-shadow(0 2px 2px rgba(15, 23, 42, 0.4));
 }
+/* A caught cheat pulses gold — the player can march it home. */
+.glyph.state-cheated {
+  animation: cheatPulse 0.8s ease-in-out infinite;
+}
+@keyframes cheatPulse {
+  50% {
+    filter: drop-shadow(0 0 7px rgba(250, 204, 21, 0.95)) drop-shadow(0 2px 2px rgba(15, 23, 42, 0.5));
+  }
+}
 /* .white / .black remain as selector hooks (e2e + future styling); the art
    itself carries the colour now. */
 
@@ -1757,25 +1811,30 @@ onBeforeUnmount(() => {
   transform: translateX(-50%);
   width: max-content;
   max-width: 150px;
-  padding: 4px 8px;
+  padding: 4px 9px;
   border-radius: 10px;
   font-size: 0.72rem;
   line-height: 1.25;
   text-align: center;
-  color: #0f172a;
-  background: #fef9c3;
-  box-shadow: 0 4px 14px rgba(2, 6, 23, 0.45);
+  /* Dark card with a tone-coloured edge — reads clearly over both the gold
+     parchment and the muted-purple squares (the old pale-yellow bubble blended
+     into the light squares). */
+  color: #f8fafc;
+  background: #221a38;
+  border: 1.5px solid var(--tone, #fbbf24);
+  box-shadow: 0 4px 14px rgba(2, 6, 23, 0.55);
   pointer-events: auto; /* tappable to dismiss */
   cursor: pointer;
   animation: pop 0.16s ease-out;
 }
-.tone-gloat { background: #fde68a; }
-.tone-sad { background: #cbd5e1; }
-.tone-afraid { background: #bfdbfe; }
-.tone-angry { background: #fecaca; }
+.tone-gloat { --tone: #fbbf24; }
+.tone-sad { --tone: #94a3b8; }
+.tone-afraid { --tone: #60a5fa; }
+.tone-angry { --tone: #f87171; }
 .tone-warm,
-.tone-joy { background: #bbf7d0; }
-/* Tail pointing down at the speaker; inherits the bubble's tone colour. */
+.tone-joy { --tone: #4ade80; }
+.tone-calm { --tone: #c084fc; }
+/* Tail pointing down at the speaker; matches the dark card + tone edge. */
 .bubble::after {
   content: '';
   position: absolute;
@@ -1784,7 +1843,9 @@ onBeforeUnmount(() => {
   width: 11px;
   height: 11px;
   transform: translateX(-50%) rotate(45deg);
-  background-color: inherit;
+  background: #221a38;
+  border-right: 1.5px solid var(--tone, #fbbf24);
+  border-bottom: 1.5px solid var(--tone, #fbbf24);
   border-radius: 0 0 3px 0;
 }
 @keyframes pop {
@@ -1960,6 +2021,8 @@ onBeforeUnmount(() => {
   .acc-flame,
   .acc-banner,
   .grave-transit.drag img,
+  .piece-box.tugging,
+  .glyph.state-cheated,
   .endgame {
     animation: none !important;
   }

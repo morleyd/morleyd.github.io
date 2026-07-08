@@ -217,6 +217,28 @@ The **tantrum** removal and **no trust-reset** decisions from round 3 stand.
       a gold-ringed chip so **black pieces no longer vanish** into the dark edge.
 - [x] **Tap a speech bubble to dismiss it** (bubbles are now interactive).
 
+### Playtest round 6 (bubble contrast, capture marks, dragging piece, reprimand) — shipped
+
+- [x] **Bubbles recoloured** — dark card + tone-coloured edge (gold/red/blue/…),
+      so they pop over the purple/gold board instead of blending into the light
+      squares.
+- [x] **Capture indicator** is now four **corner triangles** closing on the
+      target (the ring looked clunky); colour flips per square so it reads on
+      both. **Grave chips** lightened to a soft halo (no hard gold ring) so black
+      casualties stay readable at the edge.
+- [x] **A dragging piece, not just a dragged one.** The captor stays on the
+      square and **heaves** (`heave`) while the victim is hauled off on a **rope
+      that points back to it** (`--rope-angle` toward the captor). Plus a real
+      **settle beat**: after a capture the enemy waits ~2.6s (drag + ≥1s settle)
+      before it can march in and drag the fresh victor off in turn.
+- [x] **Reprimand the cheats.** When an enemy piece breaks the rules — a jetpack,
+      a disguise slide, or a cold-feet retreat — it pulses gold and its legal
+      home square glows; tap it to **march the offender back and resurrect any
+      piece it grabbed**. Free (doesn't cost your move), available until you make
+      your own next move. The engine can't do this to you — but it's the hook a
+      future multiplayer mode would use to let an opponent enforce your pieces'
+      rules. (`reprimandMove` in chaos.ts; `cheat` state in game.ts.)
+
 Deferred canon: enemy-side entourage/swap, defector coax-back, sound.
 
 ### Self-play soak (`soak.spec.ts`)

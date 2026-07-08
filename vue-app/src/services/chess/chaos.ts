@@ -116,6 +116,24 @@ export function knockOff(c: Chess, square: Square, flipTurn = false): boolean {
   return commit(c, edited, turn)
 }
 
+/** Reprimand: undo an enemy cheat by marching the offender from `from` back to
+ * its legal `home`, and (if the cheat captured) resurrecting the victim on the
+ * square it was taken from. Keeps the current turn. Rejected if illegal. */
+export function reprimandMove(
+  c: Chess,
+  from: Square,
+  home: Square,
+  victim: { type: PieceType; color: Color; square: Square } | null,
+): boolean {
+  const p = c.get(from)
+  if (!p || c.get(home)) return false // offender missing, or home no longer clear
+  const edited = new Chess(c.fen())
+  edited.remove(from)
+  edited.put({ type: p.type, color: p.color }, home)
+  if (victim && !edited.get(victim.square)) edited.put({ type: victim.type, color: victim.color }, victim.square)
+  return commit(c, edited, c.turn())
+}
+
 /** Swap two pieces' squares (the body swap — "Cover me!"). Consumes the turn.
  * Rejected if the result is illegal (self-check, pawn on a back rank, …). */
 export function swapPieces(c: Chess, a: Square, b: Square): boolean {

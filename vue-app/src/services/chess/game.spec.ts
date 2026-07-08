@@ -352,6 +352,42 @@ describe('WizardGame interaction', () => {
     expect(h.fx?.kind).toBe(plan!.type) // and left a lingering mark
   })
 
+  it('lets the player reprimand a cheating enemy piece back to its legal home', () => {
+    const g = new WizardGame('reprimand')
+    g.reset('reprimand', '4k3/8/2n5/8/8/5P2/PP6/4K3 b - - 0 1') // Nc6, white pawns (live game)
+    g.settings.chaos = 1
+    g.society.ply = 20
+    let plan = null
+    for (let i = 0; i < 60 && !plan; i += 1) plan = g.aiChaosPlan()
+    expect(plan).toBeTruthy()
+    g.aiChaosCommit(plan!) // the knight jetpacks c6 -> f3, snatching the pawn
+    expect(g.turn).toBe('w') // the player's move now
+    expect(g.chess.get('f3')?.color).toBe('b') // enemy knight cheated onto f3
+    expect(g.fallen().some((f) => f.color === 'w')).toBe(true) // it grabbed our pawn
+    expect(g.reprimandSquare()).toBe('f3') // the cheat is badged
+    expect(g.reprimandTarget()).toBe('c6') // ...and its home glows
+
+    const res = g.playerTap('c6') // enforce the rule
+    expect(res.moved).toBe(false) // free — the player keeps their move
+    expect(g.turn).toBe('w')
+    expect(g.chess.get('c6')?.color).toBe('b') // knight marched home
+    expect(g.chess.get('f3')?.color).toBe('w') // and our pawn is back!
+    expect(g.fallen().length).toBe(0)
+    expect(g.reprimandTarget()).toBeNull() // cheat resolved
+
+    // Once the player makes a real move, the reprimand window is gone.
+    const g2 = new WizardGame('reprimand2')
+    g2.reset('reprimand2', '4k3/8/2n5/8/8/5P2/PP6/4K3 b - - 0 1')
+    g2.settings.chaos = 1
+    g2.society.ply = 20
+    let plan2 = null
+    for (let i = 0; i < 60 && !plan2; i += 1) plan2 = g2.aiChaosPlan()
+    g2.aiChaosCommit(plan2!)
+    g2.playerTap('e1')
+    g2.playerTap('e2') // the player moves instead of reprimanding
+    expect(g2.reprimandTarget()).toBeNull() // too late now
+  })
+
   it('rallies the pep-talk entourage: king + friends march one step as one turn', () => {
     const g = new WizardGame('entourage')
     // King e1 flanked by pawns d2/e2/f2 — room to march up the board.
