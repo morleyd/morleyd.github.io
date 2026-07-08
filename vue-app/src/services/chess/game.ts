@@ -175,11 +175,13 @@ export class WizardGame {
     const victim = this.society.souls[cap.soulId]
     const val = victim ? PIECE_VALUE[victim.type] : move.captured ? PIECE_VALUE[move.captured] : 3
     if (mover === PLAYER) {
-      this.setTrust(this.trust + 2 + val * 0.7) // you won material — the ranks cheer up
+      this.setTrust(this.trust + 2 + val * 0.9) // you won material — the ranks cheer up
       return null
     }
-    // A comrade has fallen on your watch. Loss aversion: it stings more than a
-    // capture cheers, and the closer the survivors were to the fallen, the worse.
+    // A comrade has fallen on your watch. Loss aversion: it stings a bit more
+    // than a capture cheers, sharpened by how loved the fallen was — but capped,
+    // so an even trading game doesn't death-spiral the army into permanent
+    // mutiny (the 50-game soak railed trust to 0 in 29 games before this).
     let grief = 0
     let mourner: PieceSoul | null = null
     let topBond = 0
@@ -194,7 +196,7 @@ export class WizardGame {
         }
       }
     }
-    this.setTrust(this.trust - (3 + val * 1.1 + grief * 1.5))
+    this.setTrust(this.trust - (2 + val * 0.85 + Math.min(grief, 3) * 1.2))
     // A bonded survivor voices flagging faith when the loss really hurt.
     if (mourner && topBond >= 0.4 && this.trust < 60 && this.rng() < 0.6) {
       return {
@@ -243,6 +245,7 @@ export class WizardGame {
     this.fx = null
     this.deathFx = 'drag'
     this.smack = null
+    this.spontaneousCount = 0
   }
 
   private fxSeq = 0
@@ -349,6 +352,10 @@ export class WizardGame {
     if (this.chess.isCheckmate() && moverId) events.push({ kind: 'checkmate', soulId: moverId, salience: 120 })
     else if (this.chess.isCheck() && moverId) events.push({ kind: 'check', soulId: moverId, salience: 54 })
 
+    // Morale drifts back toward neutral a little every ply — grudges (and
+    // adoration) fade with time, so a bad opening can still become a story of
+    // redemption instead of a locked-in mutiny.
+    this.setTrust(this.trust + (50 - this.trust) * 0.012)
     // Material swings move trust the most; capture the "losing faith" voice too.
     const faith = this.trustFromMove(move, events)
     // Game verdict swings trust several notches (the side to move is the loser).
@@ -773,8 +780,16 @@ export class WizardGame {
   spontaneousChaos(): Utterance | null {
     if (!this.canPlay || this.settings.chaos <= 0) return null
     if (this.selected) return null
-    return this.breakout() ?? this.coldFeet() ?? this.defector()
+    // Uninvited stunts share a tight budget: at most TWO per game, total. The
+    // soak averaged ~2.7 spontaneous board-changes per game without this — a
+    // circus, not seasoning. (Offered stunts are the player's choice; only the
+    // uninvited kind is capped here.)
+    if (this.spontaneousCount >= 2) return null
+    const u = this.breakout() ?? this.coldFeet() ?? this.defector()
+    if (u) this.spontaneousCount += 1
+    return u
   }
+  private spontaneousCount = 0
 
   /** Legal-move count for the piece on `sq` with the turn forced to its colour —
    * a cheap "how free is it there" probe for off-book planning. */

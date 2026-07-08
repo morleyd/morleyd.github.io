@@ -218,6 +218,10 @@ watch(version, () => {
     smack.value = { square: game.smack.square, word: game.smack.word }
     if (smackTimer) clearTimeout(smackTimer)
     smackTimer = setTimeout(() => (smack.value = null), 1300)
+    // If the piece that just died WAS mid-escort, stop the escort before the
+    // leaving clone freezes its classes — a corpse must not dive and return.
+    const victimId = game.graveyard[game.graveyard.length - 1]
+    if (victimId && victimId === escortId.value) clearEscort()
     // A normal drag-off capture also sends the captor down as escort (canon:
     // the victor drags the fallen to the box, then walks back to its post).
     if (game.deathFx === 'drag' && game.lastMoverId && game.lastFrom) scheduleEscort(game.lastMoverId)
@@ -1291,7 +1295,7 @@ onBeforeUnmount(() => {
   left: calc(50% - 2px);
   top: 62%;
   width: 4px;
-  height: 300%;
+  height: 150%; /* short + taut: it reaches the captor diving just ahead/below */
   background: repeating-linear-gradient(180deg, #d97706 0 7px, #92400e 7px 14px);
   z-index: 2;
 }
@@ -1408,7 +1412,11 @@ onBeforeUnmount(() => {
    vanished. */
 .pmove-leave-active {
   z-index: 3;
-  animation: dragOff 1.6s cubic-bezier(0.4, 0.08, 0.7, 0.5) both;
+  /* The 0.95s delay makes the CAPTOR lead: it slides in, lassoes the victim
+     (rope on during the hold), dives for the box first — and the victim is
+     yanked down after it, trailing on the rope. Dragger in front, dragged
+     behind: the rope now points at the piece doing the dragging. */
+  animation: dragOff 1.6s cubic-bezier(0.4, 0.08, 0.7, 0.5) 0.95s both;
 }
 @keyframes dragOff {
   0% {

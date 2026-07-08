@@ -32,7 +32,9 @@ export const createDialogueState = (): DialogueState => ({
   lastAmbientEnemy: -99,
 })
 
-const RECENT_MAX = 40
+// Sized for a long game: the 50-game soak measured 26% repeated lines at 40 —
+// a wider memory keeps the table talk fresher deep into the endgame.
+const RECENT_MAX = 90
 
 interface Ctx {
   me: string

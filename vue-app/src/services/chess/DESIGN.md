@@ -138,6 +138,31 @@ Gertrude — all at 8:57). The fixes, all in:
       select it to order it back" → "tap the green ring to order it back to its
       post"). This is the standing recourse for misbehaving pieces.
 
+### The 50-game soak (self-play QA) — findings + fixes shipped
+
+`soak.spec.ts` plays full games through the view's exact code paths (taps,
+offers, resists, coax, enemy chaos, spontaneous stunts) with per-ply invariant
+checks. Run with `SOAK=1 npx vitest run src/services/chess/soak.spec.ts`
+(~15 min; skipped in normal test passes). Findings from 2×50 games:
+
+- **Zero invariant violations** across ~9,500 plies (board/society mapping,
+  graveyard, turn flow, trust bounds) — the core is solid.
+- **Trust death-spiraled** (avg end 10; 29/50 games flat 0): loss aversion made
+  even trading rail the army into permanent mutiny. **Fixed**: capture reward up
+  (`+2 + val·0.9`), loss sting down + grief capped (`−(2 + val·0.85 +
+  min(grief,3)·1.2)`), and morale mean-reverts toward 50 by 1.2%/ply. After:
+  avg end 31, only 9/50 at zero, full 0–100 spread — redemption arcs exist, and
+  (emergent bonus) a trusted army resists less and shouts less bad advice, so
+  it literally plays better.
+- **Spontaneous chaos was a circus** (~2.7 uninvited board-changes/game).
+  **Fixed**: breakout/cold-feet/defection share a hard budget of TWO per game.
+- **Dialogue repeats ~26%** over ~108 lines/game — widened the dedup ring
+  (40→90); residual repeats are pool-size-bound and masked by display dedup.
+- **Rope physics** (from playtest): the captor now *leads* the dive (victim
+  holds lassoed ~1s, then is yanked down trailing the rope) so the rope points
+  at the dragger; and a captured mid-escort captor no longer dives-and-returns
+  as a corpse.
+
 Deferred canon: none of the big beats remain — future polish: enemy-side
 entourage/swap, defector coax-back, sound.
 
