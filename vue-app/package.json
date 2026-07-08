@@ -20,9 +20,9 @@
     "buffer": "^6.0.3",
     "chess.js": "^1.4.0",
     "pinia": "^3.0.3",
-    "sass": "^1.94.0",
-    "vite-plugin-vuetify": "^2.1.2",
-    "vue": "^3.5.22",
+    "sass": "^1.101.0",
+    "vite-plugin-vuetify": "^2.1.3",
+    "vue": "^3.5.39",
     "vue-router": "^4.6.3",
     "vuetify": "^3.10.11"
   },
