@@ -29,6 +29,11 @@ export default defineConfigWithVueTs(
   {
     ...pluginVitest.configs.recommended,
     files: ['src/**/*.spec.{js,ts}'],
+    rules: {
+      // The chess-sim specs assert invariants inside per-ply game loops, where an
+      // expect() guarded by a turn/gameOver check is intentional (and does run).
+      'vitest/no-conditional-expect': 'off',
+    },
   },
   {
     name: 'app/rule-tweaks',

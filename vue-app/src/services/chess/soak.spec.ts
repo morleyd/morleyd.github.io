@@ -4,7 +4,6 @@
  * stunts, suggestions), verifying invariants every ply and collecting stats +
  * anomalies. Temporary tool — findings drive polish.
  */
-/* eslint-disable vitest/expect-expect -- diagnostic harness: invariants throw, and it reports stats rather than asserting */
 import { describe, it } from 'vitest'
 
 // Run explicitly with:  SOAK=1 npx vitest run src/services/chess/_sim.spec.ts
