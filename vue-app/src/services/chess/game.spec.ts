@@ -201,9 +201,19 @@ describe('WizardGame interaction', () => {
     const drama = new WizardGame('drama')
     drama.reset('drama', '4k3/8/5p2/8/3N4/8/8/4K3 w - - 0 1') // Nd4, capture/check leaps exist
     drama.settings.chaos = 1
+    drama.trust = 90 // "wings": a jetpack needs a reason, and deep trust is one
     drama.playerTap('d4')
     expect(drama.chaosTargets().length).toBeGreaterThan(0)
     expect(drama.chaosOfferType()).toBe('jetpack')
+  })
+
+  it('withholds the jetpack when the knight has no reason (not just because)', () => {
+    const g = new WizardGame('no-jetpack')
+    g.reset('no-jetpack', '4k3/8/5p2/8/3N4/8/8/4K3 w - - 0 1') // dramatic leap available…
+    g.settings.chaos = 1
+    g.trust = 50 // …but ordinary trust, fresh knight, king safe → no reason to fly
+    g.playerTap('d4')
+    expect(g.chaosOfferType()).not.toBe('jetpack')
   })
 
   it('lets a vengeful piece rage-strike an adjacent enemy off the board', () => {

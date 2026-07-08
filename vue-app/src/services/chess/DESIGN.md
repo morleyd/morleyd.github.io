@@ -239,6 +239,25 @@ The **tantrum** removal and **no trust-reset** decisions from round 3 stand.
       future multiplayer mode would use to let an opponent enforce your pieces'
       rules. (`reprimandMove` in chaos.ts; `cheat` state in game.ts.)
 
+### Playtest round 7 (a real drag, gold graves, jetpack reasons, mobile rings, desktop cog) — shipped
+
+- [x] **The captor actually drags.** It now lunges ~60% of the way toward the
+      victim's edge slot (dragging the roped body along), holds at the stretch,
+      then hauls itself back to its post (`escortHaul`, offset computed per
+      capture in `escortVars`). A visible dragging piece, not a heave in place.
+      The post-capture settle also lengthened: the enemy waits ~3s (haul + a full
+      second settled) before it can drag the fresh victor off.
+- [x] **Grave halo is gold** — on-theme, and black casualties read clearly.
+- [x] **Jetpack needs a REASON**, never "just because": the offer only appears if
+      the knight is **rescuing the king** (player in check), the team **trusts you
+      enough to have grown wings** (trust ≥ 82), or it has been **building up to
+      it** (idle ≥ 6 and restless/ranting). Otherwise no jetpack.
+- [x] **Target rings render above the pieces** (new `.marks` layer, z-index over
+      the piece overlay) — a ring on an occupied square (capture / rage / jetpack
+      target) is no longer hidden behind the piece on mobile.
+- [x] **Desktop settings moved behind a cog** (a menu), like mobile, so the
+      sliders no longer crowd the page. (GameToolbar — applies to every game.)
+
 Deferred canon: enemy-side entourage/swap, defector coax-back, sound.
 
 ### Self-play soak (`soak.spec.ts`)

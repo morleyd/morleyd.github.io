@@ -763,8 +763,15 @@ export class WizardGame {
       if (o) return o
     }
     if (piece.type === 'n') {
+      // A jetpack needs a REASON — never "just because". One of:
+      //  • rescue: the king is in check and this knight could fly to the defence;
+      //  • wings: the team trusts you so much (≥ 82) the knight believes it can fly;
+      //  • build-up: it has been itching to leap for a good while (idle & restless).
+      const rescue = this.chess.isCheck() && this.chess.turn() === PLAYER
+      const wings = this.trust >= 82
+      const buildUp = soul !== null && soul.idleFor >= 6 && (soul.mood.impatience >= 0.5 || soul.rants >= 2)
       const leaps = jetpackTargets(this.chess, from)
-      const o = build('jetpack', leaps.length > 0, () => leaps)
+      const o = build('jetpack', leaps.length > 0 && (rescue || wings || buildUp), () => leaps)
       if (o) return o
     }
 

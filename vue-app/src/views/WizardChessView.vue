@@ -328,7 +328,7 @@ const transits = ref<Transit[]>([])
 const transitTimers = new Map<string, ReturnType<typeof setTimeout>[]>()
 let seenFallen = new Set<string>()
 const HOLD_MS = 1000 // the full second between the capturer landing and the haul
-const DRAG_MS = 650
+const DRAG_MS = 950 // long enough for the captor to visibly haul the victim out and back
 function cancelTransit(id: string) {
   ;(transitTimers.get(id) ?? []).forEach(clearTimeout)
   transitTimers.delete(id)
@@ -379,8 +379,22 @@ const transitStyle = (t: Transit) => {
     '--rope-angle': `${angle}deg`,
   }
 }
-// The captors currently heaving on a rope (their victim is mid-haul).
+// The captors currently hauling a victim off (their victim is mid-drag).
 const tuggingIds = computed(() => new Set(transits.value.filter((t) => t.phase === 'drag' && t.tuggerId).map((t) => t.tuggerId as string)))
+// How far (in board squares → 100% == one square, since a piece box is one
+// square wide) each captor must lunge toward the edge to drag its victim there.
+const escortVars = computed(() => {
+  const m: Record<string, { x: string; y: string }> = {}
+  for (const t of transits.value) {
+    if (t.phase !== 'drag' || !t.tuggerId) continue
+    const fx = (t.fromX - GUT) / (BSPAN / 8)
+    const fy = (t.fromY - GUT) / (BSPAN / 8)
+    const tx = (t.toX - GUT) / (BSPAN / 8)
+    const ty = (t.toY - GUT) / (BSPAN / 8)
+    m[t.tuggerId] = { x: `${(tx - fx) * 100}%`, y: `${(ty - fy) * 100}%` }
+  }
+  return m
+})
 
 // ── Endgame banner ─────────────────────────────────────────────────────────
 // The game being over must be unmissable: a big banner across the board,
@@ -516,6 +530,10 @@ const animClass = (square: Square) => {
   const a = animMap.value[square]
   return a ? 'anim-' + a : ''
 }
+const markStyle = (i: number) => {
+  const { col, row } = rc(squareOf(i))
+  return { left: `${(col / 8) * 100}%`, top: `${(row / 8) * 100}%` }
+}
 // Travel speed: bold/reckless pieces dash, timid ones creep; risky moves drag.
 // Deliberately unhurried across the board — the movement is part of the story.
 function moveMs(p: PieceView): number {
@@ -527,7 +545,17 @@ function moveMs(p: PieceView): number {
 }
 const pieceStyle = (p: PieceView) => {
   const { col, row } = rc(p.square)
-  return { left: `${(col / 8) * 100}%`, top: `${(row / 8) * 100}%`, '--move-ms': `${moveMs(p)}ms` }
+  const style: Record<string, string> = {
+    left: `${(col / 8) * 100}%`,
+    top: `${(row / 8) * 100}%`,
+    '--move-ms': `${moveMs(p)}ms`,
+  }
+  const esc = escortVars.value[p.id]
+  if (esc) {
+    style['--esc-x'] = esc.x
+    style['--esc-y'] = esc.y
+  }
+  return style
 }
 
 // Table talk: resolve the speaker so each line can show its piece image + type.
@@ -703,10 +731,11 @@ function onSquare(square: Square) {
   armIdle()
   if (res.moved) {
     maybePostGame()
-    // After a capture, give the victor a beat to haul its victim off and settle
-    // on the square before the enemy can march in and drag IT away.
+    // After a capture, give the victor time to haul its victim off (~1.95s) AND
+    // a full second settled on the square before the enemy marches in to drag it
+    // away in turn.
     const captured = game.graveyard.length > graveBefore
-    window.setTimeout(runAi, captured ? 2600 : 420)
+    window.setTimeout(runAi, captured ? 3000 : 420)
   }
 }
 
@@ -998,15 +1027,7 @@ onBeforeUnmount(() => {
               @pointerleave="endPress"
               @pointercancel="endPress"
               @contextmenu.prevent="openSheetAt(squareOf(i))"
-            >
-              <!-- special rings outrank the plain move dot (an entourage/rage target
-                   can ALSO be a legal square — the stunt is what a tap commits) -->
-              <span v-if="squareOf(i) === coaxSquare" class="dot dot--coax" title="Coax back to post"></span>
-              <span v-else-if="squareOf(i) === reprimandSquare" class="dot dot--reprimand" title="Send the cheat home"></span>
-              <span v-else-if="chaosTargets.has(squareOf(i))" class="dot" :class="rageOffer ? 'dot--rage' : 'dot--chaos'"></span>
-              <span v-else-if="captureTargets.has(squareOf(i))" class="dot dot--capture"></span>
-              <span v-else-if="legalTargets.has(squareOf(i))" class="dot"></span>
-            </div>
+            ></div>
 
             <span v-if="checkSquare" class="check-ring" :style="checkStyle"></span>
 
@@ -1071,6 +1092,18 @@ onBeforeUnmount(() => {
                 </svg>
               </span>
             </TransitionGroup>
+
+            <!-- move / capture / special-move indicators, ABOVE the pieces so
+                 they never hide behind a piece (the mobile bug) -->
+            <div class="marks">
+              <div v-for="(cell, i) in 64" :key="i" class="mark" :data-mark="squareOf(i)" :style="markStyle(i)">
+                <span v-if="squareOf(i) === coaxSquare" class="dot dot--coax" title="Coax back to post"></span>
+                <span v-else-if="squareOf(i) === reprimandSquare" class="dot dot--reprimand" title="Send the cheat home"></span>
+                <span v-else-if="chaosTargets.has(squareOf(i))" class="dot" :class="rageOffer ? 'dot--rage' : 'dot--chaos'"></span>
+                <span v-else-if="captureTargets.has(squareOf(i))" class="dot dot--capture"></span>
+                <span v-else-if="legalTargets.has(squareOf(i))" class="dot"></span>
+              </div>
+            </div>
 
             <!-- comic-book capture burst -->
             <span v-if="smack" class="smack" :style="smackStyle(smack.square)">{{ smack.word }}</span>
@@ -1270,9 +1303,9 @@ onBeforeUnmount(() => {
   height: 9%;
   transform: translate(-50%, -50%);
   object-fit: contain;
-  /* A soft light halo (no hard ring) lifts the fallen — black pieces especially
-     — off the dark purple gutter without looking like a clunky circle. */
-  background: radial-gradient(circle, rgba(233, 232, 240, 0.34) 50%, transparent 72%);
+  /* A soft GOLD halo lifts the fallen — black pieces especially — off the dark
+     purple gutter, on-theme, without a clunky ring. */
+  background: radial-gradient(circle, rgba(250, 204, 21, 0.42) 46%, rgba(250, 204, 21, 0.12) 62%, transparent 74%);
   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55));
 }
 /* Hauling casualty: above the board so the short drag to the edge is visible. */
@@ -1305,7 +1338,7 @@ onBeforeUnmount(() => {
   height: 100%;
   object-fit: contain;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(233, 232, 240, 0.28) 46%, transparent 68%);
+  background: radial-gradient(circle, rgba(250, 204, 21, 0.4) 44%, transparent 66%);
   filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.6));
 }
 /* Being hauled: the piece tumbles and lurches on the rope so it reads as
@@ -1358,19 +1391,28 @@ onBeforeUnmount(() => {
 .grave-transit.drag .haul-rope {
   opacity: 0.95;
 }
-/* The captor stays on the square and HEAVES on the rope while its victim is
-   dragged off — so there's visibly a dragging piece, not just a dragged one. */
+/* The captor actually HAULS its victim: it lunges partway toward the edge slot
+   (dragging the roped body along), holds at the stretch, then hauls itself back
+   to its square. A visible dragging piece, not just a dragged one. */
 .piece-box.tugging {
   z-index: 5;
-  animation: heave 0.42s ease-in-out infinite;
+  animation: escortHaul 950ms cubic-bezier(0.45, 0.05, 0.4, 1) both;
 }
-@keyframes heave {
-  0%,
-  100% {
-    transform: rotate(-7deg) scale(1.04);
+@keyframes escortHaul {
+  0% {
+    transform: translate(0, 0) rotate(0deg);
   }
-  50% {
-    transform: rotate(6deg) scale(0.98);
+  14% {
+    transform: translate(0, 0) rotate(-8deg);
+  }
+  52% {
+    transform: translate(calc(var(--esc-x, 0%) * 0.6), calc(var(--esc-y, 0%) * 0.6)) rotate(10deg);
+  }
+  64% {
+    transform: translate(calc(var(--esc-x, 0%) * 0.6), calc(var(--esc-y, 0%) * 0.6)) rotate(10deg);
+  }
+  100% {
+    transform: translate(0, 0) rotate(0deg);
   }
 }
 /* Board palette: warm gold parchment + muted purple, matching the app's
@@ -1684,6 +1726,22 @@ onBeforeUnmount(() => {
   inset: 0;
   pointer-events: none;
   z-index: 2;
+}
+/* Target indicators sit ABOVE the pieces so a ring on an occupied square (a
+   capture, a rage/jetpack target) is never hidden behind the piece art. */
+.marks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+}
+.mark {
+  position: absolute;
+  width: 12.5%;
+  height: 12.5%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .piece-box {
   position: absolute;

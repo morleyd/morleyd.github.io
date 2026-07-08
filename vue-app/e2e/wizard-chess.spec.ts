@@ -43,17 +43,18 @@ test.describe('Wizard Chess', () => {
   })
 
   test('chaos: a knight takes an off-book leap when Chaos is maxed', async ({ page }) => {
-    // Force the Chaos scaler on before the app boots.
+    // Force Chaos on, and max Team Trust so the knight has "wings" — a jetpack
+    // now needs a reason (rescue / wings / build-up), never "just because".
     await page.addInitScript(() => {
       localStorage.setItem(
         'wizard-chess-settings',
         JSON.stringify({ chatter: 0.6, animation: 0.6, agency: 0.6, chaos: 1 }),
       )
+      localStorage.setItem('wizard-chess-trust', '95')
     })
-    // Chaos is now only offered at a *dramatic* moment (a stunt that captures,
-    // checks, or escapes an attack) — never on a calm opening. So set up a
-    // position where a jetpack leap is a genuine capture: a white knight on d4
-    // with a black pawn on f6, exactly one extended leap away.
+    // Chaos is only offered at a *dramatic* moment (a stunt that captures, checks,
+    // or escapes an attack). Set up a position where a jetpack leap is a genuine
+    // capture: a white knight on d4 with a black pawn on f6, one extended leap away.
     await page.goto('/wizard-chess?fen=' + encodeURIComponent('4k3/8/5p2/8/3N4/8/8/4K3 w - - 0 1'))
 
     // Wait for the hand-set position to settle (four pieces, knight on d4).
@@ -63,7 +64,7 @@ test.describe('Wizard Chess', () => {
     await page.locator('[data-square="d4"]').click() // the white knight
     // A chaos option is offered (dashed purple target).
     await expect(page.locator('.dot--chaos').first()).toBeVisible()
-    const chaosSq = await page.locator('.sq:has(.dot--chaos)').first().getAttribute('data-square')
+    const chaosSq = await page.locator('.mark:has(.dot--chaos)').first().getAttribute('data-mark')
     expect(chaosSq).toBeTruthy()
 
     // Take the off-book leap; the knight lands where no normal knight could.

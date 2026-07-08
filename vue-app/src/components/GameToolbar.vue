@@ -34,20 +34,26 @@ const infoOpen = ref(false)
     </v-menu>
   </div>
 
-  <!-- Desktop: full header -->
+  <!-- Desktop: full header. Settings live behind a cog (a menu), same as mobile,
+       so the sliders don't crowd the board. -->
   <div v-else class="mb-4">
     <div class="d-flex align-center ga-2">
       <h1 class="page-title mb-0">{{ title }}</h1>
       <v-spacer />
       <v-btn v-if="$slots.info" icon="mdi-information-outline" variant="text" @click="infoOpen = true" />
       <v-btn v-if="shareable" icon="mdi-share-variant" variant="text" @click="emit('share')" />
+      <v-menu v-if="$slots.settings" location="bottom end" :close-on-content-click="false">
+        <template #activator="{ props }">
+          <v-btn icon="mdi-cog-outline" variant="text" v-bind="props" />
+        </template>
+        <v-card min-width="320" class="pa-4">
+          <slot name="settings" />
+        </v-card>
+      </v-menu>
     </div>
     <p v-if="$slots.intro" class="text-body-1 text-medium-emphasis mb-0 mt-2">
       <slot name="intro" />
     </p>
-    <div v-if="$slots.settings" class="mt-4">
-      <slot name="settings" />
-    </div>
   </div>
 
   <!-- Info dialog (both breakpoints) -->
