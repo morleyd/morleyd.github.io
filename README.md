@@ -1,51 +1,67 @@
 # morleyd.github.io
 
-David Morley's personal site, built as a Vite + Vue 3 (Vuetify) single-page app and
-deployed to GitHub Pages at **https://morleyd.github.io**.
+David Morley's personal site — a portfolio plus a small arcade of browser games.
+Live at **[morleyd.github.io](https://morleyd.github.io)**.
 
-## Pages
+Single-page app built with **Vue 3**, **Vuetify 3**, and **Vite**, deployed to
+GitHub Pages automatically on every push to `master`.
 
-- **/** — home (timeline, projects, awards)
-- **/contact** — contact info
-- **/wordle** — a full Wordle game (daily puzzle, hard mode, custom/shared words,
-  free-play random words, and post-game analysis). Shared puzzles use
-  `/wordle/<hash>`.
-- **/time-since** — a count-up timer
+## What's here
 
-## Tech stack
+**Portfolio** — home, projects, timeline, gallery, awards, a "time since" widget,
+and contact.
 
-- [Vite](https://vite.dev/) build tooling
-- [Vue 3](https://vuejs.org/) (`<script setup>`) + [Vue Router](https://router.vuejs.org/)
-- [Vuetify 3](https://vuetifyjs.com/) component library
-- Vitest (unit tests) — configured; game-logic services live in `vue-app/src/services/`
+**Games** (all under `/games`):
 
-## Project layout
+| Game | Route | Notes |
+|------|-------|-------|
+| Wizard Chess | `/wizard-chess` | Chess where every piece is a character with moods, bonds, and opinions — a social sim layered over a search engine (`chess.js` + a Web Worker). |
+| Wordle | `/wordle` | With a shareable daily/seeded mode. |
+| Wordle Helper | `/wordle-helper` | Solver / candidate explorer. |
+| Snake | `/snake` | |
+| Minesweeper | `/minesweeper` | |
+| Lights Out | `/lights-out` | |
+| Flood It | `/flood-it` | |
+| Gradient Sort | `/gradient-sort` | |
 
-```
-vue-app/            # the application (all source + build config)
-  src/
-    views/          # routed pages (HomeView, ContactView, WordleView, TimeSinceView)
-    components/      # AppBar, Projects, Awards, Timeline
-    services/       # framework-free game logic (wordleLogic, hardMode, analyzer, …)
-    router/         # route definitions
-  public/           # static assets copied verbatim into the build
-.github/workflows/  # CI that builds and deploys to GitHub Pages
-```
+Most games take an optional seed in the URL so a specific board can be shared.
 
 ## Local development
 
-```sh
-cd vue-app
+```bash
 npm install
-npm run dev        # dev server on http://localhost:3000
-npm run build      # production build to vue-app/dist (also writes 404.html)
-npm run preview    # serve the production build locally
-npm run test:unit  # run vitest
+npm run dev        # Vite dev server on http://localhost:3000
 ```
+
+### Scripts
+
+| Command | Does |
+|---------|------|
+| `npm run dev` | Start the dev server. |
+| `npm run build` | Production build to `dist/` (also emits `404.html` for SPA-style deep links). |
+| `npm run preview` | Serve the production build locally. |
+| `npm run test:unit` | Vitest unit tests. |
+| `npm run test:e2e` | Playwright end-to-end tests. |
+| `npm run lint` | ESLint (flat config) with `--fix`. |
+| `npm run format` | Prettier over `src/`. |
 
 ## Deployment
 
-Pushes to `master` trigger [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml),
-which builds `vue-app` and publishes `vue-app/dist` to GitHub Pages. The build copies
-`index.html` to `404.html` so client-side routes (e.g. a shared `/wordle/<hash>` link)
-resolve on a hard refresh, since GitHub Pages has no SPA fallback of its own.
+Pushing to `master` triggers [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml),
+which builds and publishes `dist/` to GitHub Pages. No manual step. `master` is
+lightly protected (no force-push or deletion); everything else is fair game.
+
+## Maintenance
+
+This repo is intentionally low-touch — Dependabot's routine PRs are off. A couple
+of times a year, from the repo root:
+
+```bash
+npm outdated                              # what's behind
+npm audit                                 # any real vulnerabilities
+npm run lint && npm run test:unit && npm run build   # confirm still healthy
+```
+
+Bump what looks safe, run the checks, and push. Major-version bumps (Vue,
+vue-router, ESLint, Vitest) deserve a manual look — verify the app still boots
+via `npm run preview` before pushing.
