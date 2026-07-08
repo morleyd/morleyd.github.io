@@ -810,11 +810,11 @@ export class WizardGame {
     }
 
     if (piece.type === 'r') {
-      // A rook that's already ranging freely (≥ 6 legal moves) gets cocky enough
-      // to try a diagonal — combined with the dramatic-target filter below, a
-      // deliberate flourish rather than a desperate scramble.
+      // A boxed-in rook — few legal moves (≤ 6) — slips out on a diagonal.
+      // (Mobility, not idleness: how penned in it is right now. Idleness only
+      // gates Breakout.) The dramatic-target filter below still applies.
       const mobility = this.chess.moves({ square: from }).length
-      const o = build('disguise', mobility >= 6, () => bishopTargets(this.chess, from))
+      const o = build('disguise', mobility <= 6, () => bishopTargets(this.chess, from))
       if (o) return o
     }
     if (piece.type === 'n') {

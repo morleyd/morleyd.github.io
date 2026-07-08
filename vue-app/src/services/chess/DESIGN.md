@@ -265,7 +265,7 @@ Audit of why each rule-break is allowed to happen:
 | Stunt | Reason it's offered/fires |
 |---|---|
 | Jetpack (knight) | rescue the king (in check), "wings" (trust ≥ 82), or a real build-up (idle & ranting) — **and** a dramatic target (capture/check/escape) |
-| Disguise (rook) | rook is **active** (≥ 6 legal moves — a confident flourish) **and** the diagonal target is dramatic |
+| Disguise (rook) | rook is **boxed in** (≤ 6 legal moves — penned in *now*, not idle) **and** the diagonal target is dramatic |
 | **Body swap** | **REWORKED**: never between same types; only when a clearly cheaper piece shields a clearly more valuable one that's hanging (and the cheap one was safe), or the swap gives check |
 | Rage-strike | the piece is in its vengeful window with an enemy adjacent |
 | Breakout | middlegame (ply ≥ 16), side deployed, and it has ranted ≥ 4× |
@@ -288,8 +288,8 @@ Round 8 changes:
 
 ### Playtest round 9 (audit follow-ups) — shipped + decisions recorded
 
-- [x] **Disguise** now requires an **active** rook (≥ 6 moves), not a boxed one
-      (David's call — flipped the threshold).
+- [x] **Disguise** is for a **boxed-in** rook (≤ 6 legal moves — how penned in it
+      is *now*; mobility, not idleness, which only gates Breakout).
 - [x] **Rage-strike build-up**: a vengeful piece now **pines for its fallen
       friend** across the turns before it strikes (`pine()` + `mourning` name on
       the soul + PINING lines), so the strike is a story we've been hearing. It
@@ -306,12 +306,12 @@ Round 8 changes:
 - [x] **Defector** keeps its black hat for life (confirmed) — set via the
       `defected` flag, shown persistently by `accessoryOf`, survives promotion.
 
-**DECISIONS on record**: swap = shield-a-valuable-piece **or** give-check only;
-defector only at trust < 33; disguise needs an active rook; entourage needs
-endgame-or-exposed-king; the player may reprimand enemy cheats until their next
-move (multiplayer would let the opponent enforce yours). Open: swap "check in an
-obvious turn or two" is currently immediate-check only; enemy-side entourage/swap
-and defector coax-back still deferred; sound still deferred.
+**DECISIONS on record**: swap = shield-a-valuable-piece **or give immediate
+check** (David: immediate check is enough — no multi-move lookahead needed,
+thread resolved); defector only at trust < 33; disguise needs a boxed-in rook
+(≤6 moves); entourage needs endgame-or-exposed-king; the player may reprimand
+enemy cheats until their next move (multiplayer would let the opponent enforce
+yours). Still deferred: enemy-side entourage/swap, defector coax-back, sound.
 
 ### Self-play soak (`soak.spec.ts`)
 
