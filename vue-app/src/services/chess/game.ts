@@ -34,9 +34,11 @@ import {
   applyChaosMove,
   bishopTargets,
   defect,
+  entourageShift,
   jetpackTargets,
   knockOff,
   materialBalance,
+  swapPieces,
 } from './chaos'
 import { DEFAULT_SETTINGS, DEFAULT_TRUST, type WizardSettings } from './settings'
 import type { Color, GameEvent, MoveEntry, PieceSoul, PieceType, Square, Utterance } from './types'
@@ -46,7 +48,7 @@ const opp = (c: Color): Color => (c === 'w' ? 'b' : 'w')
 const nowMs = () => Date.now()
 
 export type AnimClass = 'tremble' | 'bob' | 'angry' | 'joy'
-export type ChaosType = 'disguise' | 'jetpack' | 'rage'
+export type ChaosType = 'disguise' | 'jetpack' | 'rage' | 'entourage' | 'swap'
 export interface Cue {
   soulId: string
   type: 'shake' | 'hop'
@@ -59,7 +61,7 @@ interface ChaosOffer {
 /** A lingering board marker after any stunt, so the player can read what just
  * happened where (the view renders it for several seconds). */
 export interface StuntFx {
-  kind: ChaosType | 'tantrum' | 'breakout' | 'coldfeet' | 'defect' | 'telegraph'
+  kind: ChaosType | 'breakout' | 'coldfeet' | 'defect' | 'telegraph'
   from: Square | null
   to: Square
   seq: number // bumps every new fx so the view can restart its linger timer
@@ -120,8 +122,9 @@ export class WizardGame {
   private lastSuggestPly = -99
   private offer: ChaosOffer | null = null
   private usedStunts = new Set<string>() // each stunt fires at most once per game
-  private spooked: { soulId: string; home: Square; until: number } | null = null
-  private enrageSeen: Record<string, number> = {} // soulId -> ply its max rage was first visible
+  // A piece that moved itself (fled in fear, or charged off in a breakout) and
+  // can be coaxed back to its post for a while — the recourse for misbehaviour.
+  private spooked: { soulId: string; home: Square; until: number; kind: 'fled' | 'wayward' } | null = null
 
   constructor(public seed: string) {
     this.chess = new Chess()
@@ -237,7 +240,6 @@ export class WizardGame {
     this.offer = null
     this.usedStunts.clear()
     this.spooked = null
-    this.enrageSeen = {}
     this.fx = null
     this.deathFx = 'drag'
     this.smack = null
@@ -383,6 +385,13 @@ export class WizardGame {
   playerTap(square: Square): TapResult {
     if (!this.canPlay) return { moved: false, utterances: [] }
 
+    // A tap on an offered chaos target commits the stunt. Checked BEFORE the
+    // own-piece branch: a body-swap target IS one of your own pieces, and must
+    // commit the swap rather than re-select the friend.
+    if (this.offer && this.selected === this.offer.from && this.offer.targets.includes(square)) {
+      return this.doChaosMove(square)
+    }
+
     const piece = this.chess.get(square)
     if (piece && piece.color === PLAYER) {
       this.resist = null
@@ -424,11 +433,6 @@ export class WizardGame {
       }
     }
 
-    // A tap on an offered chaos target commits the stunt.
-    if (this.offer && this.selected === this.offer.from && this.offer.targets.includes(square)) {
-      return this.doChaosMove(square)
-    }
-
     if (this.selected && this.legalTargets().has(square)) {
       const soul = this.soulAt(this.selected)
 
@@ -437,8 +441,9 @@ export class WizardGame {
       if (!this.resist || this.resist.from !== this.selected || this.resist.to !== square) {
         const risk = assessMove(this.chess.fen(), this.selected, square)
         let need = soul ? requiredTaps(soul, risk) : 1
-        // Low trust → pieces push back more; high trust → they defer to you.
-        const resistChance = this.settings.agency * (1.4 - this.trust / 100)
+        // The trust arc, made visible: a mutinous army argues about everything,
+        // a devoted one (trust >= ~85) never talks back at all.
+        const resistChance = this.settings.agency * Math.max(0, Math.min(1, (85 - this.trust) / 55))
         if (need > 1 && this.rng() > resistChance) need = 1
         this.resist = { from: this.selected, to: square, count: 0, need, sacrifice: risk.sacrifice }
       }
@@ -498,11 +503,22 @@ export class WizardGame {
       if (s.captured || !s.square) continue
       if (s.vengefulUntil >= this.society.ply) out[s.square] = 'vengeful'
     }
-    if (this.spooked && this.society.ply <= this.spooked.until) {
+    // Only a FLED piece looks faded-scared; a wayward charger just went off on
+    // its own and shouldn't read as frightened (it's still coaxable though).
+    if (this.spooked && this.spooked.kind === 'fled' && this.society.ply <= this.spooked.until) {
       const s = this.society.souls[this.spooked.soulId]
       if (s && !s.captured && s.square) out[s.square] = 'spooked'
     }
     return out
+  }
+
+  /** The player's coaxable runaway (fled or charged off), if any — so the view
+   * can teach the coax-back ("select it, tap the green ring"). */
+  waywardSoul(): PieceSoul | null {
+    if (!this.spooked || this.society.ply > this.spooked.until) return null
+    const s = this.society.souls[this.spooked.soulId]
+    if (!s || s.captured || !s.square || s.color !== PLAYER) return null
+    return s
   }
 
   /** If a spooked piece is selected within its window, the square you can coax
@@ -561,6 +577,33 @@ export class WizardGame {
       const o = build('jetpack', leaps.length > 0, () => leaps)
       if (o) return o
     }
+
+    // Pep-talk entourage: the king, with friends at his side, rallies the whole
+    // formation to march one step together (his move for the turn). Not gated on
+    // drama — the rally IS the drama.
+    if (piece.type === 'k' && !this.usedStunts.has('entourage') && this.rng() < this.settings.chaos) {
+      const allies = adjacentSquares(from).filter((s) => this.chess.get(s)?.color === PLAYER)
+      if (allies.length >= 2) {
+        const targets = adjacentSquares(from).filter(
+          (to) => !this.chess.get(to) && !!entourageShift(new Chess(fen), from, to),
+        )
+        if (targets.length) return { type: 'entourage', from, targets }
+      }
+    }
+
+    // Body swap: a piece with a bonded friend beside it can trade places —
+    // "Cover me!" (its move for the turn).
+    if (soul && !this.usedStunts.has('swap') && this.rng() < this.settings.chaos) {
+      const friends = adjacentSquares(from).filter((s) => {
+        const id = this.society.bySquare[s]
+        if (!id) return false
+        const other = this.society.souls[id]
+        if (other.color !== PLAYER || other.id === soul.id) return false
+        const bond = Math.max(soul.bonds[other.id] ?? 0, other.bonds[soul.id] ?? 0)
+        return bond >= 0.45 && swapPieces(new Chess(fen), from, s)
+      })
+      if (friends.length) return { type: 'swap', from, targets: friends }
+    }
     return null
   }
 
@@ -573,6 +616,8 @@ export class WizardGame {
   private doChaosMove(to: Square): TapResult {
     const offer = this.offer!
     if (offer.type === 'rage') return this.doRageStrike(offer.from, to)
+    if (offer.type === 'entourage') return this.doEntourage(offer.from, to)
+    if (offer.type === 'swap') return this.doSwap(offer.from, to)
     const soul = this.soulAt(offer.from)
     this.deathFx = 'drag'
     const res = this.relocate(offer.from, to, true)
@@ -590,6 +635,88 @@ export class WizardGame {
     utterances.push(
       ...speak(this.society, scanBoard(this.society, this.chess), this.dialogue, this.rng, this.settings.chatter, 1),
     )
+    return { moved: true, utterances }
+  }
+
+  /** The pep-talk entourage: king + adjacent allies march one step together as
+   * a single turn. A rare, big formation beat — the king leads, friends follow. */
+  private doEntourage(from: Square, to: Square): TapResult {
+    const kingId = this.society.bySquare[from]
+    const moves = entourageShift(this.chess, from, to)
+    this.usedStunts.add('entourage')
+    this.offer = null
+    this.selected = null
+    this.resist = null
+    if (!moves) return { moved: false, utterances: [] }
+    // Two-phase society update: vacate every origin, then land everyone — a
+    // member may be stepping into a square another member just left.
+    const marchers = moves.map((m) => ({ ...m, id: this.society.bySquare[m.from] }))
+    for (const m of marchers) delete this.society.bySquare[m.from]
+    for (const m of marchers) {
+      if (!m.id) continue
+      this.society.bySquare[m.to] = m.id
+      const s = this.society.souls[m.id]
+      s.square = m.to
+      s.idleFor = 0
+    }
+    this.deathFx = 'drag'
+    this.lastFrom = from
+    this.lastTo = to
+    this.lastMoverId = kingId ?? null
+    this.lastMoveRisky = false
+    this.setFx('entourage', from, to)
+    this.logMove(`K+${moves.length - 1}→${to} (entourage)`, PLAYER, true)
+    const king = kingId ? this.society.souls[kingId] : null
+    const utterances: Utterance[] = king
+      ? [{ soulId: king.id, square: to, color: king.color, name: king.persona.name, text: 'To me, friends — we move as ONE!', tone: 'gloat' }]
+      : []
+    // One marcher answers the rally.
+    const fellow = marchers.find((m) => m.id && m.id !== kingId)
+    if (fellow?.id) {
+      const s = this.society.souls[fellow.id]
+      utterances.push({ soulId: s.id, square: s.square, color: s.color, name: s.persona.name, text: 'Right behind you, sire!', tone: 'warm' })
+    }
+    return { moved: true, utterances }
+  }
+
+  /** Body swap: two bonded friends trade squares — "Cover me!" */
+  private doSwap(from: Square, to: Square): TapResult {
+    const aId = this.society.bySquare[from]
+    const bId = this.society.bySquare[to]
+    const ok = swapPieces(this.chess, from, to)
+    this.usedStunts.add('swap')
+    this.offer = null
+    this.selected = null
+    this.resist = null
+    if (!ok) return { moved: false, utterances: [] }
+    if (aId) {
+      this.society.bySquare[to] = aId
+      const a = this.society.souls[aId]
+      a.square = to
+      a.idleFor = 0
+    }
+    if (bId) {
+      this.society.bySquare[from] = bId
+      const b = this.society.souls[bId]
+      b.square = from
+      b.idleFor = 0
+    }
+    this.deathFx = 'drag'
+    this.lastFrom = from
+    this.lastTo = to
+    this.lastMoverId = aId ?? null
+    this.lastMoveRisky = false
+    this.setFx('swap', from, to)
+    this.logMove(`${from}<->${to} (swap)`, PLAYER, true)
+    const utterances: Utterance[] = []
+    if (aId) {
+      const a = this.society.souls[aId]
+      utterances.push({ soulId: a.id, square: to, color: a.color, name: a.persona.name, text: 'Cover me — SWITCH!', tone: 'gloat' })
+    }
+    if (bId) {
+      const b = this.society.souls[bId]
+      utterances.push({ soulId: b.id, square: from, color: b.color, name: b.persona.name, text: 'On it. Nobody saw a thing.', tone: 'warm' })
+    }
     return { moved: true, utterances }
   }
 
@@ -640,19 +767,40 @@ export class WizardGame {
 
   /** After the engine replies: one spontaneous stunt may occur, either army.
    * Never while the player is holding a piece — the board must not shift under
-   * a selection in progress. */
+   * a selection in progress. (The old imposed "tantrum" is cut: a piece simply
+   * vanishing off-turn read as a glitch, not a story. Rage now pays off only
+   * through the player-controlled rage-strike.) */
   spontaneousChaos(): Utterance | null {
     if (!this.canPlay || this.settings.chaos <= 0) return null
     if (this.selected) return null
-    return this.tantrum() ?? this.breakout() ?? this.coldFeet() ?? this.defector()
+    return this.breakout() ?? this.coldFeet() ?? this.defector()
+  }
+
+  /** Legal-move count for the piece on `sq` with the turn forced to its colour —
+   * a cheap "how free is it there" probe for off-book planning. */
+  private freedomAt(fen: string, sq: Square): number {
+    try {
+      const probe = new Chess(fen)
+      const color = probe.get(sq)?.color
+      if (!color) return 0
+      const parts = fen.split(' ')
+      parts[1] = color
+      parts[3] = '-' // drop en passant so the forced-turn FEN stays coherent
+      return new Chess(parts.join(' ')).moves({ square: sq }).length
+    } catch {
+      return 0
+    }
   }
 
   /** A piece stuck behind its own pawn for a very long time finally charges up
-   * its file — a real slide of a few ranks (how many depends on the room above).
-   * The pawn is shoved one rank further ahead of it, or, when there's no room to
-   * give, trampled clean off the board. Spontaneous flavor for the boxed-in. */
+   * its file, shoving the pawn one rank further ahead. Disciplined so it never
+   * hurts the player: it only fires when the landing square genuinely frees the
+   * piece, it never breaks a rook the king could still castle with, YOUR pieces
+   * never trample their own pawn (only a boxed-in enemy does that), and a
+   * wayward charger can be coaxed back to its post. */
   private breakout(): Utterance | null {
     if (this.usedStunts.has('breakout')) return null
+    const castling = this.chess.fen().split(' ')[2]
     // Only a piece whose impatience the player has *heard* (the escalating
     // rant lines fire from ~0.68) gets to erupt — the charge pays off a story
     // the player was already following, instead of arriving from nowhere.
@@ -661,6 +809,12 @@ export class WizardGame {
       .sort((a, b) => b.mood.impatience - a.mood.impatience)
     for (const s of stuck) {
       const sq = s.square as Square
+      // Never break a rook the king may still castle with — the player would
+      // rightly resent a stunt that costs them the option.
+      if (s.type === 'r') {
+        const right = sq === 'a1' ? 'Q' : sq === 'h1' ? 'K' : sq === 'a8' ? 'q' : sq === 'h8' ? 'k' : ''
+        if (right && castling.includes(right)) continue
+      }
       const file = sq[0]
       const rank = Number(sq[1])
       const dir = s.color === 'w' ? 1 : -1
@@ -675,14 +829,34 @@ export class WizardGame {
       let runway = 0
       for (let r = pawnRank + dir; r >= 1 && r <= 8 && !this.chess.get((file + r) as Square); r += dir) runway += 1
 
+      // A trample (pawn dies underfoot) only for a completely boxed-in ENEMY —
+      // the player's own material is never smashed by their own stunt.
+      const trample = runway === 0
+      if (trample && s.color === PLAYER) continue
+
+      // Candidate landing squares must genuinely FREE the piece — a one-step
+      // shuffle into another trap (the playtest rook stuck behind its knight)
+      // is worse than staying put.
+      const before = this.freedomAt(this.chess.fen(), sq)
+      const options: { dest: Square; pawnDest: Square | null }[] = []
+      const maxK = trample ? 1 : runway
+      for (let k = 1; k <= maxK; k += 1) {
+        const dest = (file + (rank + k * dir)) as Square
+        const pawnDest = trample ? null : ((file + (pawnRank + k * dir)) as Square)
+        const trial = new Chess(this.chess.fen())
+        const mover = trial.get(sq)!
+        const pawn = trial.get(pawnSq)!
+        trial.remove(sq)
+        trial.remove(pawnSq)
+        if (pawnDest) trial.put({ type: pawn.type, color: pawn.color }, pawnDest)
+        trial.put({ type: mover.type, color: mover.color }, dest)
+        if (this.freedomAt(trial.fen(), dest) >= before + 3) options.push({ dest, pawnDest })
+      }
+      if (!options.length) continue // the charge wouldn't actually free it — hold
+      const choice = this.pick(options)
+
       const pawnId = this.society.bySquare[pawnSq]
-      // Trample when there's nowhere to shove the pawn, or (rarely) out of sheer
-      // impatience; otherwise the pawn slides up and the piece charges in behind.
-      const trample = runway === 0 || this.rng() < 0.35
-      let dest: Square
       if (trample) {
-        const k = 1 + Math.floor(this.rng() * (runway + 1)) // charge 1..runway+1 ranks
-        dest = (file + (rank + k * dir)) as Square
         this.deathFx = 'spiral' // the ONE death that spirals out — trampled underfoot
         if (!knockOff(this.chess, pawnSq)) continue // crush the pawn (clears the path)
         if (pawnId) {
@@ -695,20 +869,19 @@ export class WizardGame {
           this.graveyard.push(pawnId)
         }
         this.setSmack(pawnSq, 'SQUISH!') // trampled underfoot
-      } else {
-        const k = 1 + Math.floor(this.rng() * runway) // charge 1..runway ranks
-        dest = (file + (rank + k * dir)) as Square
-        const pawnDest = (file + (pawnRank + k * dir)) as Square // pawn stays one ahead
-        if (!this.relocate(pawnSq, pawnDest, false)) continue
+      } else if (!this.relocate(pawnSq, choice.pawnDest as Square, false)) {
+        continue
       }
-      if (!this.relocate(sq, dest, false)) continue // the charge itself, keeping our turn
+      if (!this.relocate(sq, choice.dest, false)) continue // the charge itself, keeping our turn
       s.mood.impatience = 0
       this.usedStunts.add('breakout')
-      this.setFx('breakout', sq, dest)
-      this.logMove(`${dest}${trample ? ' (breakout, trampled)' : ' (breakout)'}`, s.color, true)
+      this.setFx('breakout', sq, choice.dest)
+      this.logMove(`${choice.dest}${trample ? ' (breakout, trampled)' : ' (breakout)'}`, s.color, true)
+      // A wayward charger of YOURS can be ordered back to its post (the coax).
+      if (s.color === PLAYER) this.spooked = { soulId: s.id, home: sq, until: this.society.ply + 8, kind: 'wayward' }
       return {
         soulId: s.id,
-        square: dest,
+        square: choice.dest,
         color: s.color,
         name: s.persona.name,
         text: trample ? 'MOVE or be trampled — I waited long enough!' : 'Out of my way — coming through!',
@@ -739,7 +912,7 @@ export class WizardGame {
       this.setFx('coldfeet', sq, behind)
       this.logMove(`${behind} (cold feet)`, s.color, true)
       // The player can coax their own spooked piece back to its post for a while.
-      if (s.color === PLAYER) this.spooked = { soulId: s.id, home, until: this.society.ply + 6 }
+      if (s.color === PLAYER) this.spooked = { soulId: s.id, home, until: this.society.ply + 6, kind: 'fled' }
       return {
         soulId: s.id,
         square: behind,
@@ -747,64 +920,6 @@ export class WizardGame {
         name: s.persona.name,
         text: 'Nope! Backing away — nope nope nope.',
         tone: 'afraid',
-      }
-    }
-    return null
-  }
-
-  /** A max-rage piece knocks an adjacent enemy clean off the board. The rage
-   * must have been *visible for at least a round first* (red aura pulsing) — an
-   * eruption in the same beat as the capture that caused it reads as a glitch,
-   * not a story (the Gertrude-dies-instantly playtest). */
-  private tantrum(): Utterance | null {
-    if (this.usedStunts.has('tantrum')) return null
-    const furious = Object.values(this.society.souls)
-      .filter((s) => !s.captured && s.square && (s.mood.anger >= 0.8 || s.vengefulUntil >= this.society.ply))
-      .sort((a, b) => b.mood.anger - a.mood.anger)
-    for (const s of furious) {
-      const sq = s.square as Square
-      const foes = adjacentSquares(sq).filter((a) => {
-        const p = this.chess.get(a)
-        return p && p.color !== s.color && p.type !== 'k'
-      })
-      if (!foes.length) continue
-      // First sighting of this piece at max rage: let the red state be read for
-      // a full round before anything erupts.
-      const seen = this.enrageSeen[s.id]
-      if (seen === undefined) {
-        this.enrageSeen[s.id] = this.society.ply
-        continue
-      }
-      if (this.society.ply <= seen) continue
-      if (this.rng() >= this.settings.chaos) continue
-      const target = this.pick(foes)
-      const victimId = this.society.bySquare[target]
-      this.deathFx = 'drag'
-      if (!knockOff(this.chess, target)) continue
-      if (victimId) {
-        const v = this.society.souls[victimId]
-        if (v) {
-          v.captured = true
-          v.square = null
-        }
-        delete this.society.bySquare[target]
-        this.graveyard.push(victimId)
-      }
-      this.setSmack(target)
-      this.usedStunts.add('tantrum')
-      this.lastFrom = null
-      this.lastTo = target
-      this.lastMoverId = s.id
-      this.lastMoveRisky = false
-      this.setFx('tantrum', sq, target)
-      this.logMove(`×${target} (tantrum)`, s.color, true)
-      return {
-        soulId: s.id,
-        square: sq,
-        color: s.color,
-        name: s.persona.name,
-        text: "THAT'S IT — you're OFF the board!",
-        tone: 'angry',
       }
     }
     return null

@@ -177,10 +177,11 @@ const FX_LABEL: Record<string, string> = {
   jetpack: 'JETPACK!',
   disguise: 'DISGUISE!',
   rage: 'RAGE-STRIKE!',
-  tantrum: 'TANTRUM!',
   breakout: 'BREAKOUT!',
   coldfeet: 'COLD FEET',
   defect: 'DEFECTED!',
+  entourage: 'MOVE AS ONE!',
+  swap: 'SWITCHEROO!',
   telegraph: 'UP TO SOMETHING…',
 }
 function stuntMark(f: { kind: StuntFx['kind']; from: Square | null; to: Square }) {
@@ -227,6 +228,21 @@ const smackStyle = (sq: Square) => {
   return { left: `${((col + 0.5) / 8) * 100}%`, top: `${((row + 0.5) / 8) * 100}%` }
 }
 
+// ── Endgame banner ─────────────────────────────────────────────────────────
+// The game being over must be unmissable: a big banner across the board,
+// green for a win, red for a loss, slate for a draw.
+const endBanner = computed<{ title: string; sub: string; cls: string } | null>(() => {
+  version.value
+  if (!game.gameOver) return null
+  if (game.chess.isCheckmate()) {
+    return game.turn !== 'w'
+      ? { title: 'CHECKMATE!', sub: 'You win — the enemy king has fallen', cls: 'win' }
+      : { title: 'CHECKMATE', sub: 'Your king has fallen', cls: 'lose' }
+  }
+  if (game.chess.isStalemate()) return { title: 'STALEMATE', sub: 'Nobody can move — a stiff, awkward draw', cls: 'draw' }
+  return { title: 'DRAW', sub: 'Everyone lives to bicker another day', cls: 'draw' }
+})
+
 // ── Capture escort ─────────────────────────────────────────────────────────
 // After the captor's travel slide finishes, it dives down off the board (to the
 // box, along its own file) and climbs back to its square. The victim's leave
@@ -252,16 +268,24 @@ function clearEscort() {
 }
 
 // ── Stunt accessories ──────────────────────────────────────────────────────
-// While a stunt's FX lingers, the piece that pulled it wears the evidence:
-// jetpack flame, disguise glasses, a defector's black hat.
-type Accessory = 'flame' | 'glasses' | 'hat' | null
+// The evidence goes ON the piece — both while an offer is on the table (so you
+// can SEE what you'd be opting into: glasses = "I could be a bishop") and while
+// the stunt's FX lingers afterwards.
+type Accessory = 'flame' | 'glasses' | 'hat' | 'banner' | null
 function accessoryOf(p: PieceView): Accessory {
+  // An active offer dresses the selected piece for the part.
+  if (p.square === selectedSquare.value) {
+    const t = game.chaosOfferType()
+    if (t === 'jetpack') return 'flame'
+    if (t === 'disguise') return 'glasses'
+    if (t === 'entourage') return 'banner'
+  }
   const f = stuntFx.value
   if (!f) return null
   if (f.kind === 'jetpack' && p.square === f.to) return 'flame'
   if (f.kind === 'disguise' && p.square === f.to) return 'glasses'
   if (f.kind === 'defect' && p.square === f.to) return 'hat'
-  if (f.kind === 'telegraph' && p.square === f.to) return null // the ring + label carry the telegraph
+  if (f.kind === 'entourage' && p.square === f.to) return 'banner'
   return null
 }
 
@@ -326,6 +350,11 @@ const status = computed(() => {
   if (game.chess.isDraw()) return "It's a draw. Everyone lives to bicker another day."
   if (game.turn !== 'w' || game.aiThinking) return 'The enemy is plotting…'
   if (selectedName.value) {
+    // Holding a runaway: teach the coax (the recourse for misbehaving pieces).
+    if (game.coaxTarget()) {
+      const s = game.soulAt(selectedSquare.value as Square)
+      return `${s?.persona.name ?? 'It'} went off on its own — tap the green ring to order it back to its post (free).`
+    }
     // A vengeful piece's red pulse gets explained the moment you pick it up —
     // and, when a rage-strike is on offer, told how to spend it.
     const s = game.soulAt(selectedSquare.value as Square)
@@ -336,6 +365,9 @@ const status = computed(() => {
     }
     return `Holding ${selectedName.value} — pick a square.`
   }
+  // A runaway on the loose: point the player at the fix before anything else.
+  const runaway = game.waywardSoul()
+  if (runaway) return `${runaway.persona.name} moved on its own — select it to order it back.`
   if (game.chess.isCheck()) return 'You are in check!'
   return 'Your move.'
 })
@@ -359,6 +391,11 @@ function moveMs(p: PieceView): number {
 }
 const pieceStyle = (p: PieceView) => {
   const { col, row } = rc(p.square)
+  // A per-piece lateral sway (sign + size hashed from its identity) so no two
+  // drag-offs trace the same path — organic, not robotic.
+  let h = 0
+  for (const ch of p.id) h += ch.charCodeAt(0)
+  const sway = ((h % 29) + 16) * (h % 2 ? 1 : -1)
   return {
     left: `${(col / 8) * 100}%`,
     top: `${(row / 8) * 100}%`,
@@ -366,6 +403,7 @@ const pieceStyle = (p: PieceView) => {
     // Distance (in own-heights) from this square down past the board's bottom
     // edge — where the box sits. Drives both the drag-off exit and the escort.
     '--exit-y': `${(8 - row) * 100 + 60}%`,
+    '--sway': `${sway}%`,
   }
 }
 const bubbleStyle = (b: Bubble) => {
@@ -417,6 +455,16 @@ const trustLabel = computed(() => {
   if (t < 60) return 'Uneasy'
   if (t < 80) return 'Loyal'
   return 'Devoted'
+})
+// What the current trust tier actually DOES — the arc is a mechanic, not just
+// a meter: high trust silences back-talk, low trust breeds refusals + bad tips.
+const trustHint = computed(() => {
+  const t = trustPct.value
+  if (t < 20) return 'They refuse orders and shout bad advice.'
+  if (t < 40) return 'Expect arguments and dubious tips.'
+  if (t < 60) return "They'll question risky orders."
+  if (t < 85) return 'Mostly obedient — the odd grumble.'
+  return 'They follow your orders without question.'
 })
 const trustColor = computed(() => {
   const t = trustPct.value
@@ -791,9 +839,11 @@ onBeforeUnmount(() => {
             @pointercancel="endPress"
             @contextmenu.prevent="openSheetAt(squareOf(i))"
           >
-            <span v-if="legalTargets.has(squareOf(i))" class="dot"></span>
-            <span v-else-if="squareOf(i) === coaxSquare" class="dot dot--coax" title="Coax back to post"></span>
+            <!-- special rings outrank the plain move dot (an entourage/rage target
+                 can ALSO be a legal square — the stunt is what a tap commits) -->
+            <span v-if="squareOf(i) === coaxSquare" class="dot dot--coax" title="Coax back to post"></span>
             <span v-else-if="chaosTargets.has(squareOf(i))" class="dot" :class="rageOffer ? 'dot--rage' : 'dot--chaos'"></span>
+            <span v-else-if="legalTargets.has(squareOf(i))" class="dot"></span>
           </div>
 
           <span v-if="checkSquare" class="check-ring" :style="checkStyle"></span>
@@ -842,11 +892,21 @@ onBeforeUnmount(() => {
                 <rect x="9" y="2" width="18" height="13" rx="2" fill="#1e293b" />
                 <rect x="9" y="10" width="18" height="3" fill="#7f1d1d" />
               </svg>
+              <svg v-else-if="accessoryOf(p) === 'banner'" class="acc acc-banner" viewBox="0 0 20 30" aria-hidden="true">
+                <line x1="3" y1="0" x2="3" y2="30" stroke="#78350f" stroke-width="2.6" />
+                <path d="M4 1 L19 5 L4 11 Z" fill="#dc2626" stroke="#7f1d1d" stroke-width="1" />
+              </svg>
             </span>
           </TransitionGroup>
 
           <!-- comic-book capture burst -->
           <span v-if="smack" class="smack" :style="smackStyle(smack.square)">{{ smack.word }}</span>
+
+          <!-- endgame banner: unmissable -->
+          <div v-if="endBanner" class="endgame" :class="endBanner.cls">
+            <div class="endgame-title">{{ endBanner.title }}</div>
+            <div class="endgame-sub">{{ endBanner.sub }}</div>
+          </div>
 
           <div
             v-for="b in bubbles"
@@ -887,6 +947,7 @@ onBeforeUnmount(() => {
             <span class="trust-label" :style="{ color: trustColor }">{{ trustLabel }} · {{ trustPct }}</span>
           </div>
           <v-progress-linear :model-value="trustPct" :color="trustColor" height="8" rounded bg-color="rgba(148,163,184,0.2)" />
+          <div class="text-caption text-medium-emphasis mt-1">{{ trustHint }}</div>
         </div>
 
         <div class="text-overline text-medium-emphasis mb-1 mt-4">Table talk</div>
@@ -1197,6 +1258,100 @@ onBeforeUnmount(() => {
   left: 17%;
   top: -16%;
 }
+.acc-banner {
+  width: 42%;
+  height: 64%;
+  left: 62%;
+  top: -26%;
+  animation: bannerWave 1.1s ease-in-out infinite;
+  transform-origin: 15% 100%;
+}
+@keyframes bannerWave {
+  50% {
+    transform: rotate(6deg);
+  }
+}
+
+/* The rope: drag-off victims get lassoed and hauled down to the box — a loop
+   around the waist and a taut line pulling from below. */
+.pieces:not(.death-spiral) .piece-box.pmove-leave-active::before {
+  content: '';
+  position: absolute;
+  left: 14%;
+  top: 40%;
+  width: 72%;
+  height: 26%;
+  border: 3px solid #b45309;
+  border-radius: 50%;
+  z-index: 4;
+}
+.pieces:not(.death-spiral) .piece-box.pmove-leave-active::after {
+  content: '';
+  position: absolute;
+  left: calc(50% - 2px);
+  top: 62%;
+  width: 4px;
+  height: 300%;
+  background: repeating-linear-gradient(180deg, #d97706 0 7px, #92400e 7px 14px);
+  z-index: 2;
+}
+
+/* Endgame banner: the game being over is unmissable. */
+.endgame {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: rgba(15, 23, 42, 0.55);
+  z-index: 8;
+  pointer-events: none;
+  animation: endgameIn 0.7s cubic-bezier(0.2, 1.3, 0.4, 1) both;
+}
+.endgame-title {
+  font-size: clamp(2.2rem, 9vw, 4rem);
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 0.05em;
+  padding: 6px 28px;
+  border-radius: 14px;
+  transform: rotate(-4deg);
+}
+.endgame.win .endgame-title {
+  color: #052e16;
+  background: #4ade80;
+  border: 4px solid #166534;
+  box-shadow: 0 6px 30px rgba(74, 222, 128, 0.45);
+}
+.endgame.lose .endgame-title {
+  color: #fef2f2;
+  background: #dc2626;
+  border: 4px solid #7f1d1d;
+  box-shadow: 0 6px 30px rgba(220, 38, 38, 0.45);
+}
+.endgame.draw .endgame-title {
+  color: #f1f5f9;
+  background: #475569;
+  border: 4px solid #1e293b;
+}
+.endgame-sub {
+  font-size: clamp(0.85rem, 2.6vw, 1.1rem);
+  font-weight: 700;
+  color: #f8fafc;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+@keyframes endgameIn {
+  0% {
+    opacity: 0;
+    transform: scale(1.4);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
 .check-ring {
   position: absolute;
   width: 12.5%;
@@ -1248,45 +1403,69 @@ onBeforeUnmount(() => {
   transition: transform var(--move-ms, 300ms) cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 /* Capture = hauled off the board, all the way down past the bottom edge to the
-   box, slow and heavy. (Canon: the fallen are dragged off, not vanished.) */
+   box, slow and heavy — and NOT in a straight line: each victim staggers and
+   sways on its own path (--sway is hashed per piece). Canon: dragged, not
+   vanished. */
 .pmove-leave-active {
-  transition:
-    opacity 1.4s ease-in,
-    transform 1.5s cubic-bezier(0.45, 0.05, 0.7, 0.5);
   z-index: 3;
+  animation: dragOff 1.6s cubic-bezier(0.4, 0.08, 0.7, 0.5) both;
 }
-.pmove-leave-to {
-  opacity: 0;
-  transform: translateY(var(--exit-y, 300%)) rotate(10deg);
+@keyframes dragOff {
+  0% {
+    transform: translate(0, 0) rotate(0deg);
+    opacity: 1;
+  }
+  22% {
+    transform: translate(calc(var(--sway, 20%) * -0.55), calc(var(--exit-y, 300%) * 0.14)) rotate(-9deg);
+  }
+  48% {
+    transform: translate(var(--sway, 20%), calc(var(--exit-y, 300%) * 0.46)) rotate(11deg);
+    opacity: 1;
+  }
+  74% {
+    transform: translate(calc(var(--sway, 20%) * -0.6), calc(var(--exit-y, 300%) * 0.78)) rotate(-7deg);
+    opacity: 0.95;
+  }
+  100% {
+    transform: translate(calc(var(--sway, 20%) * 0.3), var(--exit-y, 300%)) rotate(8deg);
+    opacity: 0;
+  }
 }
-/* The captor escorts the fallen down to the box, then climbs back to its post. */
+/* The captor escorts the fallen down to the box, then climbs back to its post —
+   leaning into the haul on the way down, dusting itself off on the way up. */
 .piece-box.escorting {
   z-index: 4;
   animation: escort 2.5s cubic-bezier(0.45, 0.05, 0.55, 0.95) both;
 }
 @keyframes escort {
   0% {
-    transform: translateY(0);
+    transform: translate(0, 0) rotate(0deg);
+  }
+  18% {
+    transform: translate(calc(var(--sway, 20%) * 0.5), calc(var(--exit-y, 300%) * 0.28)) rotate(5deg);
   }
   46% {
-    transform: translateY(var(--exit-y, 300%));
+    transform: translate(calc(var(--sway, 20%) * -0.2), var(--exit-y, 300%)) rotate(-3deg);
   }
-  60% {
-    transform: translateY(var(--exit-y, 300%));
+  58% {
+    transform: translate(calc(var(--sway, 20%) * -0.2), var(--exit-y, 300%)) rotate(0deg);
+  }
+  82% {
+    transform: translate(calc(var(--sway, 20%) * -0.45), calc(var(--exit-y, 300%) * 0.3)) rotate(-5deg);
   }
   100% {
-    transform: translateY(0);
+    transform: translate(0, 0) rotate(0deg);
   }
 }
 /* The ONE exception: a trampled pawn spirals out of existence underfoot. */
 .pieces.death-spiral .pmove-leave-active {
-  transition:
-    opacity 0.85s ease-in,
-    transform 0.95s ease-in;
+  animation: spiralOut 0.95s ease-in both;
 }
-.pieces.death-spiral .pmove-leave-to {
-  opacity: 0;
-  transform: rotate(660deg) scale(0);
+@keyframes spiralOut {
+  100% {
+    transform: rotate(660deg) scale(0);
+    opacity: 0;
+  }
 }
 
 /* Mood animations — capped to ~2 pieces by the controller, so rare by design.
@@ -1582,16 +1761,18 @@ onBeforeUnmount(() => {
   .piece-box.cue-hop {
     animation: none !important;
   }
-  .pmove-move,
-  .pmove-leave-active,
-  .pieces.death-spiral .pmove-leave-active {
+  .pmove-move {
     transition: none !important;
   }
+  .pmove-leave-active,
+  .pieces.death-spiral .pmove-leave-active,
   .stunt-ring,
   .stunt-ring.fx-telegraph,
   .stunt-label,
   .piece-box.escorting,
-  .acc-flame {
+  .acc-flame,
+  .acc-banner,
+  .endgame {
     animation: none !important;
   }
   .smack {

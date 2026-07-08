@@ -107,8 +107,39 @@ Gertrude — all at 8:57). The fixes, all in:
       wears a flickering thruster flame, the disguised rook wears glasses, the
       defector wears a black hat — for as long as the stunt FX lingers.
 
-Deferred canon: pep-talk entourage (multi-piece turn), body swap, a **trust arc
-that visibly unlocks less back-talk**, a trust **reset** control.
+### Playtest round 3 (tantrum cut, endgame clarity, entourage/swap/trust) — shipped
+
+- [x] **Tantrum CUT** (David: a random piece vanishing off-turn is alarming, not
+      fun). Rage now pays off only through the player-controlled rage-strike.
+- [x] **Endgame banner**: unmissable full-board overlay — CHECKMATE! green on a
+      win, red on a loss, slate for stalemate/draw, with a subtitle.
+- [x] **Rope drag-off**: victims get a lasso loop + taut rope, and the descent
+      is *organic* — per-piece hashed sway (`--sway`), staggering curves, no two
+      paths alike; the escort leans and drifts too. Spiral stays trample-only.
+- [x] **Offers are visible**: the accessory goes on at OFFER time — glasses on
+      the rook (disguise), flame on the knight (jetpack), banner on the king
+      (entourage) — so you can see what you'd be opting into. Special rings now
+      outrank the plain move dot on shared squares.
+- [x] **Pep-talk entourage** (canon): king + ≥2 adjacent allies march one step
+      together as a single turn (`entourageShift`, king must lead, ≥1 companion,
+      commit-validated). "To me, friends — we move as ONE!"
+- [x] **Body swap** (canon): two bonded friends (bond ≥ .45) beside each other
+      trade squares as a turn — "Cover me — SWITCH!"
+- [x] **Trust arc, visible**: refusal chance is now
+      `agency × clamp((85 − trust)/55)` — a devoted army (85+) NEVER talks back,
+      a mutinous one always digs in; a caption under the meter says what the
+      current tier does. **No trust reset control (decided).**
+- [x] **Breakout discipline** (playtest: a rook trampled its own pawn to move
+      one square into a new trap, spoiling castling): player pieces never
+      trample their own pawn; the landing square must genuinely free the piece
+      (`freedomAt` ≥ before + 3); rooks with live castling rights never break
+      out; a wayward charger is **coaxable back** like a fled piece.
+- [x] **Coax discoverability**: the status bar teaches it ("X moved on its own —
+      select it to order it back" → "tap the green ring to order it back to its
+      post"). This is the standing recourse for misbehaving pieces.
+
+Deferred canon: none of the big beats remain — future polish: enemy-side
+entourage/swap, defector coax-back, sound.
 
 ## Canon survey — what Wizard's Chess actually is (HP books/films)
 

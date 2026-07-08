@@ -116,6 +116,62 @@ export function knockOff(c: Chess, square: Square, flipTurn = false): boolean {
   return commit(c, edited, turn)
 }
 
+/** Swap two pieces' squares (the body swap — "Cover me!"). Consumes the turn.
+ * Rejected if the result is illegal (self-check, pawn on a back rank, …). */
+export function swapPieces(c: Chess, a: Square, b: Square): boolean {
+  const pa = c.get(a)
+  const pb = c.get(b)
+  if (!pa || !pb || pa.color !== pb.color) return false
+  const edited = new Chess(c.fen())
+  edited.remove(a)
+  edited.remove(b)
+  edited.put({ type: pa.type, color: pa.color }, b)
+  edited.put({ type: pb.type, color: pb.color }, a)
+  const cur = c.turn() as Color
+  return commit(c, edited, cur === 'w' ? 'b' : 'w')
+}
+
+/** The pep-talk entourage: the king and his adjacent allies all shuffle one
+ * step in the same direction, as a single turn — a formation on the march.
+ * `to` is the king's destination (must be adjacent). Members blocked by a
+ * non-moving piece simply hold their ground; the king must lead, and at least
+ * one companion must come along (otherwise it's just a king move). Returns the
+ * individual relocations, or null if the result would be illegal. */
+export function entourageShift(c: Chess, kingSq: Square, to: Square): { from: Square; to: Square }[] | null {
+  const king = c.get(kingSq)
+  if (!king || king.type !== 'k') return null
+  const [kf, kr] = coords(kingSq)
+  const [tf, tr] = coords(to)
+  const df = tf - kf
+  const dr = tr - kr
+  if ((!df && !dr) || Math.abs(df) > 1 || Math.abs(dr) > 1) return null
+
+  const group = [kingSq, ...adjacentSquares(kingSq).filter((s) => c.get(s)?.color === king.color)]
+  // March the far side first so vacated squares chain for those behind.
+  const proj = (s: Square) => {
+    const [f, r] = coords(s)
+    return f * df + r * dr
+  }
+  group.sort((a, b) => proj(b) - proj(a))
+
+  const edited = new Chess(c.fen())
+  const moves: { from: Square; to: Square }[] = []
+  for (const s of group) {
+    const [f, r] = coords(s)
+    if (!onBoard(f + df, r + dr)) continue
+    const d = toSquare(f + df, r + dr)
+    if (edited.get(d)) continue // blocked — this member holds its ground
+    const p = edited.get(s)!
+    edited.remove(s)
+    edited.put({ type: p.type, color: p.color }, d)
+    moves.push({ from: s, to: d })
+  }
+  if (!moves.some((m) => m.from === kingSq)) return null // the king must lead
+  if (moves.length < 2) return null // no entourage came — not a rally
+  const cur = c.turn() as Color
+  return commit(c, edited, cur === 'w' ? 'b' : 'w') ? moves : null
+}
+
 /** Material balance in points, positive = White ahead. */
 export function materialBalance(c: Chess): number {
   let s = 0

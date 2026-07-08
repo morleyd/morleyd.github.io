@@ -193,6 +193,47 @@ describe('WizardGame interaction', () => {
     expect(g.fx?.kind).toBe('breakout') // a lingering mark tells the player what happened
   })
 
+  it('never tramples the PLAYER\'s own pawn, and never breaks a castling rook', () => {
+    // Boxed in with zero runway (own knight right above the pawn): a player
+    // piece will NOT smash its own pawn to get out.
+    const boxed = new WizardGame('breakout-boxed')
+    boxed.reset('breakout-boxed', '4k3/8/8/8/8/N7/P7/R3K3 w - - 0 1')
+    boxed.settings.chaos = 1
+    const r1 = boxed.soulAt('a1')!
+    r1.idleFor = 20
+    r1.mood.impatience = 1
+    expect(boxed.spontaneousChaos()).toBeNull()
+    expect(boxed.chess.get('a2')?.type).toBe('p') // pawn untouched
+
+    // A rook the king could still castle with stays put, no matter how bored.
+    const castle = new WizardGame('breakout-castle')
+    castle.reset('breakout-castle', '4k3/8/8/8/8/8/P7/R3K3 w Q - 0 1') // Q right live
+    castle.settings.chaos = 1
+    const r2 = castle.soulAt('a1')!
+    r2.idleFor = 20
+    r2.mood.impatience = 1
+    expect(castle.spontaneousChaos()).toBeNull()
+    expect(castle.chess.get('a1')?.type).toBe('r')
+  })
+
+  it('a wayward breakout piece can be coaxed back to its post', () => {
+    const g = new WizardGame('breakout-coax')
+    g.reset('breakout-coax', '4k3/8/8/8/8/8/P7/R3K3 w - - 0 1')
+    g.settings.chaos = 1
+    const rook = g.soulAt('a1')!
+    rook.idleFor = 20
+    rook.mood.impatience = 1
+    expect(g.spontaneousChaos()).toBeTruthy()
+    const dest = rook.square as string
+    expect(dest).not.toBe('a1')
+    expect(g.waywardSoul()?.id).toBe(rook.id) // the view can point at the runaway
+    g.playerTap(dest as Parameters<typeof g.playerTap>[0]) // select the charger
+    expect(g.coaxTarget()).toBe('a1')
+    const res = g.playerTap('a1') // order it home
+    expect(res.moved).toBe(false) // free — keeps your turn
+    expect(g.chess.get('a1')?.type).toBe('r') // back at its post
+  })
+
   it('keeps quiet pieces from breaking out — the rant must come first', () => {
     const g = new WizardGame('breakout-quiet')
     g.reset('breakout-quiet', '4k3/8/8/8/8/8/P7/R3K3 w - - 0 1')
@@ -231,24 +272,80 @@ describe('WizardGame interaction', () => {
     expect(h.fx?.kind).toBe(plan!.type) // and left a lingering mark
   })
 
-  it('holds a tantrum until the rage has been visible for a round', () => {
-    const g = new WizardGame('tantrum-wait')
-    g.reset('tantrum-wait', '4k3/8/8/3p4/3R4/8/8/4K3 w - - 0 1') // white rook d4 beside black pawn d5
+  it('rallies the pep-talk entourage: king + friends march one step as one turn', () => {
+    const g = new WizardGame('entourage')
+    // King e1 flanked by pawns d2/e2/f2 — room to march up the board.
+    g.reset('entourage', '4k3/8/8/8/8/8/3PPP2/4K3 w - - 0 1')
     g.settings.chaos = 1
-    const rook = g.soulAt('d4')!
-    rook.mood.anger = 1 // max rage, adjacent enemy at d5
+    let tapped = false
+    for (let i = 0; i < 30 && !tapped; i += 1) {
+      g.playerTap('e1') // select the king (offer is rng-gated; keep asking)
+      if (g.chaosOfferType() === 'entourage' && g.chaosTargets().length) {
+        tapped = true
+        break
+      }
+      g.playerTap('e1') // deselect and retry
+    }
+    expect(tapped).toBe(true)
+    const to = g.chaosTargets().find((t) => t === 'e2') ?? g.chaosTargets()[0]
+    const res = g.playerTap(to)
+    expect(res.moved).toBe(true)
+    expect(g.chess.get(to)?.type).toBe('k') // the king led the march
+    expect(g.turn).toBe('b') // one turn, all together
+    // At least one companion moved with him.
+    expect(g.moveLog.some((m) => m.chaos && m.san.includes('entourage'))).toBe(true)
+    expect(g.fx?.kind).toBe('entourage')
+    // Society mapping stayed consistent with the board.
+    for (const [sq, id] of Object.entries(g.society.bySquare)) {
+      expect(g.chess.get(sq as Parameters<typeof g.soulAt>[0])?.type).toBe(g.society.souls[id].type)
+    }
+  })
 
-    // First sighting: the red state must be READ first — no eruption yet.
-    expect(g.spontaneousChaos()).toBeNull()
-    expect(g.chess.get('d5')?.type).toBe('p')
+  it('body swap: two bonded friends trade squares as one turn', () => {
+    const g = new WizardGame('bodyswap')
+    g.reset('bodyswap', '4k3/8/8/8/8/8/8/2RQK3 w - - 0 1') // rook c1 beside queen d1
+    g.settings.chaos = 1
+    const rook = g.soulAt('c1')!
+    const queen = g.soulAt('d1')!
+    rook.bonds[queen.id] = 0.8 // fast friends
 
-    // A round later the tantrum may fire.
-    g.society.ply += 2
-    rook.mood.anger = 1
-    const line = g.spontaneousChaos()
-    expect(line).toBeTruthy()
-    expect(g.chess.get('d5')).toBeFalsy() // the pawn got knocked off
-    expect(g.fx?.kind).toBe('tantrum')
+    let offered = false
+    for (let i = 0; i < 30 && !offered; i += 1) {
+      g.playerTap('c1')
+      if (g.chaosOfferType() === 'swap' && g.chaosTargets().includes('d1')) {
+        offered = true
+        break
+      }
+      g.playerTap('c1')
+    }
+    expect(offered).toBe(true)
+    const res = g.playerTap('d1')
+    expect(res.moved).toBe(true)
+    expect(g.chess.get('c1')?.type).toBe('q') // traded places
+    expect(g.chess.get('d1')?.type).toBe('r')
+    expect(g.soulAt('c1')?.id).toBe(queen.id) // identities followed the swap
+    expect(g.soulAt('d1')?.id).toBe(rook.id)
+    expect(g.turn).toBe('b')
+    expect(g.fx?.kind).toBe('swap')
+  })
+
+  it('trust arc: a devoted army never talks back, a mutinous one digs in', () => {
+    const fen = '4k3/8/8/4p3/8/8/3Q4/4K3 w - - 0 1' // Qd4 is a sacrifice (pawn e5 recaptures)
+    // Devoted: trust >= 85 → resistance chance 0 → moves on the FIRST tap.
+    const devoted = new WizardGame('trust-devoted')
+    devoted.reset('trust-devoted', fen)
+    devoted.settings.agency = 1
+    devoted.trust = 95
+    devoted.playerTap('d2')
+    expect(devoted.playerTap('d4').moved).toBe(true)
+
+    // Mutinous: trust ~0 → the piece always balks at a sacrifice first.
+    const mutinous = new WizardGame('trust-mutinous')
+    mutinous.reset('trust-mutinous', fen)
+    mutinous.settings.agency = 1
+    mutinous.trust = 0
+    mutinous.playerTap('d2')
+    expect(mutinous.playerTap('d4').moved).toBe(false) // refused at least once
   })
 
   it('gives each pregame pair a multi-turn conversation with no repeated lines', () => {
