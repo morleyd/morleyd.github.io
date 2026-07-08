@@ -719,6 +719,42 @@ export class WizardGame {
     return this.society.bySquare[this.selected] === this.spooked.soulId ? this.spooked.home : null
   }
 
+  /** Is the piece on `sq` hanging — attacked by the enemy with fewer defenders
+   * than attackers (i.e. it'd come off worse in the exchange)? */
+  private hangingOn(c: Chess, sq: Square, color: Color): boolean {
+    const atk = c.attackers(sq, opp(color)).length
+    const def = c.attackers(sq, color).length
+    return atk > 0 && def < atk
+  }
+
+  /** Is swapping the two friendly pieces on `from`/`to` actually WORTH it? Never
+   * between same types (a wasted turn). Yes only when either:
+   *   • the swap gives check, or
+   *   • a clearly cheaper piece shields a clearly more valuable one that's in
+   *     danger — the cheap piece (currently safe) takes the hot square, the
+   *     valuable one lands safe. */
+  private beneficialSwap(fen: string, from: Square, to: Square): boolean {
+    const pf = this.chess.get(from)
+    const pt = this.chess.get(to)
+    if (!pf || !pt || pf.color !== PLAYER || pt.color !== PLAYER) return false
+    if (pf.type === pt.type) return false // same type → pointless
+    const trial = new Chess(fen)
+    if (!swapPieces(trial, from, to)) return false // must yield a legal position
+    if (trial.isCheck()) return true // the swap delivers check (turn has flipped to the enemy)
+
+    // Sacrifice-to-shield: needs a real value gap.
+    const vf = PIECE_VALUE[pf.type]
+    const vt = PIECE_VALUE[pt.type]
+    if (Math.abs(vf - vt) < 2) return false
+    const hiSq = vf >= vt ? from : to // the valuable piece
+    const loSq = vf >= vt ? to : from // the cheap volunteer
+    // Valuable one is currently in trouble; the cheap one is currently safe…
+    if (!this.hangingOn(this.chess, hiSq, PLAYER)) return false
+    if (this.hangingOn(this.chess, loSq, PLAYER)) return false
+    // …and after the swap the valuable piece (now on loSq) is safe.
+    return !this.hangingOn(trial, loSq, PLAYER)
+  }
+
   /** Decide (once, at selection) whether this piece offers a wild move. */
   private computeOffer(from: Square): ChaosOffer | null {
     if (this.settings.chaos <= 0) return null
@@ -788,17 +824,12 @@ export class WizardGame {
       }
     }
 
-    // Body swap: a piece with a bonded friend beside it can trade places —
-    // "Cover me!" (its move for the turn).
+    // Body swap: only ever offered when it genuinely GAINS something (a swap
+    // between equals is a wasted turn). Two reasons — a cheap piece throwing
+    // itself in front of an endangered valuable one, or a swap that puts the
+    // enemy king in check.
     if (soul && !this.usedStunts.has('swap') && this.rng() < this.settings.chaos) {
-      const friends = adjacentSquares(from).filter((s) => {
-        const id = this.society.bySquare[s]
-        if (!id) return false
-        const other = this.society.souls[id]
-        if (other.color !== PLAYER || other.id === soul.id) return false
-        const bond = Math.max(soul.bonds[other.id] ?? 0, other.bonds[soul.id] ?? 0)
-        return bond >= 0.45 && swapPieces(new Chess(fen), from, s)
-      })
+      const friends = adjacentSquares(from).filter((s) => this.beneficialSwap(fen, from, s))
       if (friends.length) return { type: 'swap', from, targets: friends }
     }
     return null
@@ -1163,10 +1194,12 @@ export class WizardGame {
     return null
   }
 
-  /** A disgruntled pawn defects to the enemy when White is losing badly. */
+  /** A disgruntled pawn defects to the enemy — but ONLY when the team's trust in
+   * you has truly collapsed (< 33). It keeps its black hat forever after, so a
+   * turncoat stays identifiable even if it later promotes. */
   private defector(): Utterance | null {
     if (this.usedStunts.has('defector')) return null
-    if (materialBalance(this.chess) > -5) return null
+    if (this.trust >= 33) return null // morale must have genuinely bottomed out
     const pawns = Object.values(this.society.souls)
       .filter((s) => !s.captured && s.color === PLAYER && s.type === 'p' && s.square && (s.persona.obedience ?? 0.6) < 0.55)
       .sort((a, b) => (a.persona.obedience ?? 0.6) - (b.persona.obedience ?? 0.6))
@@ -1175,6 +1208,7 @@ export class WizardGame {
       const sq = s.square as Square
       if (!defect(this.chess, sq)) continue
       s.color = 'b'
+      s.defected = true // marked for life
       this.usedStunts.add('defector')
       this.setFx('defect', null, sq)
       this.lastFrom = null

@@ -49,6 +49,7 @@ export interface PieceSoul {
   }
   idleFor: number // plies since this piece last moved
   rants: number // times it has voiced impatience about being left behind (reset on move)
+  defected: boolean // switched sides in disgust — wears the black hat forever after
   kills: number // enemies this piece has captured
   /** id -> feeling in [-1, 1]. Positive = fondness, negative = grudge. */
   bonds: Record<string, number>

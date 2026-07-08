@@ -81,14 +81,23 @@ describe('chaos offers and limits (controller)', () => {
     expect(g.chess.get('d5')?.type).toBe('p') // still standing
   })
 
-  it('defector: a disgruntled pawn switches sides when White is losing badly', () => {
+  it('defector: a disgruntled pawn switches sides only when trust has collapsed', () => {
     const g = new WizardGame('defect')
-    g.reset('defect', '3qk3/8/8/8/8/8/4P3/4K3 w - - 0 1') // black up a queen
+    g.reset('defect', '3qk3/8/8/8/8/8/4P3/4K3 w - - 0 1')
     g.settings.chaos = 1
     g.soulAt('e2')!.persona.obedience = 0.1 // ready to quit
+
+    // Trust still respectable → no defection, however bad the position.
+    g.trust = 50
+    expect(g.spontaneousChaos()).toBeNull()
+    expect(g.chess.get('e2')?.color).toBe('w')
+
+    // Trust in the gutter → it bolts, and is marked a defector for good.
+    g.trust = 20
     const u = g.spontaneousChaos()
     expect(u).not.toBeNull()
     expect(g.chess.get('e2')?.color).toBe('b') // now plays for the enemy
+    expect(g.society.souls[u!.soulId].defected).toBe(true)
   })
 
   it('cold feet spooks a piece, then the player can coax it back to its post', () => {

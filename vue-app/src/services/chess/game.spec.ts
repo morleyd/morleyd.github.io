@@ -427,32 +427,53 @@ describe('WizardGame interaction', () => {
     }
   })
 
-  it('body swap: two bonded friends trade squares as one turn', () => {
+  it('body swap: a cheap piece shields an endangered valuable one', () => {
     const g = new WizardGame('bodyswap')
-    g.reset('bodyswap', '4k3/8/8/8/8/8/8/2RQK3 w - - 0 1') // rook c1 beside queen d1
+    // Black rook on d8 skewers the white queen on d4; a safe knight sits on c4.
+    g.reset('bodyswap', '3rk3/8/8/8/2NQ4/8/8/4K3 w - - 0 1')
     g.settings.chaos = 1
-    const rook = g.soulAt('c1')!
-    const queen = g.soulAt('d1')!
-    rook.bonds[queen.id] = 0.8 // fast friends
+    const knight = g.soulAt('c4')!
+    const queen = g.soulAt('d4')!
 
     let offered = false
     for (let i = 0; i < 30 && !offered; i += 1) {
-      g.playerTap('c1')
-      if (g.chaosOfferType() === 'swap' && g.chaosTargets().includes('d1')) {
+      g.playerTap('d4') // hold the endangered queen
+      if (g.chaosOfferType() === 'swap' && g.chaosTargets().includes('c4')) {
         offered = true
         break
       }
-      g.playerTap('c1')
+      g.playerTap('d4')
     }
     expect(offered).toBe(true)
-    const res = g.playerTap('d1')
+    const res = g.playerTap('c4') // the knight throws itself into the queen's place
     expect(res.moved).toBe(true)
-    expect(g.chess.get('c1')?.type).toBe('q') // traded places
-    expect(g.chess.get('d1')?.type).toBe('r')
-    expect(g.soulAt('c1')?.id).toBe(queen.id) // identities followed the swap
-    expect(g.soulAt('d1')?.id).toBe(rook.id)
+    expect(g.chess.get('c4')?.type).toBe('q') // queen swung to safety
+    expect(g.chess.get('d4')?.type).toBe('n') // knight took the hot square
+    expect(g.soulAt('c4')?.id).toBe(queen.id) // identities followed the swap
+    expect(g.soulAt('d4')?.id).toBe(knight.id)
     expect(g.turn).toBe('b')
     expect(g.fx?.kind).toBe('swap')
+  })
+
+  it('never offers a pointless body swap (same type, or no gain)', () => {
+    // Two rooks side by side, nobody in danger, no check to be had → no swap.
+    const g = new WizardGame('bodyswap-none')
+    g.reset('bodyswap-none', '4k3/8/8/8/8/8/8/2RRK3 w - - 0 1') // rooks c1 & d1
+    g.settings.chaos = 1
+    for (let i = 0; i < 20; i += 1) {
+      g.playerTap('c1')
+      if (g.chaosOfferType() === 'swap') throw new Error('should not offer a same-type swap')
+      g.playerTap('c1')
+    }
+    // A rook + queen with neither in danger and no check is also pointless.
+    const g2 = new WizardGame('bodyswap-safe')
+    g2.reset('bodyswap-safe', '4k3/8/8/8/8/8/8/2RQK3 w - - 0 1')
+    g2.settings.chaos = 1
+    for (let i = 0; i < 20; i += 1) {
+      g2.playerTap('c1')
+      expect(g2.chaosOfferType()).not.toBe('swap')
+      g2.playerTap('c1')
+    }
   })
 
   it('trust arc: a devoted army never talks back, a mutinous one digs in', () => {

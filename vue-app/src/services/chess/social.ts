@@ -90,6 +90,7 @@ export function createSociety(chess: Chess, rng: Rng): Society {
         diedAt: null,
         idleFor: 0,
         rants: 0,
+        defected: false,
         kills: 0,
         bonds: {},
         avenging: null,

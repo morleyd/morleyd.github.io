@@ -258,7 +258,35 @@ The **tantrum** removal and **no trust-reset** decisions from round 3 stand.
 - [x] **Desktop settings moved behind a cog** (a menu), like mobile, so the
       sliders no longer crowd the page. (GameToolbar — applies to every game.)
 
-Deferred canon: enemy-side entourage/swap, defector coax-back, sound.
+### Rule-break audit (every stunt must have a reason) + round 8 fixes — shipped
+
+Audit of why each rule-break is allowed to happen:
+
+| Stunt | Reason it's offered/fires |
+|---|---|
+| Jetpack (knight) | rescue the king (in check), "wings" (trust ≥ 82), or a real build-up (idle & ranting) — **and** a dramatic target (capture/check/escape) |
+| Disguise (rook) | rook is cooped up (≤6 legal moves) **and** the diagonal target is dramatic |
+| **Body swap** | **REWORKED**: never between same types; only when a clearly cheaper piece shields a clearly more valuable one that's hanging (and the cheap one was safe), or the swap gives check |
+| Rage-strike | the piece is in its vengeful window with an enemy adjacent |
+| Breakout | middlegame (ply ≥ 16), side deployed, and it has ranted ≥ 4× |
+| Cold feet | genuinely terrified (fear ≥ 0.6) and under attack |
+| Defector | **now** only when team trust has collapsed (< 33) |
+| Enemy chaos | never in the opening; only to capture material |
+| Pep-talk entourage | king + ≥2 adjacent allies — *the one whose "reason" is weakest; flagged for David* |
+
+Round 8 changes:
+- [x] **Body swap gated** to genuine gain (shield an endangered valuable piece, or
+      give check) — no more turn-one pawn↔pawn swaps. (`beneficialSwap`.)
+- [x] **Defector** only at trust < 33, and it **keeps its black hat for life** —
+      identifiable as a turncoat even after it promotes (`defected` flag;
+      `accessoryOf` shows the hat persistently).
+- [x] **Drag-off reworked**: slower; the captor **walks the body all the way to
+      the edge**, lurching with a random-walk wiggle as it pulls, then walks back
+      (`escortHaul`, ~2.3s round trip; enemy waits ~4.2s to recapture).
+- [x] **Glow dialed down** a touch (grave halo + vengeful/cheated pulses).
+
+Deferred canon: enemy-side entourage/swap, defector coax-back, sound, and a
+decision on whether pep-talk entourage needs a firmer reason.
 
 ### Self-play soak (`soak.spec.ts`)
 

@@ -328,7 +328,8 @@ const transits = ref<Transit[]>([])
 const transitTimers = new Map<string, ReturnType<typeof setTimeout>[]>()
 let seenFallen = new Set<string>()
 const HOLD_MS = 1000 // the full second between the capturer landing and the haul
-const DRAG_MS = 950 // long enough for the captor to visibly haul the victim out and back
+const DRAG_MS = 1400 // the victim's one-way trudge to the edge (slower now)
+const ESCORT_MS = 2300 // the captor's full round trip: walk the body all the way out, then back
 function cancelTransit(id: string) {
   ;(transitTimers.get(id) ?? []).forEach(clearTimeout)
   transitTimers.delete(id)
@@ -349,7 +350,10 @@ function beginTransit(id: string) {
       if (cur) cur.phase = 'drag'
       transits.value = [...transits.value] // nudge reactivity
     }, HOLD_MS),
-    setTimeout(() => cancelTransit(id), HOLD_MS + DRAG_MS + 60),
+    // Keep the corpse (and the captor's tugging) alive for the whole round trip,
+    // so the captor visibly walks all the way back before the corpse hands off
+    // to the resting graveyard.
+    setTimeout(() => cancelTransit(id), HOLD_MS + ESCORT_MS + 80),
   ]
   transitTimers.set(id, timers)
 }
@@ -417,6 +421,9 @@ const endBanner = computed<{ title: string; sub: string; cls: string } | null>((
 // the stunt's FX lingers afterwards.
 type Accessory = 'flame' | 'glasses' | 'hat' | 'banner' | null
 function accessoryOf(p: PieceView): Accessory {
+  // A defector wears its black hat for the rest of the game — even once it has
+  // promoted — so a turncoat is always identifiable.
+  if (game.society.souls[p.id]?.defected) return 'hat'
   // An active offer dresses the selected piece for the part.
   if (p.square === selectedSquare.value) {
     const t = game.chaosOfferType()
@@ -731,11 +738,11 @@ function onSquare(square: Square) {
   armIdle()
   if (res.moved) {
     maybePostGame()
-    // After a capture, give the victor time to haul its victim off (~1.95s) AND
-    // a full second settled on the square before the enemy marches in to drag it
-    // away in turn.
+    // After a capture, wait for the victor to walk the body all the way out and
+    // back (~3.3s) plus a beat settled on its square, before the enemy marches in
+    // to drag IT off in turn.
     const captured = game.graveyard.length > graveBefore
-    window.setTimeout(runAi, captured ? 3000 : 420)
+    window.setTimeout(runAi, captured ? 4200 : 420)
   }
 }
 
@@ -1305,7 +1312,7 @@ onBeforeUnmount(() => {
   object-fit: contain;
   /* A soft GOLD halo lifts the fallen — black pieces especially — off the dark
      purple gutter, on-theme, without a clunky ring. */
-  background: radial-gradient(circle, rgba(250, 204, 21, 0.42) 46%, rgba(250, 204, 21, 0.12) 62%, transparent 74%);
+  background: radial-gradient(circle, rgba(250, 204, 21, 0.32) 46%, rgba(250, 204, 21, 0.09) 62%, transparent 74%);
   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55));
 }
 /* Hauling casualty: above the board so the short drag to the edge is visible. */
@@ -1338,7 +1345,7 @@ onBeforeUnmount(() => {
   height: 100%;
   object-fit: contain;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(250, 204, 21, 0.4) 44%, transparent 66%);
+  background: radial-gradient(circle, rgba(250, 204, 21, 0.3) 44%, transparent 66%);
   filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.6));
 }
 /* Being hauled: the piece tumbles and lurches on the rope so it reads as
@@ -1391,25 +1398,34 @@ onBeforeUnmount(() => {
 .grave-transit.drag .haul-rope {
   opacity: 0.95;
 }
-/* The captor actually HAULS its victim: it lunges partway toward the edge slot
-   (dragging the roped body along), holds at the stretch, then hauls itself back
-   to its square. A visible dragging piece, not just a dragged one. */
+/* The captor actually HAULS its victim: it trudges the body ALL the way out to
+   the edge — lurching and wiggling with the effort (random-walk sway) — pauses
+   at the edge, then walks back to its square. A visible dragging piece. */
 .piece-box.tugging {
   z-index: 5;
-  animation: escortHaul 950ms cubic-bezier(0.45, 0.05, 0.4, 1) both;
+  animation: escortHaul 2300ms cubic-bezier(0.4, 0, 0.5, 1) both;
 }
 @keyframes escortHaul {
   0% {
     transform: translate(0, 0) rotate(0deg);
   }
-  14% {
-    transform: translate(0, 0) rotate(-8deg);
+  8% {
+    transform: translate(calc(var(--esc-x, 0%) * 0.08), calc(var(--esc-y, 0%) * 0.08)) rotate(-11deg) scale(1.03);
   }
-  52% {
-    transform: translate(calc(var(--esc-x, 0%) * 0.6), calc(var(--esc-y, 0%) * 0.6)) rotate(10deg);
+  20% {
+    transform: translate(calc(var(--esc-x, 0%) * 0.24), calc(var(--esc-y, 0%) * 0.24)) rotate(8deg);
   }
-  64% {
-    transform: translate(calc(var(--esc-x, 0%) * 0.6), calc(var(--esc-y, 0%) * 0.6)) rotate(10deg);
+  33% {
+    transform: translate(calc(var(--esc-x, 0%) * 0.42), calc(var(--esc-y, 0%) * 0.42)) rotate(-9deg) scale(1.03);
+  }
+  46% {
+    transform: translate(calc(var(--esc-x, 0%) * 0.62), calc(var(--esc-y, 0%) * 0.62)) rotate(7deg);
+  }
+  58% {
+    transform: translate(var(--esc-x, 0%), var(--esc-y, 0%)) rotate(-6deg) scale(1.02);
+  }
+  66% {
+    transform: translate(var(--esc-x, 0%), var(--esc-y, 0%)) rotate(3deg);
   }
   100% {
     transform: translate(0, 0) rotate(0deg);
@@ -1762,7 +1778,7 @@ onBeforeUnmount(() => {
 /* Power-up states shown with visual treatment, not emoji: vengeful pieces get a
    red aura (reinforced by the anim-angry fume); the spooked look faded. */
 .glyph.state-vengeful {
-  filter: drop-shadow(0 0 6px rgba(239, 68, 68, 0.95)) drop-shadow(0 2px 2px rgba(15, 23, 42, 0.4));
+  filter: drop-shadow(0 0 4px rgba(239, 68, 68, 0.8)) drop-shadow(0 2px 2px rgba(15, 23, 42, 0.4));
 }
 .glyph.state-spooked {
   opacity: 0.55;
@@ -1774,7 +1790,7 @@ onBeforeUnmount(() => {
 }
 @keyframes cheatPulse {
   50% {
-    filter: drop-shadow(0 0 7px rgba(250, 204, 21, 0.95)) drop-shadow(0 2px 2px rgba(15, 23, 42, 0.5));
+    filter: drop-shadow(0 0 5px rgba(250, 204, 21, 0.8)) drop-shadow(0 2px 2px rgba(15, 23, 42, 0.5));
   }
 }
 /* .white / .black remain as selector hooks (e2e + future styling); the art
