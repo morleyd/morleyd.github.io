@@ -8,7 +8,7 @@
  */
 import { computed, ref } from 'vue'
 import GameToolbar from '@/components/GameToolbar.vue'
-import { answerBank } from '@/services/wordLists'
+import { allWords, answerBank } from '@/services/wordLists'
 import { WORD_LENGTH, evaluateGuess, statusesToPattern } from '@/services/wordleLogic'
 
 const greens = ref<string[]>(Array.from({ length: WORD_LENGTH }, () => ''))
@@ -114,7 +114,13 @@ const matches = (word: string): boolean => {
   return true
 }
 
-const candidates = computed(() => answerBank.filter(matches))
+/** 'all' searches every valid guess word; 'answers' only the original answer bank. */
+const listMode = ref<'all' | 'answers'>('all')
+const sortedAnswers = [...answerBank].sort()
+
+const candidates = computed(() =>
+  (listMode.value === 'all' ? allWords : sortedAnswers).filter(matches),
+)
 
 const expectedInfo = (guess: string, pool: string[]): number => {
   const counts = new Map<string, number>()
@@ -175,6 +181,7 @@ const reset = () => {
           <ul>
             <li>Enter clues as you play — the possible-word count shrinks fast.</li>
             <li>Turn on "suggested guesses" to see high-information next words.</li>
+            <li>"All words" searches every valid guess; "classic answers" limits results to the original Wordle answer list (today's NYT answer may not be in it).</li>
           </ul>
         </template>
       </GameToolbar>
@@ -259,6 +266,16 @@ const reset = () => {
 
       <v-divider class="mb-4" />
 
+      <div class="d-flex align-center justify-space-between flex-wrap ga-2 mb-2">
+        <p class="text-subtitle-2 mb-0">
+          {{ candidates.length.toLocaleString() }} possible {{ candidates.length === 1 ? 'word' : 'words' }}
+        </p>
+        <v-btn-toggle v-model="listMode" mandatory density="compact" variant="outlined" divided>
+          <v-btn value="all" size="small">All words</v-btn>
+          <v-btn value="answers" size="small">Classic answers</v-btn>
+        </v-btn-toggle>
+      </div>
+
       <div v-if="!hasInput" class="text-center text-grey-lighten-1 text-body-2">
         Enter what you know above to see matching words.
       </div>
@@ -282,9 +299,6 @@ const reset = () => {
           </div>
         </div>
 
-        <p class="text-subtitle-2 mb-2">
-          {{ candidates.length }} possible {{ candidates.length === 1 ? 'word' : 'words' }}
-        </p>
         <div v-if="candidates.length === 0" class="text-error text-body-2">
           No words match — double-check your letters.
         </div>

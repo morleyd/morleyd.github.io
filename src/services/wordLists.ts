@@ -32,6 +32,9 @@ const extraAllowed = parseWordList(wordsRaw)
 /** Combined set of all allowed guess words */
 export const allowedWordSet = new Set<string>([...answerBank, ...extraAllowed])
 
+/** Every allowed guess word, deduped and alphabetized (for display/search) */
+export const allWords = [...allowedWordSet].sort()
+
 export interface DailyAnswer {
   word: string
   index: number
