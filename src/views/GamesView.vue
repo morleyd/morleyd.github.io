@@ -210,6 +210,15 @@ const games: GameCard[] = [
     gradient: 'linear-gradient(135deg, hsl(330, 80%, 55%), hsl(190, 80%, 50%), hsl(50, 90%, 55%))',
   },
   {
+    key: 'mini-golf',
+    title: 'Mini Golf',
+    description:
+      'Nine seeded holes. Pull back to aim and set power, then putt — bank off the walls and sink it in as few strokes as you can.',
+    icon: 'mdi-golf',
+    to: '/mini-golf',
+    gradient: 'linear-gradient(135deg, rgba(22, 101, 52, 0.5), rgba(52, 211, 153, 0.3))',
+  },
+  {
     key: 'time-since',
     title: 'Time Since',
     description:
