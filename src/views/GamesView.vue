@@ -111,6 +111,15 @@ const games: GameCard[] = [
     gradient: 'linear-gradient(135deg, rgba(124, 58, 237, 0.4), rgba(15, 23, 42, 0.3))',
   },
   {
+    key: 'tango',
+    title: 'Tango',
+    description:
+      'Fill a 6×6 grid with Suns and Moons: balance every row and column, no three in a row, and honor the =/× links. Pure logic, always solvable.',
+    icon: 'mdi-weather-sunny',
+    to: '/tango',
+    gradient: 'linear-gradient(135deg, rgba(250, 204, 21, 0.34), rgba(129, 140, 248, 0.30))',
+  },
+  {
     key: 'flood-it',
     title: 'Flood It',
     description:
