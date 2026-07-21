@@ -37,6 +37,7 @@ let ninja: NinjaState = initialNinja()
 let seed = 1
 let maxY = 0
 let dangerY = -4
+let cameraY = 0 // lags ninja.y so the jump arc is visible on screen
 let charging = false
 let chargeStart = 0
 let raf = 0
@@ -49,6 +50,7 @@ const reset = () => {
   seed = (Math.floor(Math.random() * 0xffffffff) || 1) >>> 0
   maxY = 0
   dangerY = -4
+  cameraY = 0
   charging = false
   chargeMs.value = 0
 }
@@ -88,7 +90,6 @@ const draw = () => {
   ctx.fillRect(0, 0, W, H)
 
   const unit = H / UNITS_VISIBLE
-  const cameraY = ninja.y
   const wt = WALL_THICK * W
 
   // Walls
@@ -161,6 +162,8 @@ const tick = (ts: number) => {
 
   ninja = stepNinja(ninja, dt)
   if (ninja.y > maxY) maxY = ninja.y
+  // Ease the camera toward the ninja so the jump arc is visible before it recenters.
+  cameraY += (ninja.y - cameraY) * Math.min(1, (dt / 1000) * 5)
 
   // Rising hazard accelerates as you climb.
   const dangerSpeed = 0.4 + Math.min(1.3, maxY * 0.02)
@@ -281,7 +284,6 @@ onBeforeUnmount(() => {
         :style="{ width: displayW + 'px', height: displayH + 'px' }"
         @pointerdown.prevent="onPointerDown"
         @pointerup.prevent="onPointerUp"
-        @pointerleave="onPointerUp"
       />
       <div v-if="state !== 'running'" class="overlay">
         <template v-if="state === 'idle'">
