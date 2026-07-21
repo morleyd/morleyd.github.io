@@ -5,9 +5,12 @@ import {
   isSolved,
   lineClue,
   lineSatisfied,
+  nonogramFromPattern,
+  patternToSolution,
   rowClues,
   type Solution,
 } from './nonogram'
+import { NONOGRAM_PATTERNS, patternById, patternsForSize } from './nonogramPatterns'
 
 describe('lineClue', () => {
   it('counts consecutive runs', () => {
@@ -76,6 +79,55 @@ describe('isSolved', () => {
     //  . .   ==   . .   (identical) — trivial accept
     const p = generateNonogram(4, 4, 'clue')
     expect(isSolved(p.solution.slice(), p)).toBe(true)
+  })
+})
+
+describe('pattern library', () => {
+  it('bundles pictures across the supported sizes', () => {
+    expect(NONOGRAM_PATTERNS.length).toBeGreaterThanOrEqual(8)
+    for (const size of [5, 10, 15]) {
+      expect(patternsForSize(size).length).toBeGreaterThan(0)
+    }
+  })
+
+  it('every pattern is a well-formed square with a non-empty picture and unique id', () => {
+    const ids = new Set<string>()
+    for (const p of NONOGRAM_PATTERNS) {
+      expect(p.rows.length, `${p.id} row count`).toBe(p.size)
+      for (const line of p.rows) {
+        expect(line.length, `${p.id} row width`).toBe(p.size)
+      }
+      const sol = patternToSolution(p)
+      expect(sol.length).toBe(p.size * p.size)
+      expect(sol.some(Boolean), `${p.id} not empty`).toBe(true)
+      expect(ids.has(p.id), `${p.id} unique`).toBe(false)
+      ids.add(p.id)
+    }
+  })
+
+  it('patternToSolution maps "#" to filled, row-major', () => {
+    const grid = patternToSolution({ id: 't', name: 't', size: 3, rows: ['#..', '.#.', '..#'] })
+    expect(grid).toEqual([true, false, false, false, true, false, false, false, true])
+  })
+
+  it('derives clues from the chosen picture', () => {
+    // A 5×5 heart — check its clues match the run-lengths of the drawn grid.
+    const heart = patternById('heart5', 5)!
+    const nono = nonogramFromPattern(heart)
+    expect(nono.rows).toBe(5)
+    expect(nono.cols).toBe(5)
+    expect(nono.rowClues).toEqual(rowClues(nono.solution, 5, 5))
+    expect(nono.colClues).toEqual(colClues(nono.solution, 5, 5))
+    // Heart rows: '.#.#.', '#####', '#####', '.###.', '..#..'
+    expect(nono.rowClues).toEqual([[1, 1], [5], [5], [3], [1]])
+    expect(nono.colClues).toEqual([[2], [4], [4], [4], [2]])
+  })
+
+  it('produces a puzzle solved by its own picture, for every pattern', () => {
+    for (const p of NONOGRAM_PATTERNS) {
+      const nono = nonogramFromPattern(p)
+      expect(isSolved(nono.solution, nono), `${p.id} solvable`).toBe(true)
+    }
   })
 })
 

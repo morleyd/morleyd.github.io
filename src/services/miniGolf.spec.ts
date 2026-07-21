@@ -65,6 +65,13 @@ describe('aimToVelocity', () => {
     expect(speed(aimToVelocity({ x: 0, y: 5 }, 5))).toBeCloseTo(MAX_POWER)
     expect(speed(aimToVelocity({ x: 0, y: 5 }, -1))).toBe(0)
   })
+  it('never exceeds MAX_POWER for an off-screen drag (power > 1)', () => {
+    // A drag that runs well beyond the canvas produces power far above 1; the
+    // launch speed must still cap at full power rather than growing unbounded.
+    for (const p of [1.5, 3, 100]) {
+      expect(speed(aimToVelocity({ x: 3, y: -4 }, p))).toBeCloseTo(MAX_POWER)
+    }
+  })
 })
 
 describe('inCup', () => {

@@ -1,11 +1,16 @@
 import { describe, it, expect } from 'vitest'
 import {
+  DIFFICULTIES,
+  DIFFICULTY_ORDER,
+  MAX_SIMON_PADS,
   SIMON_PADS,
   buildDeck,
   checkSimon,
   extendSequence,
   isMatch,
   matchStars,
+  padsFor,
+  pairsFor,
 } from './memory'
 
 describe('buildDeck', () => {
@@ -51,12 +56,47 @@ describe('matchStars', () => {
   })
 })
 
+describe('difficulty sizes', () => {
+  it('each preset produces the right number of cards and pads', () => {
+    for (const d of DIFFICULTY_ORDER) {
+      const { pairs, pads } = DIFFICULTIES[d]
+      expect(pairsFor(d)).toBe(pairs)
+      expect(padsFor(d)).toBe(pads)
+      // A chosen size yields a deck of exactly `pairs * 2` cards.
+      expect(buildDeck(pairsFor(d), () => 0.5)).toHaveLength(pairs * 2)
+    }
+  })
+  it('gets harder (more pairs/pads) across the ordered presets', () => {
+    const pairsSeq = DIFFICULTY_ORDER.map(pairsFor)
+    const padsSeq = DIFFICULTY_ORDER.map(padsFor)
+    expect(pairsSeq).toEqual([...pairsSeq].sort((a, b) => a - b))
+    expect(padsSeq).toEqual([...padsSeq].sort((a, b) => a - b))
+    expect(pairsSeq[pairsSeq.length - 1]).toBeGreaterThan(pairsSeq[0])
+  })
+  it('MAX_SIMON_PADS covers the largest preset', () => {
+    expect(MAX_SIMON_PADS).toBe(Math.max(...DIFFICULTY_ORDER.map(padsFor)))
+  })
+})
+
 describe('extendSequence', () => {
   it('adds one pad in range', () => {
     const next = extendSequence([0, 1], () => 0.99)
     expect(next).toHaveLength(3)
     expect(next[2]).toBeGreaterThanOrEqual(0)
     expect(next[2]).toBeLessThan(SIMON_PADS)
+  })
+  it('defaults to the classic 4 pads', () => {
+    expect(extendSequence([], () => 0.99)[0]).toBe(3)
+  })
+  it('honors a custom pad count so harder sizes use more pads', () => {
+    // rng near 1 selects the top pad index (pads - 1).
+    expect(extendSequence([], () => 0.99, 6)[0]).toBe(5)
+    // Every draw stays within [0, pads).
+    for (let r = 0; r < 1; r += 0.05) {
+      const v = extendSequence([], () => r, 6)[0]
+      expect(v).toBeGreaterThanOrEqual(0)
+      expect(v).toBeLessThan(6)
+    }
   })
   it('does not mutate the input', () => {
     const seq = [2, 3]

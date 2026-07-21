@@ -15,6 +15,9 @@ import {
   type Constraint,
   type Grid,
 } from './tango'
+import { findHint, symbolName } from './tangoHints'
+
+const emptyGrid = (): Grid => new Array(CELLS).fill(EMPTY)
 
 const isValidFull = (grid: Grid, constraints: Constraint[]): boolean => {
   if (grid.some((v) => v !== SUN && v !== MOON)) return false
@@ -130,5 +133,123 @@ describe('isSolved', () => {
     const partial = solution.slice()
     partial[0] = EMPTY
     expect(isSolved(partial, constraints)).toBe(false)
+  })
+})
+
+describe('findHint — no-three-in-a-row rule', () => {
+  it('forces the cell sandwiched between two equal symbols', () => {
+    // row 0: SUN _ SUN  → the middle must be a MOON
+    const grid = emptyGrid()
+    grid[0] = SUN
+    grid[2] = SUN
+    const hint = findHint(grid, [])
+    expect(hint).not.toBeNull()
+    expect(hint?.rule).toBe('triple')
+    expect(hint?.cell).toBe(1)
+    expect(hint?.value).toBe(MOON)
+    expect(hint?.because).toEqual(expect.arrayContaining([0, 2]))
+  })
+
+  it('forces the cell beside an existing equal pair', () => {
+    // row 0: SUN SUN _  → the next cell must be a MOON
+    const grid = emptyGrid()
+    grid[0] = SUN
+    grid[1] = SUN
+    const hint = findHint(grid, [])
+    expect(hint?.rule).toBe('triple')
+    expect(hint?.cell).toBe(2)
+    expect(hint?.value).toBe(MOON)
+  })
+
+  it('works vertically as well', () => {
+    // column 0: MOON MOON _ down the left edge → cell below must be a SUN
+    const grid = emptyGrid()
+    grid[0] = MOON
+    grid[SIZE] = MOON
+    const hint = findHint(grid, [])
+    expect(hint?.rule).toBe('triple')
+    expect(hint?.cell).toBe(2 * SIZE)
+    expect(hint?.value).toBe(SUN)
+  })
+})
+
+describe('findHint — balance rule', () => {
+  it('fills the rest of a line once one symbol hits its max', () => {
+    // row 0 gets its three Suns (no triple); the last empty cell must be a Moon.
+    const grid = emptyGrid()
+    grid[0] = SUN
+    grid[1] = MOON
+    grid[2] = SUN
+    grid[3] = MOON
+    grid[4] = SUN
+    // cell 5 is the only empty in the row
+    const hint = findHint(grid, [])
+    expect(hint?.rule).toBe('balance')
+    expect(hint?.cell).toBe(5)
+    expect(hint?.value).toBe(MOON)
+    expect(hint?.because).toEqual(expect.arrayContaining([0, 2, 4]))
+  })
+})
+
+describe('findHint — link (= / ×) rule', () => {
+  it('copies a value across an equality badge', () => {
+    const grid = emptyGrid()
+    grid[0] = SUN
+    const hint = findHint(grid, [{ a: 0, b: 1, kind: 'eq' }])
+    expect(hint?.rule).toBe('link')
+    expect(hint?.cell).toBe(1)
+    expect(hint?.value).toBe(SUN)
+    expect(hint?.because).toEqual([0])
+  })
+
+  it('flips a value across an opposite badge', () => {
+    const grid = emptyGrid()
+    grid[0] = SUN
+    const hint = findHint(grid, [{ a: 0, b: 1, kind: 'opp' }])
+    expect(hint?.rule).toBe('link')
+    expect(hint?.cell).toBe(1)
+    expect(hint?.value).toBe(MOON)
+  })
+})
+
+describe('findHint — integration', () => {
+  it('returns null when no single rule settles a cell', () => {
+    expect(findHint(emptyGrid(), [])).toBeNull()
+  })
+
+  it('only ever suggests moves that agree with the real solution', () => {
+    let applied = 0
+    // Walk each puzzle by repeatedly applying the deduced hint. Every suggestion
+    // must match the unique solution, and the engine must never contradict it.
+    for (const seed of ['a', 'b', 'c', 'd', 'hint-seed']) {
+      const { given, solution, constraints } = generateTango(seed)
+      const grid = given.slice()
+      for (let step = 0; step < CELLS; step += 1) {
+        const hint = findHint(grid, constraints)
+        if (!hint) break
+        expect(grid[hint.cell]).toBe(EMPTY) // never re-suggests a filled cell
+        expect(solution[hint.cell]).toBe(hint.value)
+        grid[hint.cell] = hint.value
+        applied += 1
+      }
+    }
+    // The deduction engine fires on real puzzles (not merely a no-op).
+    expect(applied).toBeGreaterThan(0)
+  })
+
+  it('solves a solution missing a single forced cell', () => {
+    const { solution, constraints } = generateTango('almost')
+    const grid = solution.slice()
+    grid[10] = EMPTY
+    const hint = findHint(grid, constraints)
+    expect(hint?.cell).toBe(10)
+    expect(hint?.value).toBe(solution[10])
+  })
+})
+
+describe('symbolName', () => {
+  it('names the symbols', () => {
+    expect(symbolName(SUN)).toBe('Sun')
+    expect(symbolName(MOON)).toBe('Moon')
   })
 })

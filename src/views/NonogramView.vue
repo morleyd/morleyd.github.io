@@ -11,21 +11,45 @@ import GameToolbar from '@/components/GameToolbar.vue'
 import { copyToClipboard } from '@/services/share'
 import { randomSeed } from '@/services/seed'
 import { useSquareFit } from '@/composables/useSquareFit'
-import { generateNonogram, isSolved, lineSatisfied, type Nonogram } from '@/services/nonogram'
+import {
+  generateNonogram,
+  isSolved,
+  lineSatisfied,
+  nonogramFromPattern,
+  type Nonogram,
+} from '@/services/nonogram'
+import { patternById, patternsForSize } from '@/services/nonogramPatterns'
 
-const { el: boardEl, px: boardPx } = useSquareFit(200)
+const { el: boardEl, px: boardPx } = useSquareFit(96)
 
 const route = useRoute()
 const router = useRouter()
 
 const SIZES = [5, 10, 15]
 
+// Fill-color themes for the painted cells (picked in settings).
+const THEMES = [
+  { id: 'violet', label: 'Violet', fill: '#7c3aed' },
+  { id: 'ocean', label: 'Ocean', fill: '#0ea5e9' },
+  { id: 'sunset', label: 'Sunset', fill: '#f97316' },
+  { id: 'forest', label: 'Forest', fill: '#22c55e' },
+] as const
+
 const size = ref(10)
 const code = ref('')
+const pattern = ref('random') // 'random' or a pattern id
+const theme = ref<string>('violet')
 const puzzle = ref<Nonogram>(generateNonogram(10, 10, 'init'))
 const marks = ref<number[]>([]) // 0 empty · 1 filled · 2 X-marked
 const mode = ref<'fill' | 'mark'>('fill')
 const snackbar = ref(false)
+
+// Pictures the player can pick for the current board size.
+const patternOptions = computed(() => [
+  { title: 'Random', value: 'random' },
+  ...patternsForSize(size.value).map((p) => ({ title: p.name, value: p.id })),
+])
+const themeFill = computed(() => THEMES.find((t) => t.id === theme.value)?.fill ?? THEMES[0].fill)
 
 const rows = computed(() => puzzle.value.rows)
 const cols = computed(() => puzzle.value.cols)
@@ -35,16 +59,20 @@ const idx = (r: number, c: number) => r * cols.value + c
 const maxRowClueLen = computed(() => Math.max(1, ...puzzle.value.rowClues.map((c) => c.length)))
 const maxColClueLen = computed(() => Math.max(1, ...puzzle.value.colClues.map((c) => c.length)))
 
-// Fit clues + board into the measured square.
+// Fit clues + board into the measured square. Clamp cells so the board scales
+// UP to fill desktop space (bigger cells) without a single small picture
+// ballooning into absurdly large squares.
 const cell = computed(() => {
   const across = cols.value + maxRowClueLen.value
   const down = rows.value + maxColClueLen.value
-  return Math.max(16, Math.floor(boardPx.value / Math.max(across, down)))
+  const fit = Math.floor(boardPx.value / Math.max(across, down))
+  return Math.min(64, Math.max(16, fit))
 })
 const gridStyle = computed(() => ({
   gridTemplateColumns: `${maxRowClueLen.value * cell.value}px repeat(${cols.value}, ${cell.value}px)`,
   gridTemplateRows: `${maxColClueLen.value * cell.value}px repeat(${rows.value}, ${cell.value}px)`,
   fontSize: `${Math.max(9, Math.floor(cell.value * 0.42))}px`,
+  '--nono-fill': themeFill.value,
 }))
 
 const asBool = computed(() => marks.value.map((m) => m === 1))
@@ -60,19 +88,39 @@ const colDone = (c: number) => {
 }
 
 const build = () => {
+  if (pattern.value !== 'random') {
+    const p = patternById(pattern.value, size.value)
+    if (p) {
+      puzzle.value = nonogramFromPattern(p)
+      marks.value = new Array(size.value * size.value).fill(0)
+      return
+    }
+    pattern.value = 'random' // no such picture at this size — fall back
+  }
   puzzle.value = generateNonogram(size.value, size.value, code.value)
   marks.value = new Array(size.value * size.value).fill(0)
 }
 
-const syncUrl = () => router.replace({ name: 'nonogram', params: { seed: `${size.value}.${code.value}` } })
+// A named picture shares as `@id`; a random puzzle shares its seed code.
+const seedCode = computed(() => (pattern.value === 'random' ? code.value : `@${pattern.value}`))
+const syncUrl = () =>
+  router.replace({ name: 'nonogram', params: { seed: `${size.value}.${seedCode.value}` } })
 const newGame = () => {
-  code.value = randomSeed()
+  if (pattern.value === 'random') code.value = randomSeed()
   syncUrl()
   build()
 }
 const setSize = (v: number) => {
   size.value = v
+  // Drop a picture selection that doesn't exist at the new size.
+  if (pattern.value !== 'random' && !patternById(pattern.value, v)) pattern.value = 'random'
   newGame()
+}
+const setPattern = (v: string | null) => {
+  pattern.value = v ?? 'random'
+  if (pattern.value === 'random' && !code.value) code.value = randomSeed()
+  syncUrl()
+  build()
 }
 
 // --- Painting -----------------------------------------------------------
@@ -131,7 +179,12 @@ onMounted(() => {
   const m = /^(\d+)\.(.+)$/.exec(p)
   if (m && SIZES.includes(Number(m[1]))) {
     size.value = Number(m[1])
-    code.value = m[2]
+    const rest = m[2]
+    if (rest.startsWith('@') && patternById(rest.slice(1), size.value)) {
+      pattern.value = rest.slice(1)
+    } else {
+      code.value = rest
+    }
     build()
   } else {
     newGame()
@@ -144,7 +197,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <v-container class="py-6" max-width="640">
+  <v-container class="py-6" max-width="860">
     <GameToolbar title="Nonogram" shareable @share="share">
       <template #intro>
         Fill the cells so each row and column matches its run-length clues — the numbers count
@@ -156,6 +209,25 @@ onBeforeUnmount(() => {
             <label class="text-caption text-medium-emphasis d-block mb-1">Size</label>
             <v-btn-toggle :model-value="size" mandatory density="compact" variant="outlined" divided @update:model-value="setSize">
               <v-btn v-for="s in SIZES" :key="s" :value="s" size="small">{{ s }}×{{ s }}</v-btn>
+            </v-btn-toggle>
+          </div>
+          <div>
+            <label class="text-caption text-medium-emphasis d-block mb-1">Picture</label>
+            <v-select
+              :model-value="pattern"
+              :items="patternOptions"
+              density="compact"
+              variant="outlined"
+              hide-details
+              @update:model-value="setPattern"
+            />
+          </div>
+          <div>
+            <label class="text-caption text-medium-emphasis d-block mb-1">Fill color</label>
+            <v-btn-toggle v-model="theme" mandatory density="compact" variant="outlined" divided>
+              <v-btn v-for="t in THEMES" :key="t.id" :value="t.id" size="small" :title="t.label">
+                <span class="swatch" :style="{ background: t.fill }" />
+              </v-btn>
             </v-btn-toggle>
           </div>
           <v-btn variant="tonal" color="primary" prepend-icon="mdi-refresh" @click="newGame">New puzzle</v-btn>
@@ -290,10 +362,17 @@ onBeforeUnmount(() => {
 .ncell--r5 { border-left-color: rgba(148, 163, 184, 0.5); }
 .ncell--b5 { border-top-color: rgba(148, 163, 184, 0.5); }
 .ncell--fill {
-  background: #7c3aed;
-  box-shadow: inset 0 0 0 1px rgba(124, 58, 237, 0.9);
+  background: var(--nono-fill, #7c3aed);
+  box-shadow: inset 0 0 0 1px var(--nono-fill, #7c3aed);
 }
 .ncell--x { color: rgba(148, 163, 184, 0.7); }
+.swatch {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+}
 .x {
   font-size: 0.8em;
   line-height: 1;

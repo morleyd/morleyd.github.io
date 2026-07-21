@@ -23,6 +23,7 @@ import {
   type Constraint,
   type Grid,
 } from '@/services/tango'
+import { findHint, symbolName, type Hint } from '@/services/tangoHints'
 
 const { el: boardEl, px: boardPx } = useSquareFit(170)
 const cell = computed(() => boardPx.value / SIZE)
@@ -36,6 +37,34 @@ const given = ref<boolean[]>([])
 const solution = ref<Grid>([])
 const constraints = ref<Constraint[]>([])
 const snackbar = ref(false)
+
+// Progressive hint state: level 0 = idle, 1 = region shown, 2 = exact cell shown,
+// 3 = value revealed (then it resets). The hint is computed once when it starts
+// and held steady across levels; any board change clears it.
+const hint = ref<Hint | null>(null)
+const hintLevel = ref(0)
+const noHint = ref(false)
+
+const clearHint = () => {
+  hint.value = null
+  hintLevel.value = 0
+  noHint.value = false
+}
+
+const hintRegion = computed(() =>
+  hint.value && hintLevel.value >= 1 ? new Set(hint.value.region.concat(hint.value.because)) : new Set<number>(),
+)
+const hintCell = computed(() => (hint.value && hintLevel.value >= 2 ? hint.value.cell : null))
+
+const hintMessage = computed(() => {
+  if (noHint.value) return 'No single-step deduction from here — try filling in what you know, then ask again.'
+  const h = hint.value
+  if (!h) return ''
+  if (hintLevel.value === 1) return `${h.reason} (Hint again to pinpoint the cell.)`
+  if (hintLevel.value === 2) return 'This exact cell is forced. Hint again to reveal its value.'
+  if (hintLevel.value >= 3) return `${h.reason.split(':')[0]}: this cell must be a ${symbolName(h.value)}.`
+  return ''
+})
 
 const conflicts = computed(() => findConflicts(cells.value, constraints.value))
 const solved = computed(() => cells.value.length > 0 && isSolved(cells.value, constraints.value))
@@ -57,6 +86,7 @@ const build = () => {
   given.value = puzzle.given.map((v) => v !== EMPTY)
   solution.value = puzzle.solution.slice()
   constraints.value = puzzle.constraints
+  clearHint()
 }
 
 const syncUrl = () => router.replace({ name: 'tango', params: { seed: code.value } })
@@ -71,6 +101,35 @@ const cycle = (i: number) => {
   const next = cells.value.slice()
   next[i] = next[i] === EMPTY ? SUN : next[i] === SUN ? MOON : EMPTY
   cells.value = next
+  clearHint() // the board changed — any pending hint is stale
+}
+
+// Step the hint through its reveal levels: compute on first press, then
+// region → cell → value; the final step fills the forced cell.
+const nextHint = () => {
+  if (solved.value) return
+  if (!hint.value) {
+    const found = findHint(cells.value, constraints.value)
+    if (!found) {
+      noHint.value = true
+      return
+    }
+    hint.value = found
+    hintLevel.value = 1
+    return
+  }
+  if (hintLevel.value < 3) {
+    hintLevel.value += 1
+    if (hintLevel.value === 3) {
+      const next = cells.value.slice()
+      next[hint.value.cell] = hint.value.value
+      cells.value = next // fill applied without clearHint so the reveal message stays
+    }
+    return
+  }
+  // Level 3 already shown — move on to the next deduction.
+  clearHint()
+  nextHint()
 }
 
 const share = async () => {
@@ -92,6 +151,8 @@ onMounted(() => {
 const cellClass = (i: number) => ({
   'tcell--given': given.value[i],
   'tcell--conflict': conflicts.value.has(i),
+  'tcell--hint-region': hintRegion.value.has(i) && hintCell.value !== i,
+  'tcell--hint-cell': hintCell.value === i,
 })
 </script>
 
@@ -123,13 +184,20 @@ const cellClass = (i: number) => ({
       </template>
     </GameToolbar>
 
-    <div class="d-flex align-center ga-3 mb-3">
+    <div class="d-flex align-center ga-2 mb-3">
       <v-spacer />
+      <v-btn variant="tonal" prepend-icon="mdi-lightbulb-on-outline" :disabled="solved" @click="nextHint">Hint</v-btn>
       <v-btn variant="tonal" color="primary" prepend-icon="mdi-refresh" @click="newGame">New</v-btn>
     </div>
 
     <div ref="boardEl" class="board-wrap" :style="{ width: boardPx + 'px', height: boardPx + 'px' }">
-      <div class="board" :style="{ gridTemplateColumns: `repeat(${SIZE}, 1fr)` }">
+      <div
+        class="board"
+        :style="{
+          gridTemplateColumns: `repeat(${SIZE}, 1fr)`,
+          gridTemplateRows: `repeat(${SIZE}, 1fr)`,
+        }"
+      >
         <button
           v-for="(v, i) in cells"
           :key="i"
@@ -158,6 +226,15 @@ const cellClass = (i: number) => ({
       </div>
     </div>
 
+    <v-alert
+      v-if="hintMessage"
+      class="mt-4"
+      density="comfortable"
+      variant="tonal"
+      :color="noHint ? 'warning' : 'info'"
+      icon="mdi-lightbulb-on-outline"
+    >{{ hintMessage }}</v-alert>
+
     <v-snackbar v-model="snackbar" :timeout="2600" color="secondary">Puzzle link copied — share it!</v-snackbar>
   </v-container>
 </template>
@@ -179,6 +256,12 @@ const cellClass = (i: number) => ({
   user-select: none;
 }
 .tcell {
+  /* Square cells: the 6×6 grid tracks (1fr rows + columns inside a square wrapper)
+     already size each cell to boardPx/6; aspect-ratio keeps them square even if a
+     browser lays the tracks out early, before the wrapper's height is applied. */
+  aspect-ratio: 1;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -193,6 +276,13 @@ const cellClass = (i: number) => ({
 }
 .tcell--conflict {
   background: rgba(248, 113, 113, 0.22);
+}
+.tcell--hint-region {
+  background: rgba(59, 130, 246, 0.16);
+}
+.tcell--hint-cell {
+  background: rgba(59, 130, 246, 0.42);
+  box-shadow: inset 0 0 0 2px #60a5fa;
 }
 .sun {
   color: #facc15;

@@ -191,30 +191,46 @@ const startRolling = () => {
   raf = requestAnimationFrame(loop)
 }
 
-const pointerPos = (e: PointerEvent, el: HTMLElement) => {
-  const rect = el.getBoundingClientRect()
+// Pointer position relative to the canvas — works even when the pointer is
+// beyond the canvas edges, so the drag can extend off-screen.
+const pointerPos = (e: PointerEvent) => {
+  const canvas = canvasEl.value
+  if (!canvas) return { x: 0, y: 0 }
+  const rect = canvas.getBoundingClientRect()
   return { x: e.clientX - rect.left, y: e.clientY - rect.top }
+}
+
+// While dragging, track the pointer on the window so aim + power keep updating
+// (and the putt still registers) even when the pointer leaves the play area.
+const detachDrag = () => {
+  window.removeEventListener('pointermove', onPointerMove)
+  window.removeEventListener('pointerup', onPointerUp)
+  window.removeEventListener('pointercancel', onPointerUp)
 }
 
 const onPointerDown = (e: PointerEvent) => {
   if (phase.value !== 'aim') return
   aiming = true
-  dragStart = pointerPos(e, e.currentTarget as HTMLElement)
+  dragStart = pointerPos(e)
   dragCur = { ...dragStart }
+  window.addEventListener('pointermove', onPointerMove)
+  window.addEventListener('pointerup', onPointerUp)
+  window.addEventListener('pointercancel', onPointerUp)
 }
-const onPointerMove = (e: PointerEvent) => {
+function onPointerMove(e: PointerEvent) {
   if (!aiming) return
-  dragCur = pointerPos(e, e.currentTarget as HTMLElement)
+  dragCur = pointerPos(e)
   draw()
 }
-const onPointerUp = () => {
+function onPointerUp() {
   if (!aiming) return
   aiming = false
+  detachDrag()
   const S = boardPx.value
   const dx = dragCur.x - dragStart.x
   const dy = dragCur.y - dragStart.y
   const len = Math.hypot(dx, dy)
-  const power = Math.min(1, len / (MAX_DRAG_FRAC * S))
+  const power = Math.min(1, len / (MAX_DRAG_FRAC * S)) // clamp to full power
   if (power < 0.06) {
     draw()
     return // too small — treat as a cancel
@@ -255,12 +271,10 @@ onMounted(() => {
   seedCode.value = p || randomSeed()
   if (!p) router.replace({ name: 'mini-golf', params: { seed: seedCode.value } })
   loadHole()
-  // Catch a mouse-up that lands outside the canvas so aiming never sticks.
-  window.addEventListener('pointerup', onPointerUp)
 })
 onBeforeUnmount(() => {
   stopLoop()
-  window.removeEventListener('pointerup', onPointerUp)
+  detachDrag()
 })
 </script>
 
@@ -306,9 +320,6 @@ onBeforeUnmount(() => {
         class="canvas"
         :style="{ width: boardPx + 'px', height: boardPx + 'px' }"
         @pointerdown.prevent="onPointerDown"
-        @pointermove="onPointerMove"
-        @pointerup="onPointerUp"
-        @pointercancel="onPointerUp"
       />
 
       <div v-if="phase === 'holed'" class="overlay">

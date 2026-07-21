@@ -114,6 +114,25 @@ export function merge(board: Board, piece: Piece): Board {
   return next
 }
 
+/**
+ * Indices of rows that are completely filled — the rows a clear will remove.
+ * The view uses this to flash those rows before collapsing them.
+ */
+export function fullRows(board: Board): number[] {
+  const rows: number[] = []
+  for (let r = 0; r < ROWS; r += 1) {
+    let full = true
+    for (let c = 0; c < COLS; c += 1) {
+      if (!board[r * COLS + c]) {
+        full = false
+        break
+      }
+    }
+    if (full) rows.push(r)
+  }
+  return rows
+}
+
 /** Remove full rows, dropping everything above down. Returns the count cleared. */
 export function clearLines(board: Board): { board: Board; cleared: number } {
   const rows: number[][] = []

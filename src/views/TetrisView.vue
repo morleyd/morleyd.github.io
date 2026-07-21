@@ -19,6 +19,7 @@ import {
   createBag,
   dropRow,
   emptyBoard,
+  fullRows,
   gravityMs,
   lineScore,
   matrixFor,
@@ -51,6 +52,18 @@ const best = ref(0)
 const state = ref<'idle' | 'running' | 'paused' | 'over'>('idle')
 
 let timer: ReturnType<typeof setInterval> | null = null
+
+// Line-clear animation: full rows flash briefly before they collapse away. This
+// is purely a view concern — the pure clear happens in clearLines once the flash
+// finishes. `clearingRows` holds the rows currently flashing.
+const CLEAR_ANIM_MS = 320
+const clearingRows = ref<number[]>([])
+let clearTimer: ReturnType<typeof setTimeout> | null = null
+const cancelClear = () => {
+  if (clearTimer) clearTimeout(clearTimer)
+  clearTimer = null
+  clearingRows.value = []
+}
 
 // Lock delay: a grounded piece doesn't lock instantly — it gets a short grace
 // window so it can be slid or rotated into a gap. Moves reset the window a
@@ -96,15 +109,21 @@ const bumpLock = () => {
 
 // Rendered board = settled cells + ghost landing spot + the active piece.
 const view = computed(() => {
-  const cells = board.value.map((color) => ({ color, ghost: false }))
+  const flashing = new Set(clearingRows.value)
+  const cells = board.value.map((color, i) => ({
+    color,
+    ghost: false,
+    clearing: flashing.has(Math.floor(i / COLS)),
+  }))
   const piece = current.value
   if (piece && (state.value === 'running' || state.value === 'paused')) {
     for (const { x, y } of pieceCells(dropRow(board.value, piece))) {
-      if (y >= 0 && !cells[y * COLS + x].color) cells[y * COLS + x] = { color: 0, ghost: true }
+      if (y >= 0 && !cells[y * COLS + x].color)
+        cells[y * COLS + x] = { color: 0, ghost: true, clearing: false }
     }
     const color = colorOf(piece.type)
     for (const { x, y } of pieceCells(piece)) {
-      if (y >= 0) cells[y * COLS + x] = { color, ghost: false }
+      if (y >= 0) cells[y * COLS + x] = { color, ghost: false, clearing: false }
     }
   }
   return cells
@@ -127,6 +146,10 @@ const previewCells = (type: PieceType | null): number[] => {
 }
 
 const nextPreviews = computed(() => queue.value.slice(0, 3))
+
+// Progress within the current level: you advance a level every 10 lines.
+const linesToNext = computed(() => 10 - (lines.value % 10))
+const levelProgress = computed(() => (lines.value % 10) * 10)
 
 const stopTimer = () => {
   if (timer) clearInterval(timer)
@@ -154,22 +177,41 @@ const spawnNext = () => {
   canHold.value = true
 }
 
+// Settle the score/level for a clear of `n` rows.
+const applyClear = (n: number) => {
+  score.value += lineScore(n, level.value)
+  lines.value += n
+  const nextLevel = Math.floor(lines.value / 10) + 1
+  if (nextLevel !== level.value) {
+    level.value = nextLevel
+    restartGravity() // faster gravity at the new level
+  }
+}
+
 const lockPiece = () => {
   if (!current.value) return
   clearLock()
-  const { board: cleared, cleared: n } = clearLines(merge(board.value, current.value))
-  board.value = cleared
-  if (n > 0) {
-    score.value += lineScore(n, level.value)
-    lines.value += n
-    const nextLevel = Math.floor(lines.value / 10) + 1
-    if (nextLevel !== level.value) {
-      level.value = nextLevel
-      restartGravity() // faster gravity at the new level
-    }
-  }
+  const merged = merge(board.value, current.value)
   current.value = null
-  spawnNext()
+  const full = fullRows(merged)
+  if (full.length === 0) {
+    board.value = merged
+    spawnNext()
+    return
+  }
+  // Show the completed rows, flash them, then collapse. Gravity pauses during
+  // the flash so nothing spawns on top of the animating board.
+  board.value = merged
+  clearingRows.value = full
+  applyClear(full.length)
+  stopTimer() // keep gravity paused through the flash, even after a level-up
+  clearTimer = setTimeout(() => {
+    clearTimer = null
+    clearingRows.value = []
+    board.value = clearLines(merged).board
+    spawnNext()
+    if (state.value === 'running') restartGravity()
+  }, CLEAR_ANIM_MS)
 }
 
 const tick = () => {
@@ -250,6 +292,7 @@ const gameOver = () => {
   state.value = 'over'
   stopTimer()
   clearLock()
+  cancelClear()
   current.value = null
   persistBest()
 }
@@ -257,6 +300,7 @@ const gameOver = () => {
 const reset = () => {
   stopTimer()
   clearLock()
+  cancelClear()
   board.value = emptyBoard()
   queue.value = []
   holdType.value = null
@@ -392,6 +436,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   stopTimer()
   clearLock()
+  cancelClear()
   persistBest()
   window.removeEventListener('keydown', onKey)
 })
@@ -402,7 +447,8 @@ onBeforeUnmount(() => {
     <GameToolbar title="Tetris" shareable @share="share">
       <template #intro>
         Move with arrows / WASD, rotate with up (Z for the other way), hard-drop with Space, hold
-        with C. On mobile, use the buttons or swipe. Clear lines to score; it speeds up each level.
+        with C. On mobile, use the buttons or swipe. Clear lines to score. Every 10 lines you level
+        up: pieces fall faster and each line clear is worth more points.
       </template>
       <template #info>
         <h3>Goal</h3>
@@ -415,8 +461,9 @@ onBeforeUnmount(() => {
           <li><span class="k">C</span> — hold a piece for later. <span class="k">P</span> — pause.</li>
           <li>Mobile: on-screen buttons, or swipe to move / flick down to drop / tap to rotate.</li>
         </ul>
-        <h3>Scoring</h3>
-        <p>1/2/3/4 lines score 100/300/500/800 × level. Soft drop +1 per row, hard drop +2. You level up every 10 lines.</p>
+        <h3>Scoring &amp; levels</h3>
+        <p>1/2/3/4 lines score 100/300/500/800 × level. Soft drop +1 per row, hard drop +2.</p>
+        <p>Every 10 lines you gain a level. Higher levels are a bonus, not just a challenge: pieces fall faster <em>and</em> every line clear is multiplied by your level, so the same tetris is worth far more later on. The bar under the stats shows your progress to the next level.</p>
         <h3>Tips</h3>
         <ul>
           <li>Keep the stack low and flat; leave one column open for I-pieces to score tetrises.</li>
@@ -426,13 +473,21 @@ onBeforeUnmount(() => {
     </GameToolbar>
 
     <!-- Stats -->
-    <div class="d-flex align-center ga-3 mb-3 flex-wrap">
+    <div class="d-flex align-center ga-3 mb-2 flex-wrap">
       <div class="stat"><span class="stat-label">Score</span><span class="stat-value">{{ score }}</span></div>
       <div class="stat"><span class="stat-label">Lines</span><span class="stat-value">{{ lines }}</span></div>
       <div class="stat"><span class="stat-label">Level</span><span class="stat-value">{{ level }}</span></div>
       <v-spacer />
       <div class="text-body-2 text-medium-emphasis">Best: {{ best }}</div>
       <v-btn variant="tonal" color="primary" prepend-icon="mdi-restart" @click="newGame">New</v-btn>
+    </div>
+
+    <!-- Level progress: faster fall + higher line scores at the next level. -->
+    <div class="level-progress mb-3">
+      <v-progress-linear :model-value="levelProgress" color="primary" height="6" rounded />
+      <span class="level-progress-label text-caption text-medium-emphasis">
+        {{ linesToNext }} more {{ linesToNext === 1 ? 'line' : 'lines' }} to level {{ level + 1 }} (faster fall, bigger scores)
+      </span>
     </div>
 
     <div class="play-area">
@@ -448,7 +503,10 @@ onBeforeUnmount(() => {
             v-for="(c, i) in view"
             :key="i"
             class="cell"
-            :class="[c.color ? `cell--${c.color}` : '', { 'cell--ghost': c.ghost }]"
+            :class="[
+              c.color ? `cell--${c.color}` : '',
+              { 'cell--ghost': c.ghost, 'cell--clearing': c.clearing },
+            ]"
           />
         </div>
 
@@ -466,43 +524,71 @@ onBeforeUnmount(() => {
             <p class="text-body-2 mb-3">
               Score {{ score }}<span v-if="score === best && score > 0"> — new best!</span>
             </p>
-            <v-btn color="primary" variant="flat" prepend-icon="mdi-restart" @click="newGame">Play again</v-btn>
+            <div class="d-flex ga-2">
+              <v-btn color="primary" variant="flat" prepend-icon="mdi-restart" @click="newGame">Play again</v-btn>
+              <v-btn color="secondary" variant="tonal" prepend-icon="mdi-share-variant" @click="share">Share</v-btn>
+            </div>
           </template>
         </div>
       </div>
 
-      <!-- Side panel: hold + next -->
+      <!-- Side panel: hold + next. A compact strip above the board on narrow
+           screens, a column beside it on wide ones — always visible. -->
       <div class="side">
-        <div class="side-label">Hold</div>
-        <div class="mini">
-          <div
-            v-for="(c, i) in previewCells(holdType)"
-            :key="'h' + i"
-            class="mini-cell"
-            :class="c ? `cell--${c}` : ''"
-          />
+        <div class="side-group">
+          <div class="side-label">Hold</div>
+          <div class="mini">
+            <div
+              v-for="(c, i) in previewCells(holdType)"
+              :key="'h' + i"
+              class="mini-cell"
+              :class="c ? `cell--${c}` : ''"
+            />
+          </div>
         </div>
-        <div class="side-label mt-3">Next</div>
-        <div v-for="(t, n) in nextPreviews" :key="'n' + n" class="mini">
-          <div
-            v-for="(c, i) in previewCells(t)"
-            :key="i"
-            class="mini-cell"
-            :class="c ? `cell--${c}` : ''"
-          />
+        <div class="side-group side-next">
+          <div class="side-label">Next</div>
+          <div class="mini-row">
+            <div v-for="(t, n) in nextPreviews" :key="'n' + n" class="mini">
+              <div
+                v-for="(c, i) in previewCells(t)"
+                :key="i"
+                class="mini-cell"
+                :class="c ? `cell--${c}` : ''"
+              />
+            </div>
+          </div>
         </div>
       </div>
     </div>
 
-    <!-- On-screen controls -->
+    <!-- On-screen controls. Hard-drop stays on Space / a downward swipe to keep
+         this row simple — one clear down control that soft-drops. -->
     <div class="controls mt-4">
-      <v-btn icon="mdi-rotate-right-variant" variant="tonal" @click="rotatePiece(1)" />
-      <v-btn icon="mdi-chevron-left" variant="tonal" @click="tryMove(-1)" />
-      <v-btn icon="mdi-chevron-down" variant="tonal" @click="softDrop" />
-      <v-btn icon="mdi-chevron-right" variant="tonal" @click="tryMove(1)" />
-      <v-btn icon="mdi-arrow-collapse-down" variant="tonal" @click="hardDrop" />
-      <v-btn icon="mdi-tray-arrow-up" variant="tonal" :disabled="!canHold" @click="hold" />
-      <v-btn :icon="state === 'paused' ? 'mdi-play' : 'mdi-pause'" variant="tonal" @click="togglePause" />
+      <v-btn icon variant="tonal" @click="rotatePiece(1)">
+        <v-icon icon="mdi-rotate-right-variant" />
+        <v-tooltip activator="parent" location="top" text="Rotate" />
+      </v-btn>
+      <v-btn icon variant="tonal" @click="tryMove(-1)">
+        <v-icon icon="mdi-chevron-left" />
+        <v-tooltip activator="parent" location="top" text="Move left" />
+      </v-btn>
+      <v-btn icon variant="tonal" @click="softDrop">
+        <v-icon icon="mdi-chevron-down" />
+        <v-tooltip activator="parent" location="top" text="Soft drop (Space or swipe down to hard-drop)" />
+      </v-btn>
+      <v-btn icon variant="tonal" @click="tryMove(1)">
+        <v-icon icon="mdi-chevron-right" />
+        <v-tooltip activator="parent" location="top" text="Move right" />
+      </v-btn>
+      <v-btn icon variant="tonal" :disabled="!canHold" @click="hold">
+        <v-icon icon="mdi-archive-arrow-down-outline" />
+        <v-tooltip activator="parent" location="top" text="Hold piece" />
+      </v-btn>
+      <v-btn icon variant="tonal" @click="togglePause">
+        <v-icon :icon="state === 'paused' ? 'mdi-play' : 'mdi-pause'" />
+        <v-tooltip activator="parent" location="top" :text="state === 'paused' ? 'Resume' : 'Pause'" />
+      </v-btn>
     </div>
 
     <v-snackbar v-model="snackbar" :timeout="2600" color="secondary">Score copied — challenge a friend!</v-snackbar>
@@ -510,10 +596,13 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* Mobile-first: stack the hold/next strip above the board so it's never pushed
+   off-screen. Wide screens move it beside the board (see the media query). */
 .play-area {
   display: flex;
-  gap: 14px;
-  align-items: flex-start;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
   justify-content: center;
 }
 
@@ -544,6 +633,33 @@ onBeforeUnmount(() => {
   background: rgba(226, 232, 240, 0.16);
   box-shadow: inset 0 0 0 1px rgba(226, 232, 240, 0.25);
 }
+/* Completed rows flash bright, then the row collapses just before it clears. */
+.cell--clearing {
+  animation: line-clear 320ms ease-out forwards;
+  z-index: 1;
+}
+@keyframes line-clear {
+  0% {
+    filter: brightness(1);
+    transform: scale(1);
+  }
+  35% {
+    background: #fff;
+    filter: brightness(2.4);
+    transform: scale(1.08);
+  }
+  100% {
+    background: #fff;
+    filter: brightness(3);
+    transform: scaleY(0);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cell--clearing {
+    animation-duration: 1ms;
+  }
+}
 
 /* Piece colors, in COLOR_ORDER: I O T S Z J L */
 .cell--1 { background: #22d3ee; } /* I - cyan */
@@ -554,9 +670,20 @@ onBeforeUnmount(() => {
 .cell--6 { background: #3b82f6; } /* J - blue */
 .cell--7 { background: #f97316; } /* L - orange */
 
+/* Narrow: a horizontal strip of Hold + Next groups above the board. */
 .side {
   flex: 0 0 auto;
-  min-width: 76px;
+  order: -1;
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.side-group {
+  display: flex;
+  flex-direction: column;
 }
 .side-label {
   font-size: 0.7rem;
@@ -565,17 +692,50 @@ onBeforeUnmount(() => {
   color: rgba(148, 163, 184, 0.9);
   margin-bottom: 4px;
 }
+.mini-row {
+  display: flex;
+  flex-direction: row;
+  gap: 6px;
+}
 .mini {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 2px;
-  width: 68px;
+  width: 56px;
   aspect-ratio: 1;
-  margin-bottom: 6px;
 }
 .mini-cell {
   border-radius: 2px;
   background: rgba(148, 163, 184, 0.05);
+}
+
+.level-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* Wide: hold/next sits in a column beside the board, next pieces stacked. */
+@media (min-width: 640px) {
+  .play-area {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 14px;
+  }
+  .side {
+    order: 0;
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 12px;
+    min-width: 76px;
+  }
+  .mini-row {
+    flex-direction: column;
+    gap: 6px;
+  }
+  .mini {
+    width: 68px;
+  }
 }
 
 .stat {

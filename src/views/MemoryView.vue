@@ -8,21 +8,35 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import GameToolbar from '@/components/GameToolbar.vue'
 import {
-  SIMON_PADS,
+  DIFFICULTIES,
+  DIFFICULTY_ORDER,
+  type Difficulty,
   buildDeck,
   checkSimon,
   extendSequence,
   isMatch,
   matchStars,
+  padsFor,
+  pairsFor,
 } from '@/services/memory'
+import { SimonAudio } from '@/services/memoryAudio'
 
 const FACES = ['🍎', '🌟', '🎈', '🐱', '🌸', '⚡', '🍕', '🎸', '🚀', '🎲', '🍩', '👾']
+// Colors + labels for pad 0..MAX_SIMON_PADS-1 (harder difficulties use more).
+const PAD_LABELS = ['green', 'red', 'yellow', 'blue', 'purple', 'cyan']
 const SIMON_BEST_KEY = 'simon-best'
 
 const mode = ref<'match' | 'simon'>('match')
 
+// --- Difficulty / size --------------------------------------------------
+// One preset drives both modes: Match pairs and the number of Simon pads.
+const difficulty = ref<Difficulty>('medium')
+const difficultyLabels: Record<Difficulty, string> = { easy: 'Easy', medium: 'Medium', hard: 'Hard' }
+const pairs = computed(() => pairsFor(difficulty.value))
+const pads = computed(() => padsFor(difficulty.value))
+const simonCols = computed(() => (pads.value <= 4 ? 2 : 3))
+
 // --- Match --------------------------------------------------------------
-const pairs = ref(8)
 const deck = ref<number[]>([])
 const flipped = ref<number[]>([])
 const matched = ref<Set<number>>(new Set())
@@ -70,6 +84,15 @@ const simonState = ref<'idle' | 'show' | 'input' | 'over'>('idle')
 const activePad = ref(-1)
 const simonBest = ref(0)
 
+// Web Audio tones — one per pad. Guarded so tests/SSR (no AudioContext) no-op.
+const audio = new SimonAudio()
+const muted = ref(false)
+const audioAvailable = audio.available
+const toggleMute = () => {
+  muted.value = !muted.value
+  audio.muted = muted.value
+}
+
 const simonLevel = computed(() => sequence.value.length)
 
 let timers: ReturnType<typeof setTimeout>[] = []
@@ -90,6 +113,7 @@ const playSequence = () => {
       return
     }
     activePad.value = sequence.value[i]
+    audio.play(activePad.value, 420)
     pushTimer(
       setTimeout(() => {
         activePad.value = -1
@@ -114,8 +138,9 @@ const persistSimonBest = () => {
 }
 
 const startSimon = () => {
+  audio.resume() // first gesture — unlock/resume the AudioContext
   clearTimers()
-  sequence.value = extendSequence([], Math.random)
+  sequence.value = extendSequence([], Math.random, pads.value)
   simonInput.value = []
   simonState.value = 'show'
   playSequence()
@@ -132,6 +157,8 @@ const flashPad = (p: number) => {
 
 const tapPad = (p: number) => {
   if (simonState.value !== 'input') return
+  audio.resume() // keep the context alive; safe to call repeatedly
+  audio.play(p, 220)
   flashPad(p)
   simonInput.value = [...simonInput.value, p]
   const result = checkSimon(sequence.value, simonInput.value)
@@ -143,7 +170,7 @@ const tapPad = (p: number) => {
     simonState.value = 'show'
     pushTimer(
       setTimeout(() => {
-        sequence.value = extendSequence(sequence.value, Math.random)
+        sequence.value = extendSequence(sequence.value, Math.random, pads.value)
         playSequence()
       }, 650),
     )
@@ -165,6 +192,20 @@ const newGame = () => {
   else startSimon()
 }
 
+// Changing size starts a fresh game at the new size in whichever mode is active.
+const setDifficulty = (d: Difficulty) => {
+  difficulty.value = d
+  clearTimers()
+  if (mode.value === 'match') {
+    buildMatch()
+  } else {
+    simonState.value = 'idle'
+    activePad.value = -1
+    sequence.value = []
+    simonInput.value = []
+  }
+}
+
 onMounted(() => {
   try {
     simonBest.value = Number(localStorage.getItem(SIMON_BEST_KEY)) || 0
@@ -175,6 +216,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   clearTimers()
+  audio.dispose()
 })
 </script>
 
@@ -187,12 +229,24 @@ onBeforeUnmount(() => {
       </template>
       <template #settings>
         <div class="d-flex flex-column ga-4">
-          <div v-if="mode === 'match'">
-            <label class="text-caption text-medium-emphasis d-block mb-1">Pairs</label>
-            <v-btn-toggle :model-value="pairs" mandatory density="compact" variant="outlined" divided @update:model-value="(v: number) => { pairs = v; buildMatch() }">
-              <v-btn v-for="p in [6, 8, 10]" :key="p" :value="p" size="small">{{ p }}</v-btn>
+          <div>
+            <label class="text-caption text-medium-emphasis d-block mb-1">Difficulty</label>
+            <v-btn-toggle :model-value="difficulty" mandatory density="compact" variant="outlined" divided @update:model-value="setDifficulty">
+              <v-btn v-for="d in DIFFICULTY_ORDER" :key="d" :value="d" size="small">{{ difficultyLabels[d] }}</v-btn>
             </v-btn-toggle>
+            <div class="text-caption text-medium-emphasis mt-1">
+              {{ DIFFICULTIES[difficulty].pairs }} pairs · {{ DIFFICULTIES[difficulty].pads }} Simon pads
+            </div>
           </div>
+          <v-btn
+            v-if="audioAvailable"
+            variant="tonal"
+            :color="muted ? undefined : 'primary'"
+            :prepend-icon="muted ? 'mdi-volume-off' : 'mdi-volume-high'"
+            @click="toggleMute"
+          >
+            {{ muted ? 'Sound off' : 'Sound on' }}
+          </v-btn>
           <v-btn variant="tonal" color="primary" prepend-icon="mdi-refresh" @click="newGame">New game</v-btn>
         </div>
       </template>
@@ -254,14 +308,14 @@ onBeforeUnmount(() => {
         <div class="text-h6">Level: <span class="font-weight-bold">{{ simonState === 'idle' ? 0 : simonLevel }}</span></div>
         <div class="text-body-2 text-medium-emphasis">Best: {{ simonBest }}</div>
       </div>
-      <div class="simon">
+      <div class="simon" :style="{ gridTemplateColumns: `repeat(${simonCols}, 1fr)` }">
         <button
-          v-for="p in SIMON_PADS"
+          v-for="p in pads"
           :key="p"
           type="button"
           class="pad"
           :class="[`pad--${p - 1}`, { 'pad--active': activePad === p - 1 }]"
-          :aria-label="['green', 'red', 'yellow', 'blue'][p - 1]"
+          :aria-label="PAD_LABELS[p - 1]"
           :disabled="simonState !== 'input'"
           @pointerdown="tapPad(p - 1)"
         />
@@ -329,7 +383,6 @@ onBeforeUnmount(() => {
   grid-template-columns: repeat(2, 1fr);
   gap: 10px;
   max-width: 340px;
-  aspect-ratio: 1;
   margin: 0 auto;
 }
 .pad {
@@ -337,6 +390,7 @@ onBeforeUnmount(() => {
   border-radius: 14px;
   cursor: pointer;
   opacity: 0.55;
+  aspect-ratio: 1;
   transition: opacity 90ms ease, transform 90ms ease, box-shadow 90ms ease;
 }
 .pad:disabled {
@@ -350,10 +404,14 @@ onBeforeUnmount(() => {
 .pad--1 { background: #ef4444; }
 .pad--2 { background: #facc15; }
 .pad--3 { background: #3b82f6; }
+.pad--4 { background: #a855f7; }
+.pad--5 { background: #06b6d4; }
 .pad--active.pad--0 { box-shadow: 0 0 30px #22c55e; }
 .pad--active.pad--1 { box-shadow: 0 0 30px #ef4444; }
 .pad--active.pad--2 { box-shadow: 0 0 30px #facc15; }
 .pad--active.pad--3 { box-shadow: 0 0 30px #3b82f6; }
+.pad--active.pad--4 { box-shadow: 0 0 30px #a855f7; }
+.pad--active.pad--5 { box-shadow: 0 0 30px #06b6d4; }
 
 .simon-center {
   position: absolute;

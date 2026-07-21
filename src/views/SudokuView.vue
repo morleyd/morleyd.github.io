@@ -19,6 +19,7 @@ import {
   type Difficulty,
   type Grid,
 } from '@/services/sudoku'
+import { findHint, type Hint } from '@/services/sudokuHints'
 
 const { el: boardEl, px: boardPx } = useSquareFit(220)
 
@@ -37,6 +38,16 @@ const selected = ref<number | null>(null)
 const notesMode = ref(false)
 const seconds = ref(0)
 const snackbar = ref(false)
+
+// Number lock: long-press a pad digit to keep it active so every cell tap
+// places it. `lockedDigit` is the pinned value (null = off).
+const lockedDigit = ref<number | null>(null)
+
+// Progressive hints: `activeHint` is the current technique found by the
+// strategy solver; `hintLevel` indexes into its `levels` nudges.
+const activeHint = ref<Hint | null>(null)
+const hintLevel = ref(0)
+const hintMessage = ref('')
 
 let timer: ReturnType<typeof setInterval> | null = null
 
@@ -67,6 +78,28 @@ const peers = computed(() => {
 
 const selectedValue = computed(() => (selected.value === null ? 0 : cells.value[selected.value]))
 
+// From the "exact cell" step on, highlight the cells the hint is about.
+const hintCells = computed(() => {
+  const set = new Set<number>()
+  if (activeHint.value && hintLevel.value >= 2) {
+    for (const c of activeHint.value.cells) set.add(c)
+  }
+  return set
+})
+const hintElimCells = computed(() => {
+  const set = new Set<number>()
+  if (activeHint.value && hintLevel.value >= 2) {
+    for (const e of activeHint.value.eliminations) set.add(e.cell)
+  }
+  return set
+})
+
+const clearHint = () => {
+  activeHint.value = null
+  hintLevel.value = 0
+  hintMessage.value = ''
+}
+
 const stopTimer = () => {
   if (timer) clearInterval(timer)
   timer = null
@@ -90,6 +123,8 @@ const build = () => {
   solution.value = puzzle.solution.slice()
   notes.value = Array.from({ length: CELLS }, () => new Set<number>())
   selected.value = null
+  lockedDigit.value = null
+  clearHint()
   seconds.value = 0
   startTimer()
 }
@@ -109,6 +144,8 @@ const setDifficulty = (d: Difficulty) => {
 
 const select = (i: number) => {
   selected.value = i
+  // With a locked digit, tapping a cell places that digit straight away.
+  if (lockedDigit.value !== null) placeLocked(i)
 }
 
 const clearPeerNotes = (i: number, v: number) => {
@@ -123,6 +160,7 @@ const clearPeerNotes = (i: number, v: number) => {
 const inputDigit = (v: number) => {
   const i = selected.value
   if (i === null || given.value[i] || solved.value) return
+  clearHint()
   if (notesMode.value) {
     if (cells.value[i]) return // can't note a filled cell
     const set = notes.value[i]
@@ -140,9 +178,73 @@ const inputDigit = (v: number) => {
   }
 }
 
+// Place the currently locked digit into cell `i` (used by cell taps in lock
+// mode). Unlike inputDigit it never toggles off, and auto-advances the lock.
+const placeLocked = (i: number) => {
+  const v = lockedDigit.value
+  if (v === null || given.value[i] || solved.value) return
+  clearHint()
+  const next = cells.value.slice()
+  next[i] = v
+  cells.value = next
+  notes.value[i].clear()
+  clearPeerNotes(i, v)
+  notes.value = [...notes.value]
+  advanceLock()
+  if (solved.value) stopTimer()
+}
+
+// Once every copy of the locked digit is placed, jump the lock to the next
+// digit that still has cells to fill; turn it off when the board is full.
+const advanceLock = () => {
+  const v = lockedDigit.value
+  if (v === null || digitCounts.value[v] < 9) return
+  for (let step = 1; step <= N; step += 1) {
+    const d = ((v - 1 + step) % N) + 1
+    if (digitCounts.value[d] < 9) {
+      lockedDigit.value = d
+      return
+    }
+  }
+  lockedDigit.value = null
+}
+
+// Number-pad tap (not a long-press): manage the lock, else place normally.
+const tapPad = (n: number) => {
+  if (lockedDigit.value !== null) {
+    // Tapping the locked digit turns the lock off; a different one switches it.
+    lockedDigit.value = lockedDigit.value === n ? null : n
+    return
+  }
+  inputDigit(n)
+}
+
+// Long-press wiring for locking a pad digit.
+let pressTimer: ReturnType<typeof setTimeout> | null = null
+let longPressed = false
+const startPress = (n: number) => {
+  longPressed = false
+  pressTimer = setTimeout(() => {
+    longPressed = true
+    lockedDigit.value = n
+  }, 450)
+}
+const endPress = () => {
+  if (pressTimer) clearTimeout(pressTimer)
+  pressTimer = null
+}
+const clickPad = (n: number) => {
+  if (longPressed) {
+    longPressed = false // long-press already handled the lock; swallow the click
+    return
+  }
+  tapPad(n)
+}
+
 const erase = () => {
   const i = selected.value
   if (i === null || given.value[i] || solved.value) return
+  clearHint()
   const next = cells.value.slice()
   next[i] = 0
   cells.value = next
@@ -150,22 +252,67 @@ const erase = () => {
   notes.value = [...notes.value]
 }
 
-const hint = () => {
-  if (solved.value) return
-  let i = selected.value
-  // With no usable selection, hint the first cell that's still empty or wrong.
-  if (i === null || given.value[i] || cells.value[i] === solution.value[i]) {
-    i = cells.value.findIndex((v, idx) => !given.value[idx] && v !== solution.value[idx])
-    if (i === -1) return
-    selected.value = i
-  }
+// Fallback when no supported human technique applies: reveal a single cell
+// from the stored solution (the old hint behaviour).
+const revealCell = () => {
+  const i = cells.value.findIndex((v, idx) => !given.value[idx] && v !== solution.value[idx])
+  if (i === -1) return
+  selected.value = i
   const next = cells.value.slice()
   next[i] = solution.value[i]
   cells.value = next
   notes.value[i].clear()
   clearPeerNotes(i, next[i])
   notes.value = [...notes.value]
+  hintMessage.value = `No forced move found — revealed row ${rowOf(i) + 1}, column ${colOf(i) + 1} for you.`
   if (solved.value) stopTimer()
+}
+
+const applyHint = (h: Hint) => {
+  if (h.placement) {
+    const { cell, value } = h.placement
+    if (given.value[cell] || solved.value) return
+    const next = cells.value.slice()
+    next[cell] = value
+    cells.value = next
+    notes.value[cell].clear()
+    clearPeerNotes(cell, value)
+    notes.value = [...notes.value]
+    if (solved.value) stopTimer()
+  } else {
+    // Elimination techniques: strike the ruled-out candidates from any notes.
+    for (const e of h.eliminations) notes.value[e.cell].delete(e.value)
+    notes.value = [...notes.value]
+  }
+}
+
+// Progressive hint: first press finds the easiest technique and states it;
+// each subsequent press narrows in, then highlights the cell, then reveals /
+// applies the move on the final step.
+const hint = () => {
+  if (solved.value) return
+  const current = activeHint.value
+  if (!current) {
+    const h = findHint(cells.value)
+    if (!h) {
+      revealCell()
+      return
+    }
+    activeHint.value = h
+    hintLevel.value = 0
+    hintMessage.value = h.levels[0]
+    return
+  }
+  if (hintLevel.value < current.levels.length - 1) {
+    hintLevel.value += 1
+    hintMessage.value = current.levels[hintLevel.value]
+    if (hintLevel.value >= 2 && current.cells.length) selected.value = current.cells[0]
+    if (hintLevel.value === current.levels.length - 1) applyHint(current)
+    return
+  }
+  // Final step already applied — clear and look for the next move.
+  clearHint()
+  hint()
 }
 
 const move = (dr: number, dc: number) => {
@@ -205,6 +352,8 @@ const cellClass = (i: number) => ({
   'cell--peer': selected.value !== null && selected.value !== i && peers.value.has(i),
   'cell--same': selectedValue.value > 0 && cells.value[i] === selectedValue.value,
   'cell--conflict': conflicts.value.has(i),
+  'cell--hint': hintCells.value.has(i),
+  'cell--hint-elim': hintElimCells.value.has(i),
   'cell--r3': colOf(i) % 3 === 0,
   'cell--b3': rowOf(i) % 3 === 0,
 })
@@ -266,7 +415,8 @@ onBeforeUnmount(() => {
           <li>Click/tap a cell, then a number (or press <span class="k">1</span>–<span class="k">9</span>).</li>
           <li><span class="k">Notes</span> mode (or <span class="k">N</span>) pencils in small candidates.</li>
           <li><span class="k">Backspace</span> / the erase button clears a cell; arrow keys move.</li>
-          <li><span class="k">Hint</span> fills the selected cell with its correct value.</li>
+          <li><strong>Long-press a number</strong> to lock it: every cell you tap then gets that digit, and the lock jumps to the next digit once all nine are placed. Tap it again to unlock.</li>
+          <li><span class="k">Hint</span> finds the next logical move by name (naked/hidden single, locked candidate, pairs) and nudges you step by step — press again to narrow in, and only the last step reveals the value.</li>
         </ul>
         <h3>Difficulty</h3>
         <p>Higher difficulties start with fewer given numbers. Every puzzle is guaranteed to have exactly one solution.</p>
@@ -305,17 +455,48 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Number pad -->
+    <!-- Number pad (long-press a digit to lock it) -->
     <div class="pad mt-4">
       <v-btn
         v-for="n in 9"
         :key="n"
         class="pad-btn"
-        variant="tonal"
+        :class="{ 'pad-btn--locked': lockedDigit === n }"
+        :variant="lockedDigit === n ? 'flat' : 'tonal'"
+        :color="lockedDigit === n ? 'primary' : undefined"
         :disabled="digitCounts[n] >= 9"
-        @click="inputDigit(n)"
+        @pointerdown="startPress(n)"
+        @pointerup="endPress"
+        @pointerleave="endPress"
+        @pointercancel="endPress"
+        @contextmenu.prevent
+        @click="clickPad(n)"
       >{{ n }}</v-btn>
     </div>
+
+    <!-- Lock status -->
+    <div class="text-center text-caption text-medium-emphasis mt-2" style="min-height: 1.2em">
+      <template v-if="lockedDigit !== null">
+        <v-icon icon="mdi-lock" size="x-small" /> {{ lockedDigit }} locked — tap cells to place it. Tap {{ lockedDigit }} again to unlock.
+      </template>
+      <template v-else>Long-press a number to lock it for repeated placement.</template>
+    </div>
+
+    <!-- Progressive hint banner -->
+    <v-alert
+      v-if="hintMessage"
+      class="mt-3"
+      type="info"
+      variant="tonal"
+      density="comfortable"
+      closable
+      @click:close="clearHint"
+    >
+      {{ hintMessage }}
+      <template v-if="activeHint" #append>
+        <span class="text-caption">{{ hintLevel + 1 }}/{{ activeHint.levels.length }}</span>
+      </template>
+    </v-alert>
 
     <!-- Tools -->
     <div class="d-flex justify-center ga-2 mt-3 flex-wrap">
@@ -323,7 +504,9 @@ onBeforeUnmount(() => {
         Notes {{ notesMode ? 'on' : 'off' }}
       </v-btn>
       <v-btn variant="tonal" prepend-icon="mdi-eraser" @click="erase">Erase</v-btn>
-      <v-btn variant="tonal" prepend-icon="mdi-lightbulb-on-outline" @click="hint">Hint</v-btn>
+      <v-btn variant="tonal" prepend-icon="mdi-lightbulb-on-outline" @click="hint">
+        {{ activeHint ? 'Next hint' : 'Hint' }}
+      </v-btn>
     </div>
 
     <v-snackbar v-model="snackbar" :timeout="2600" color="secondary">Puzzle link copied — share it!</v-snackbar>
@@ -372,6 +555,12 @@ onBeforeUnmount(() => {
 .cell--same { background: rgba(59, 130, 246, 0.22); }
 .cell--selected { background: rgba(59, 130, 246, 0.38); }
 .cell--conflict { color: #f87171; background: rgba(248, 113, 113, 0.18); }
+/* Hint highlighting: target cell(s) glow, elimination cells get a softer tint */
+.cell--hint-elim { background: rgba(250, 204, 21, 0.14); }
+.cell--hint {
+  background: rgba(250, 204, 21, 0.3);
+  box-shadow: inset 0 0 0 2px rgba(250, 204, 21, 0.85);
+}
 
 .notes {
   display: grid;
@@ -412,5 +601,9 @@ onBeforeUnmount(() => {
   min-width: 0;
   font-size: 1.15rem;
   font-weight: 700;
+  touch-action: manipulation; /* avoid text-selection / callout on long-press */
+}
+.pad-btn--locked {
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.6);
 }
 </style>

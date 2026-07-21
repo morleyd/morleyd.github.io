@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
- * Vertical Tunnel — fly upward through a scrolling, narrowing tunnel. Tap (or
- * arrow-key) the left/right side to flap that way; do nothing and you drift.
+ * Vertical Tunnel — steer a circle up a scrolling, narrowing tunnel. Tap (or
+ * arrow-key) the left/right side to nudge that way; do nothing and you coast.
  * Hit a wall and it's over. Rendered on a canvas; physics/course come from
  * services/tunnel. Endless, with a best-distance score in localStorage.
  */
@@ -13,6 +13,7 @@ import {
   collides,
   difficultyFor,
   flap,
+  scrollSpeedFor,
   segmentAt,
   stepFlyer,
   type FlyerState,
@@ -112,8 +113,7 @@ const tick = (ts: number) => {
   const dt = lastTs ? Math.min(48, ts - lastTs) : 16
   lastTs = ts
 
-  const diff = difficultyFor(distance.value)
-  const scrollSpeed = 2.6 + diff * 2.2 // rows per second
+  const scrollSpeed = scrollSpeedFor(distance.value) // rows per second, ramps up
   distance.value += (scrollSpeed * dt) / 1000
   flyer = stepFlyer(flyer, dt)
 
@@ -190,22 +190,24 @@ onBeforeUnmount(() => {
   <v-container class="py-6" max-width="600">
     <GameToolbar title="Vertical Tunnel">
       <template #intro>
-        Fly up through the tunnel. Tap the <strong>left</strong> or <strong>right</strong> side to
-        flap that way (arrow keys on desktop). Don't drift into the walls — it speeds up as you climb.
+        Steer your circle up the tunnel. Tap a side to nudge that way — the
+        <strong>left</strong> or <strong>right</strong> half of the board (arrow keys on desktop).
+        Keep off the walls as the tunnel weaves, pinches, and picks up speed.
       </template>
       <template #info>
         <h3>Goal</h3>
-        <p>Fly as far up the tunnel as you can without hitting a wall.</p>
+        <p>Steer your circle as far up the tunnel as you can without hitting a wall.</p>
         <h3>Controls</h3>
         <ul>
-          <li>Tap or click the left/right half of the screen to flap left/right.</li>
+          <li>Tap or click the left/right half of the board to thrust that way.</li>
           <li>Desktop: <span class="k">←</span>/<span class="k">→</span> (or A/D). <span class="k">Space</span> to start.</li>
-          <li>Between flaps you keep drifting, then slow — so tap in rhythm to steer.</li>
+          <li>After each nudge you keep coasting, then slow — so tap in rhythm to steer.</li>
         </ul>
         <h3>Tips</h3>
         <ul>
-          <li>Small, frequent taps steer more precisely than one big flap.</li>
-          <li>Look ahead to where the gap is drifting, not where it is now.</li>
+          <li>Small, frequent taps steer more precisely than one hard shove.</li>
+          <li>The corridor breathes — line up early for the tight pinch points.</li>
+          <li>It only gets faster, so look ahead to where the gap is drifting.</li>
         </ul>
       </template>
     </GameToolbar>
@@ -225,8 +227,8 @@ onBeforeUnmount(() => {
       />
       <div v-if="state !== 'running'" class="overlay">
         <template v-if="state === 'idle'">
-          <p class="text-h6 mb-2">Tap to fly</p>
-          <p class="text-caption text-medium-emphasis mb-3">Left/right side flaps that way</p>
+          <p class="text-h6 mb-2">Tap to start</p>
+          <p class="text-caption text-medium-emphasis mb-3">Tap a side to nudge that way</p>
           <v-btn color="primary" variant="flat" @click="start">Start</v-btn>
         </template>
         <template v-else>
@@ -234,7 +236,7 @@ onBeforeUnmount(() => {
           <p class="text-body-2 mb-3">
             Distance {{ score }}<span v-if="score === best && score > 0"> — new best!</span>
           </p>
-          <v-btn color="primary" variant="flat" prepend-icon="mdi-restart" @click="start">Fly again</v-btn>
+          <v-btn color="primary" variant="flat" prepend-icon="mdi-restart" @click="start">Try again</v-btn>
         </template>
       </div>
     </div>

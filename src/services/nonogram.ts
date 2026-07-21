@@ -20,6 +20,18 @@ export interface Nonogram {
   seed: string
 }
 
+/**
+ * A hand-authored picture. `rows` are drawn as text (see nonogramPatterns): `#`
+ * is a filled cell, any other character empty. Every row must be `size` chars
+ * and there must be `size` rows.
+ */
+export interface NonogramPattern {
+  id: string
+  name: string
+  size: number
+  rows: string[]
+}
+
 /** Run-lengths of consecutive `true`s in a line. An empty line clues to [0]. */
 export function lineClue(line: boolean[]): number[] {
   const runs: number[] = []
@@ -74,6 +86,29 @@ export function generateNonogram(rows: number, cols: number, seed: string): Nono
     rowClues: rowClues(solution, rows, cols),
     colClues: colClues(solution, rows, cols),
     seed,
+  }
+}
+
+/** Turn a text picture (`#` = filled) into a row-major boolean solution grid. */
+export function patternToSolution(pattern: NonogramPattern): Solution {
+  return pattern.rows.flatMap((line) => Array.from(line, (ch) => ch === '#'))
+}
+
+/**
+ * Build a solvable puzzle from a hand-authored picture: the picture is the
+ * solution, and its clues are derived from it. Deterministic — the seed is the
+ * pattern id so the URL stays shareable.
+ */
+export function nonogramFromPattern(pattern: NonogramPattern): Nonogram {
+  const { size } = pattern
+  const solution = patternToSolution(pattern)
+  return {
+    rows: size,
+    cols: size,
+    solution,
+    rowClues: rowClues(solution, size, size),
+    colClues: colClues(solution, size, size),
+    seed: `@${pattern.id}`,
   }
 }
 

@@ -34,9 +34,51 @@ export function matchStars(pairs: number, moves: number): number {
 
 export const SIMON_PADS = 4
 
-/** Append one random pad (0..SIMON_PADS-1) to a Simon sequence. */
-export function extendSequence(sequence: number[], rng: () => number): number[] {
-  return [...sequence, Math.floor(rng() * SIMON_PADS)]
+/**
+ * Difficulty presets. Each picks how many Match pairs the board has and how
+ * many Simon pads light up; the view lets the player switch between them and
+ * starts a fresh game at the chosen size.
+ */
+export type Difficulty = 'easy' | 'medium' | 'hard'
+
+export interface MemorySize {
+  /** Number of matching pairs in the Match board (deck is twice this). */
+  pairs: number
+  /** Number of Simon pads (sequence values are drawn from 0..pads-1). */
+  pads: number
+}
+
+export const DIFFICULTIES: Record<Difficulty, MemorySize> = {
+  easy: { pairs: 6, pads: 4 },
+  medium: { pairs: 8, pads: 4 },
+  hard: { pairs: 10, pads: 6 },
+}
+
+export const DIFFICULTY_ORDER: Difficulty[] = ['easy', 'medium', 'hard']
+
+/** Largest pad count any difficulty uses — the view needs a color/tone for each. */
+export const MAX_SIMON_PADS = Math.max(...DIFFICULTY_ORDER.map((d) => DIFFICULTIES[d].pads))
+
+/** Number of Simon pads for a difficulty. */
+export function padsFor(difficulty: Difficulty): number {
+  return DIFFICULTIES[difficulty].pads
+}
+
+/** Number of Match pairs for a difficulty. */
+export function pairsFor(difficulty: Difficulty): number {
+  return DIFFICULTIES[difficulty].pairs
+}
+
+/**
+ * Append one random pad to a Simon sequence. Pads defaults to the classic 4,
+ * but a harder difficulty passes a larger count so more pads come into play.
+ */
+export function extendSequence(
+  sequence: number[],
+  rng: () => number,
+  pads: number = SIMON_PADS,
+): number[] {
+  return [...sequence, Math.floor(rng() * pads)]
 }
 
 /**

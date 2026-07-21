@@ -23,9 +23,16 @@ export interface NinjaState {
 export const GRAVITY = 2.6 // downward accel (climb units / s^2)
 export const WALL_X = { '-1': 0.12, '1': 0.88 } as const // cling x per wall
 export const JUMP_VX = 0.9 // horizontal jump speed
-export const MIN_JUMP_VY = 1.2
-export const MAX_JUMP_VY = 2.6
-export const MAX_CHARGE_MS = 420 // press duration for a full-power jump
+
+// A wide gap between a tap and a full hold makes charging feel meaningful: a
+// short tap barely clears the shaft (and can even dip), while a full charge
+// arcs high. The apex is capped by MAX_JUMP_HEIGHT so the ninja can never fly
+// off the top of the view, and horizontal motion is bounded by the two walls,
+// so a jump is always kept within screen bounds.
+export const MAX_JUMP_HEIGHT = 1.9 // max apex above the launch point (climb units)
+export const MIN_JUMP_VY = 0.5
+export const MAX_JUMP_VY = Math.sqrt(2 * GRAVITY * MAX_JUMP_HEIGHT) // apex === MAX_JUMP_HEIGHT
+export const MAX_CHARGE_MS = 620 // press duration for a full-power jump
 
 export const initialNinja = (): NinjaState => ({
   side: -1,
@@ -79,6 +86,29 @@ export function stepNinja(state: NinjaState, dtMs: number): NinjaState {
   return { ...state, x, y, vy }
 }
 
+/**
+ * Predict the flight path of a jump of the given hold duration, as world-space
+ * {x, y} points from launch until the ninja clings to the far wall (or a step
+ * cap). Used to draw the charge arc preview; because it reuses `jump`/`stepNinja`
+ * the preview matches the real leap, and both are bounded (x between the walls,
+ * apex ≤ MAX_JUMP_HEIGHT) so the arc never leaves the playfield.
+ */
+export function predictTrajectory(
+  state: NinjaState,
+  holdMs: number,
+  maxSteps = 60,
+  dtMs = 16,
+): { x: number; y: number }[] {
+  if (state.airborne) return []
+  let s = jump(state, holdMs)
+  const points: { x: number; y: number }[] = [{ x: s.x, y: s.y }]
+  for (let i = 0; i < maxSteps && s.airborne; i += 1) {
+    s = stepNinja(s, dtMs)
+    points.push({ x: s.x, y: s.y })
+  }
+  return points
+}
+
 /** A spike hazard on one wall at a given height, with a vertical half-extent. */
 export interface Spike {
   side: Wall
@@ -93,6 +123,7 @@ export interface Spike {
  */
 export const SPIKE_SPACING = 1.4
 export const SPIKE_HALF = 0.32
+export const SPIKE_REACH = 0.09 // how far a spike's danger zone juts in from its wall (x units)
 
 export function spikeAt(seed: number, index: number): Spike {
   const rand = mulberry32((seed + index * 2654435761) >>> 0)
@@ -101,17 +132,43 @@ export function spikeAt(seed: number, index: number): Spike {
   return { side, y: (index + 1) * SPIKE_SPACING + jitter, half: SPIKE_HALF }
 }
 
-/** Whether the ninja (clinging or passing a wall) is impaled on any nearby spike. */
+/**
+ * Whether the ninja is impaled on a nearby spike. A spike can catch the ninja
+ * whether it is clinging to that wall or still airborne but within the spike's
+ * reach of it — so flying into a spike is fatal, not only landing on one. When
+ * the ninja is out in the middle of the shaft (near neither wall) it is safe.
+ */
 export function hitsSpike(state: NinjaState, seed: number): boolean {
-  // Only a spike on the wall the ninja is touching can hit it.
-  if (state.airborne) {
-    // In-air: check the wall it's closest to only if actually against it.
-    return false
-  }
+  const leftX = WALL_X['-1']
+  const rightX = WALL_X['1']
+  let side: Wall | 0 = 0
+  if (state.x <= leftX + SPIKE_REACH) side = -1
+  else if (state.x >= rightX - SPIKE_REACH) side = 1
+  if (side === 0) return false
+
   const nearestIndex = Math.round(state.y / SPIKE_SPACING)
   for (let i = Math.max(0, nearestIndex - 1); i <= nearestIndex + 1; i += 1) {
     const spike = spikeAt(seed, i)
-    if (spike.side === state.side && Math.abs(spike.y - state.y) < spike.half) return true
+    if (spike.side === side && Math.abs(spike.y - state.y) < spike.half) return true
   }
   return false
+}
+
+// --- Rising lava --------------------------------------------------------------
+// The lava rises from below and its speed accelerates the longer the run lasts,
+// so dawdling gets punished more and more. Speed is a function of elapsed time,
+// capped so it stays outrunnable in principle.
+export const LAVA_BASE_SPEED = 0.35 // rise speed at the start (climb units / s)
+export const LAVA_ACCEL = 0.16 // extra rise speed gained per second elapsed
+export const LAVA_MAX_SPEED = 3.2 // ceiling on the rise speed (climb units / s)
+
+/** Current lava rise speed for a run that has been going `elapsedMs` ms. */
+export function lavaSpeed(elapsedMs: number): number {
+  const t = Math.max(0, elapsedMs) / 1000
+  return Math.min(LAVA_MAX_SPEED, LAVA_BASE_SPEED + LAVA_ACCEL * t)
+}
+
+/** Advance the lava surface by dtMs, using the (accelerating) speed for `elapsedMs`. */
+export function stepLava(dangerY: number, elapsedMs: number, dtMs: number): number {
+  return dangerY + (lavaSpeed(elapsedMs) * dtMs) / 1000
 }

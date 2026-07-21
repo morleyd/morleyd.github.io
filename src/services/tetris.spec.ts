@@ -7,6 +7,7 @@ import {
   createBag,
   dropRow,
   emptyBoard,
+  fullRows,
   gravityMs,
   lineScore,
   matrixFor,
@@ -86,6 +87,28 @@ describe('merge + clearLines', () => {
     expect(res.board.every((v) => v === 0)).toBe(true)
     board = res.board
     expect(board).toHaveLength(COLS * ROWS)
+  })
+})
+
+describe('fullRows', () => {
+  it('reports no rows on an empty board', () => {
+    expect(fullRows(emptyBoard())).toEqual([])
+  })
+  it('reports the indices of completely filled rows', () => {
+    const board = emptyBoard()
+    for (let c = 0; c < COLS; c += 1) {
+      board[(ROWS - 1) * COLS + c] = 1
+      board[(ROWS - 3) * COLS + c] = 1
+    }
+    board[(ROWS - 2) * COLS + 0] = 2 // a partial row is not full
+    expect(fullRows(board)).toEqual([ROWS - 3, ROWS - 1])
+  })
+  it('matches the count reported by clearLines', () => {
+    const board = emptyBoard()
+    for (let r = ROWS - 4; r < ROWS; r += 1) {
+      for (let c = 0; c < COLS; c += 1) board[r * COLS + c] = 1
+    }
+    expect(fullRows(board)).toHaveLength(clearLines(board).cleared)
   })
 })
 

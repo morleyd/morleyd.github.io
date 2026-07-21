@@ -8,13 +8,14 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import GameToolbar from '@/components/GameToolbar.vue'
 import { useSquareFit } from '@/composables/useSquareFit'
+import { copyToClipboard } from '@/services/share'
 import {
   BALL_RADIUS,
   BOUNCE_VY,
-  PLATFORM_SPACING,
   type Ball,
   nearestPlatformIndex,
   platformAt,
+  platformBroken,
   stepBall,
   tryBounce,
 } from '@/services/ballBounce'
@@ -24,12 +25,13 @@ const displayW = computed(() => Math.round(boardPx.value * 0.66))
 const displayH = computed(() => boardPx.value)
 
 const BEST_KEY = 'ballbounce-best'
-const UNITS_VISIBLE = 9
+const UNITS_VISIBLE = 7 // keeps at most ~5 shelves on screen at the tightest spacing
 const BALL_SCREEN = 0.42
 
 const canvasEl = ref<HTMLCanvasElement | null>(null)
 const state = ref<'idle' | 'running' | 'over'>('idle')
 const best = ref(0)
+const snackbar = ref(false)
 
 let ball: Ball = { x: 0.5, y: BALL_RADIUS, vx: 0, vy: BOUNCE_VY }
 let seed = 1
@@ -41,6 +43,8 @@ let leftKey = false
 let rightKey = false
 let raf = 0
 let lastTs = 0
+// How many times each shelf (by index) has been bounced — shelves break at MAX_BOUNCES.
+const bounceCounts = new Map<number, number>()
 
 const score = computed(() => Math.max(0, Math.round(maxY * 10)))
 const fallLimit = (1 - BALL_SCREEN) * UNITS_VISIBLE
@@ -55,6 +59,7 @@ const reset = () => {
   pointerActive = false
   leftKey = false
   rightKey = false
+  bounceCounts.clear()
 }
 
 const gameOver = () => {
@@ -96,16 +101,21 @@ const draw = () => {
 
   const unit = H / UNITS_VISIBLE
 
-  // Platforms in view
-  const lo = Math.floor((cameraY - (1 - BALL_SCREEN) * UNITS_VISIBLE) / PLATFORM_SPACING) - 1
-  const hi = Math.ceil((cameraY + BALL_SCREEN * UNITS_VISIBLE) / PLATFORM_SPACING) + 1
-  for (let i = Math.max(0, lo); i <= hi; i += 1) {
+  // Shelves in view (skip any that have broken away).
+  const topY = cameraY + BALL_SCREEN * UNITS_VISIBLE
+  const botY = cameraY - (1 - BALL_SCREEN) * UNITS_VISIBLE
+  const lo = Math.max(0, nearestPlatformIndex(botY) - 1)
+  const hi = nearestPlatformIndex(topY) + 1
+  for (let i = lo; i <= hi; i += 1) {
+    const count = bounceCounts.get(i) ?? 0
+    if (platformBroken(count)) continue
     const p = platformAt(seed, i)
     const sy = yToScreen(p.y, H, unit)
     if (sy < -20 || sy > H + 20) continue
     const pw = p.width * W
     const px = p.x * W - pw / 2
-    ctx.fillStyle = i === 0 ? '#475569' : '#34d399'
+    // Grey start shelf; green normally; amber once it's been bounced (about to break).
+    ctx.fillStyle = i === 0 ? '#475569' : count > 0 ? '#f59e0b' : '#34d399'
     ctx.fillRect(px, sy - 6, pw, 10)
     ctx.fillStyle = 'rgba(255,255,255,0.15)'
     ctx.fillRect(px, sy - 6, pw, 3)
@@ -131,13 +141,17 @@ const tick = (ts: number) => {
   const prevY = ball.y
   ball = stepBall(ball, steer, dt)
 
-  // Bounce off any platform the ball crossed downward this step.
+  // Bounce off the top of any (unbroken) shelf the ball crossed downward this
+  // step, and count the bounce so the shelf breaks after MAX_BOUNCES.
   if (ball.vy <= 0) {
     const center = nearestPlatformIndex(ball.y)
-    for (let i = Math.max(0, center - 1); i <= center + 2; i += 1) {
+    for (let i = Math.max(0, center - 2); i <= center + 2; i += 1) {
+      const count = bounceCounts.get(i) ?? 0
+      if (platformBroken(count)) continue
       const bounced = tryBounce(ball, prevY, platformAt(seed, i))
       if (bounced) {
         ball = bounced
+        bounceCounts.set(i, count + 1)
         break
       }
     }
@@ -205,6 +219,14 @@ const onKeyUp = (e: KeyboardEvent) => {
   applyKeySteer()
 }
 
+const share = async () => {
+  const url = window.location.origin + '/ball-bounce'
+  await copyToClipboard(
+    `I climbed to ${score.value} in Ball Bounce${score.value === best.value && score.value > 0 ? ' (my best!)' : ''}. Beat me!\n${url}`,
+  )
+  snackbar.value = true
+}
+
 watch([displayW, displayH], () => {
   if (state.value !== 'running') draw()
 })
@@ -229,7 +251,7 @@ onBeforeUnmount(() => {
 
 <template>
   <v-container class="py-6" max-width="600">
-    <GameToolbar title="Ball Bounce">
+    <GameToolbar title="Ball Bounce" shareable @share="share">
       <template #intro>
         The ball bounces on its own — steer <strong>left</strong> and <strong>right</strong> (hold a
         side, or arrow keys) to land on the next platform. The view only climbs; fall off the bottom
@@ -244,10 +266,16 @@ onBeforeUnmount(() => {
           <li>Desktop: <span class="k">←</span>/<span class="k">→</span> or <span class="k">A</span>/<span class="k">D</span>.</li>
           <li>The ball wraps around the screen edges.</li>
         </ul>
+        <h3>Rules</h3>
+        <ul>
+          <li>You only bounce off the <strong>top</strong> of a shelf, and only while falling.</li>
+          <li>Shelves <strong>break after two bounces</strong> (they turn amber first) — keep climbing, you can't camp on one.</li>
+          <li>Shelves spread <strong>further apart the higher you climb</strong>, so it gets harder.</li>
+        </ul>
         <h3>Tips</h3>
         <ul>
-          <li>Line up the next platform while you're rising — you can't change a miss once you're falling past it.</li>
-          <li>Use the wrap: sometimes the quickest path to a platform is off the far edge.</li>
+          <li>Line up the next shelf while you're rising — you can't change a miss once you're falling past it.</li>
+          <li>Use the wrap: sometimes the quickest path to a shelf is off the far edge.</li>
         </ul>
       </template>
     </GameToolbar>
@@ -274,14 +302,18 @@ onBeforeUnmount(() => {
           <v-btn color="primary" variant="flat" @click="start">Start</v-btn>
         </template>
         <template v-else>
-          <p class="text-h5 mb-1">Dropped!</p>
+          <p class="text-h5 mb-1">Game over</p>
           <p class="text-body-2 mb-3">
             Height {{ score }}<span v-if="score === best && score > 0"> — new best!</span>
           </p>
-          <v-btn color="primary" variant="flat" prepend-icon="mdi-restart" @click="start">Bounce again</v-btn>
+          <div class="d-flex ga-2">
+            <v-btn color="primary" variant="flat" prepend-icon="mdi-restart" @click="start">Bounce again</v-btn>
+            <v-btn variant="tonal" prepend-icon="mdi-share-variant" @click="share">Share</v-btn>
+          </div>
         </template>
       </div>
     </div>
+    <v-snackbar v-model="snackbar" :timeout="2600" color="secondary">Score copied — challenge a friend!</v-snackbar>
   </v-container>
 </template>
 

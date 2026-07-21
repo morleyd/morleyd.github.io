@@ -9,12 +9,15 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import GameToolbar from '@/components/GameToolbar.vue'
 import { useSquareFit } from '@/composables/useSquareFit'
 import {
+  GRAVITY,
   MAX_CHARGE_MS,
   SPIKE_SPACING,
   hitsSpike,
   initialNinja,
   jump,
+  predictTrajectory,
   spikeAt,
+  stepLava,
   stepNinja,
   type NinjaState,
 } from '@/services/wallJump'
@@ -37,11 +40,15 @@ let ninja: NinjaState = initialNinja()
 let seed = 1
 let maxY = 0
 let dangerY = -4
+let elapsedMs = 0 // run time, drives lava acceleration
 let cameraY = 0 // lags ninja.y so the jump arc is visible on screen
 let charging = false
 let chargeStart = 0
 let raf = 0
 let lastTs = 0
+let dying = false // playing the death fall before the game-over screen
+let deathMs = 0
+let deathVy = 0
 
 const score = computed(() => Math.max(0, Math.round(maxY * 10)))
 
@@ -50,9 +57,13 @@ const reset = () => {
   seed = (Math.floor(Math.random() * 0xffffffff) || 1) >>> 0
   maxY = 0
   dangerY = -4
+  elapsedMs = 0
   cameraY = 0
   charging = false
   chargeMs.value = 0
+  dying = false
+  deathMs = 0
+  deathVy = 0
 }
 
 const gameOver = () => {
@@ -72,6 +83,67 @@ const gameOver = () => {
 
 const yToScreen = (worldY: number, cameraY: number, H: number, unit: number) =>
   NINJA_SCREEN * H - (worldY - cameraY) * unit
+
+/**
+ * Draw a tiny stick-ninja at (cx, cy). `facing` is the wall it clings to
+ * (-1 left / +1 right); the figure leans away from that wall and reaches an arm
+ * toward it, so you can read which side it's on. `s` is the body scale in px.
+ */
+const drawNinja = (
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  s: number,
+  facing: -1 | 1,
+  airborne: boolean,
+) => {
+  const f = facing // +1 limbs reach right, -1 reach left
+  ctx.save()
+  ctx.translate(cx, cy)
+  ctx.strokeStyle = '#f8fafc'
+  ctx.fillStyle = '#f8fafc'
+  ctx.lineWidth = Math.max(1.5, s * 0.22)
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  ctx.shadowColor = '#38bdf8'
+  ctx.shadowBlur = 10
+
+  const headR = s * 0.5
+  const headY = -s * 1.35
+  // Head
+  ctx.beginPath()
+  ctx.arc(0, headY, headR, 0, Math.PI * 2)
+  ctx.fill()
+  // Headband tail streaming away from the wall it faces
+  ctx.beginPath()
+  ctx.moveTo(-f * headR * 0.6, headY - headR * 0.2)
+  ctx.lineTo(-f * headR * 1.9, headY - headR * 0.6)
+  ctx.stroke()
+  // Body
+  const hipY = s * 0.55
+  ctx.beginPath()
+  ctx.moveTo(0, headY + headR)
+  ctx.lineTo(0, hipY)
+  ctx.stroke()
+  // Arms: one reaches toward the wall (to cling), one out for balance
+  const armY = -s * 0.35
+  ctx.beginPath()
+  ctx.moveTo(0, armY)
+  ctx.lineTo(f * s * 1.0, armY + (airborne ? -s * 0.5 : s * 0.15)) // wall-side arm
+  ctx.moveTo(0, armY)
+  ctx.lineTo(-f * s * 0.85, armY + s * 0.55) // trailing arm
+  ctx.stroke()
+  // Legs: wall-side leg tucked up when clinging, both trailing when airborne
+  ctx.beginPath()
+  ctx.moveTo(0, hipY)
+  ctx.lineTo(f * s * 0.7, hipY + (airborne ? s * 0.9 : s * 0.5))
+  ctx.moveTo(0, hipY)
+  ctx.lineTo(-f * s * 0.6, hipY + s * 1.0)
+  ctx.stroke()
+
+  ctx.shadowBlur = 0
+  ctx.restore()
+}
 
 const draw = () => {
   const canvas = canvasEl.value
@@ -133,30 +205,74 @@ const draw = () => {
     ctx.fillRect(0, Math.max(0, lavaScreen), W, H - Math.max(0, lavaScreen))
   }
 
-  // Ninja
   const nx = ninja.x * W
   const ny = yToScreen(ninja.y, cameraY, H, unit)
-  ctx.beginPath()
-  ctx.arc(nx, ny, 0.05 * W, 0, Math.PI * 2)
-  ctx.fillStyle = '#f8fafc'
-  ctx.shadowColor = '#38bdf8'
-  ctx.shadowBlur = 14
-  ctx.fill()
-  ctx.shadowBlur = 0
+
+  // Charge arc preview: a dashed predicted trajectory that grows with the hold.
+  if (charging && !ninja.airborne) {
+    const path = predictTrajectory(ninja, chargeMs.value)
+    if (path.length > 1) {
+      ctx.save()
+      ctx.strokeStyle = 'rgba(34, 211, 238, 0.85)'
+      ctx.lineWidth = 2
+      ctx.setLineDash([4, 6])
+      ctx.beginPath()
+      for (let i = 0; i < path.length; i += 1) {
+        const px = path[i].x * W
+        const py = yToScreen(path[i].y, cameraY, H, unit)
+        if (i === 0) ctx.moveTo(px, py)
+        else ctx.lineTo(px, py)
+      }
+      ctx.stroke()
+      ctx.setLineDash([])
+      // Landing marker at the end of the arc.
+      const end = path[path.length - 1]
+      ctx.fillStyle = 'rgba(34, 211, 238, 0.9)'
+      ctx.beginPath()
+      ctx.arc(end.x * W, yToScreen(end.y, cameraY, H, unit), 3.5, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.restore()
+    }
+  }
+
+  // Ninja figure, oriented to the wall it clings to (or last leaned toward).
+  drawNinja(ctx, nx, ny, 0.05 * W, ninja.side, ninja.airborne || dying)
 
   // Charge meter (while holding, grounded)
   if (charging && !ninja.airborne) {
     const t = Math.min(1, chargeMs.value / MAX_CHARGE_MS)
     const barH = 0.18 * H * t
     ctx.fillStyle = '#22d3ee'
-    ctx.fillRect(nx - 4, ny - 0.05 * W - barH - 6, 8, barH)
+    ctx.fillRect(nx - 4, ny - 0.11 * W - barH - 6, 8, barH)
   }
+}
+
+// Detach the ninja and let it tumble down for a beat before the game-over card.
+const startDeath = () => {
+  dying = true
+  deathMs = 0
+  deathVy = 0
+  ninja = { ...ninja, airborne: true, vx: 0 }
 }
 
 const tick = (ts: number) => {
   if (state.value !== 'running') return
   const dt = lastTs ? Math.min(48, ts - lastTs) : 16
   lastTs = ts
+
+  if (dying) {
+    deathMs += dt
+    deathVy += (GRAVITY * dt) / 1000
+    ninja = { ...ninja, y: ninja.y - (deathVy * dt) / 1000 }
+    cameraY += (ninja.y - cameraY) * Math.min(1, (dt / 1000) * 4)
+    draw()
+    if (deathMs > 650) {
+      gameOver()
+      return
+    }
+    raf = requestAnimationFrame(tick)
+    return
+  }
 
   if (charging && !ninja.airborne) chargeMs.value = ts - chargeStart
 
@@ -165,13 +281,15 @@ const tick = (ts: number) => {
   // Ease the camera toward the ninja so the jump arc is visible before it recenters.
   cameraY += (ninja.y - cameraY) * Math.min(1, (dt / 1000) * 5)
 
-  // Rising hazard accelerates as you climb.
-  const dangerSpeed = 0.4 + Math.min(1.3, maxY * 0.02)
-  dangerY += (dangerSpeed * dt) / 1000
+  // Lava rises, accelerating the longer the run lasts.
+  elapsedMs += dt
+  dangerY = stepLava(dangerY, elapsedMs, dt)
 
-  if (!ninja.airborne && hitsSpike(ninja, seed)) {
+  // Fly into (or land on) a spike and the ninja falls to its death.
+  if (hitsSpike(ninja, seed)) {
+    startDeath()
     draw()
-    gameOver()
+    raf = requestAnimationFrame(tick)
     return
   }
   if (ninja.y <= dangerY) {
