@@ -41,6 +41,20 @@ describe('makeRound', () => {
       expect(p.startOffset).toBeLessThan(1)
     }
   })
+  it('separates pieces sharing a lane so they cannot visually merge', () => {
+    const r = makeRound(8, 'lanes') // high level → many pieces, more lane sharing
+    for (let lane = 0; lane < r.lanes; lane += 1) {
+      const offsets = r.pieces
+        .filter((p) => p.lane === lane)
+        .map((p) => p.startOffset)
+        .sort((a, b) => a - b)
+      const m = offsets.length
+      for (let i = 1; i < m; i += 1) {
+        // Slots are 1/m apart with <=0.2/m jitter each side → gap >= 0.6/m.
+        expect(offsets[i] - offsets[i - 1]).toBeGreaterThan(0.5 / m)
+      }
+    }
+  })
   it('speeds up and shortens exposure as levels rise', () => {
     const a = makeRound(1, 's')
     const b = makeRound(6, 's')

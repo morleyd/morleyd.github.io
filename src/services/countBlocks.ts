@@ -57,11 +57,16 @@ export function makeRound(level: number, seed: string): Round {
   const pieces: Piece[] = []
   for (let i = 0; i < count; i += 1) {
     const shape = SHAPES[Math.floor(rng() * SHAPES.length)]
-    pieces.push({
-      shape,
-      lane: Math.floor(rng() * lanes),
-      color: colorOf(shape),
-      startOffset: rng(),
+    pieces.push({ shape, lane: Math.floor(rng() * lanes), color: colorOf(shape), startOffset: 0 })
+  }
+  // Spread pieces that share a lane into separated time slots so they never
+  // overlap on screen and get miscounted.
+  const byLane: Piece[][] = Array.from({ length: lanes }, () => [])
+  for (const p of pieces) byLane[p.lane].push(p)
+  for (const lanePieces of byLane) {
+    const m = lanePieces.length
+    lanePieces.forEach((p, k) => {
+      p.startOffset = (k + 0.5) / m + (rng() - 0.5) * (0.4 / m) // centered in its slot, small jitter
     })
   }
   const target = SHAPES[Math.floor(rng() * SHAPES.length)]

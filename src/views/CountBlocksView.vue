@@ -141,7 +141,9 @@ const adjust = (delta: number) => {
 }
 
 watch(boardPx, () => {
+  // Redraw at the current elapsed time; before the first frame startTs is 0.
   if (phase.value === 'watch') drawPieces(startTs ? performance.now() - startTs : 0)
+  else drawPieces(round.exposureMs) // answer/result: keep the board cleared
 })
 
 onMounted(() => {
