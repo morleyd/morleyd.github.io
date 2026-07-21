@@ -147,6 +147,15 @@ const games: GameCard[] = [
     gradient: 'linear-gradient(135deg, rgba(59, 130, 246, 0.35), rgba(34, 197, 94, 0.28))',
   },
   {
+    key: 'connect-4',
+    title: 'Connect 4',
+    description:
+      'Drop discs to line up four in a row against a negamax AI with alpha-beta pruning. Three difficulties and you choose who starts.',
+    icon: 'mdi-circle-multiple-outline',
+    to: '/connect-4',
+    gradient: 'linear-gradient(135deg, rgba(37, 99, 235, 0.4), rgba(234, 179, 8, 0.28))',
+  },
+  {
     key: 'wizard-chess',
     title: 'Wizard Chess',
     description:
