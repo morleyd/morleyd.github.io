@@ -84,6 +84,15 @@ const games: GameCard[] = [
     gradient: 'linear-gradient(135deg, rgba(52, 211, 153, 0.32), rgba(59, 130, 246, 0.3))',
   },
   {
+    key: 'tunnel',
+    title: 'Vertical Tunnel',
+    description:
+      'Fly up an endless, narrowing tunnel — tap the left or right side to flap that way, and don’t drift into the walls. It speeds up as you climb.',
+    icon: 'mdi-airplane',
+    to: '/tunnel',
+    gradient: 'linear-gradient(135deg, rgba(56, 189, 248, 0.38), rgba(244, 114, 182, 0.3))',
+  },
+  {
     key: 'snake',
     title: 'Snake',
     description:
