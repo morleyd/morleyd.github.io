@@ -92,7 +92,16 @@ const applyPaint = (i: number) => {
   }
 }
 
-const startPaint = (i: number) => {
+const startPaint = (i: number, e: PointerEvent) => {
+  if (e.button !== 0) return // right/middle click is handled by contextmenu (X mark)
+  // Release the implicit pointer capture touch sets on pointerdown, so
+  // pointerenter fires on the cells we drag across (otherwise touch paints
+  // only the first cell).
+  try {
+    ;(e.target as Element).releasePointerCapture?.(e.pointerId)
+  } catch {
+    // no capture to release
+  }
   if (solved.value) return
   const cur = marks.value[i]
   paintTo = mode.value === 'fill' ? (cur === 1 ? 0 : 1) : cur === 2 ? 0 : 2
@@ -202,7 +211,7 @@ onBeforeUnmount(() => {
               'ncell--r5': (c - 1) % 5 === 0,
               'ncell--b5': (r - 1) % 5 === 0,
             }"
-            @pointerdown.prevent="startPaint(idx(r - 1, c - 1))"
+            @pointerdown.prevent="startPaint(idx(r - 1, c - 1), $event)"
             @pointerenter="enterPaint(idx(r - 1, c - 1))"
             @contextmenu.prevent="toggleX(idx(r - 1, c - 1))"
           >
