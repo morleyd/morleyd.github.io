@@ -43,6 +43,12 @@ const router = createRouter({
       meta: { gamePage: true, lockScroll: true },
     },
     {
+      path: '/tetris',
+      name: 'tetris',
+      component: () => import('../views/TetrisView.vue'),
+      meta: { gamePage: true, lockScroll: true },
+    },
+    {
       path: '/snake',
       name: 'snake',
       component: () => import('../views/SnakeView.vue'),

@@ -57,6 +57,15 @@ const games: GameCard[] = [
     gradient: 'linear-gradient(135deg, rgba(249, 115, 22, 0.42), rgba(250, 204, 21, 0.24))',
   },
   {
+    key: 'tetris',
+    title: 'Tetris',
+    description:
+      'The falling-blocks classic: rotate and stack tetrominoes to clear lines. Ghost piece, hold slot, next queue, and rising speed.',
+    icon: 'mdi-view-quilt-outline',
+    to: '/tetris',
+    gradient: 'linear-gradient(135deg, rgba(34, 211, 238, 0.32), rgba(168, 85, 247, 0.30))',
+  },
+  {
     key: 'snake',
     title: 'Snake',
     description:
