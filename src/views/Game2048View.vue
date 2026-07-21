@@ -81,7 +81,7 @@ const addRandomTile = () => {
 }
 
 const doMove = (dir: Direction) => {
-  if (busy || over.value) return
+  if (busy || over.value || showWinOverlay.value) return
   const before = tiles.value
   const result = move(before, dir)
   if (!result.moved) return
@@ -101,10 +101,8 @@ const doMove = (dir: Direction) => {
     tiles.value = tiles.value.map((t) => ({ ...t, merged: false }))
     addRandomTile()
     if (!won.value && hasWon(tiles.value)) won.value = true
-    if (!canMove(tiles.value)) {
-      over.value = true
-      persistBest()
-    }
+    if (!canMove(tiles.value)) over.value = true
+    persistBest() // keep the stored best current after every move, not only at game over
     busy = false
   }, 110)
 }
@@ -116,6 +114,7 @@ const undoMove = () => {
   score.value = undo.score
   consumed.value = []
   over.value = false
+  won.value = hasWon(undo.tiles) // undoing the winning move drops win state too
   undo = null
   canUndo.value = false
   busy = false
@@ -175,6 +174,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   if (cleanupTimer) clearTimeout(cleanupTimer)
+  persistBest() // don't lose a running best if the player leaves mid-game
   window.removeEventListener('keydown', onKey)
 })
 
@@ -309,20 +309,22 @@ const showWinOverlay = computed(() => won.value && !keepPlaying.value && !over.v
   will-change: transform;
 }
 
+/* Pops animate the `scale` property, NOT `transform` — `transform` carries each
+   tile's grid position, so animating it here would fling the tile from (0,0). */
 .tile--new {
-  animation: pop-in 130ms ease-out;
+  animation: pop-in 100ms ease-out;
 }
 .tile--merged {
-  animation: pop-merge 130ms ease-out;
+  animation: pop-merge 100ms ease-out;
 }
 
 @keyframes pop-in {
-  0% { opacity: 0; }
-  60% { opacity: 1; }
+  0% { opacity: 0; scale: 0.6; }
+  100% { opacity: 1; scale: 1; }
 }
 @keyframes pop-merge {
-  0% { transform: var(--merge-from, none); }
-  50% { scale: 1.12; }
+  0% { scale: 1; }
+  50% { scale: 1.14; }
   100% { scale: 1; }
 }
 
