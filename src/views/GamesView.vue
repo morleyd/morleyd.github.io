@@ -165,6 +165,15 @@ const games: GameCard[] = [
     gradient: 'linear-gradient(135deg, rgba(142, 36, 170, 0.42), rgba(15, 23, 42, 0.35))',
   },
   {
+    key: 'color-memory',
+    title: 'Color from Memory',
+    description:
+      'A color flashes for a few seconds — then recreate it from memory with RGB sliders. Scored on how close it looks, not just the numbers.',
+    icon: 'mdi-palette-outline',
+    to: '/color-memory',
+    gradient: 'linear-gradient(135deg, hsl(330, 80%, 55%), hsl(190, 80%, 50%), hsl(50, 90%, 55%))',
+  },
+  {
     key: 'time-since',
     title: 'Time Since',
     description:

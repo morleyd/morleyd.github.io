@@ -109,6 +109,12 @@ const router = createRouter({
       meta: { gamePage: true, lockScroll: true },
     },
     {
+      path: '/color-memory',
+      name: 'color-memory',
+      component: () => import('../views/ColorMemoryView.vue'),
+      meta: { gamePage: true, lockScroll: true },
+    },
+    {
       path: '/wizard-chess/:seed?',
       name: 'wizard-chess',
       component: () => import('../views/WizardChessView.vue'),
