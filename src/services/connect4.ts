@@ -72,33 +72,28 @@ export function findWin(board: Board, who: Disc): number[] | null {
 export const isWin = (board: Board, who: Disc): boolean => findWin(board, who) !== null
 export const isFull = (board: Board): boolean => board.every((v) => v !== EMPTY)
 
-/** Count length-4 windows and weight them — the heart of the heuristic. */
-function scoreWindow(cells: Disc[], who: Disc): number {
+/** Positive-only value of a length-4 window for `who` (0 if the window is
+ *  blocked by an opponent disc, so it can never complete). */
+function windowValue(cells: Disc[], who: Disc): number {
   const opp = who === AI ? PLAYER : AI
   let mine = 0
-  let theirs = 0
   for (const v of cells) {
+    if (v === opp) return 0 // opponent disc present → dead window for `who`
     if (v === who) mine += 1
-    else if (v === opp) theirs += 1
   }
-  if (mine > 0 && theirs > 0) return 0 // blocked window, worthless
-  if (mine === 4) return 10000
   if (mine === 3) return 50
   if (mine === 2) return 10
-  if (theirs === 3) return -80 // value blocking a bit higher than building
-  if (theirs === 2) return -10
+  if (mine === 1) return 1
   return 0
 }
 
-/** Static evaluation of a non-terminal board from `who`'s perspective. */
-export function evaluate(board: Board, who: Disc): number {
+/** Raw positional value for a single side (center control + open windows). */
+function heuristic(board: Board, who: Disc): number {
   let score = 0
-  // Center control is valuable.
   const center = Math.floor(COLS / 2)
   for (let r = 0; r < ROWS; r += 1) {
     if (board[r * COLS + center] === who) score += 6
   }
-  // All length-4 windows.
   for (let r = 0; r < ROWS; r += 1) {
     for (let c = 0; c < COLS; c += 1) {
       for (const [dr, dc] of DIRECTIONS) {
@@ -107,11 +102,21 @@ export function evaluate(board: Board, who: Disc): number {
         if (er < 0 || er >= ROWS || ec < 0 || ec >= COLS) continue
         const cells: Disc[] = []
         for (let k = 0; k < 4; k += 1) cells.push(board[(r + k * dr) * COLS + (c + k * dc)])
-        score += scoreWindow(cells, who)
+        score += windowValue(cells, who)
       }
     }
   }
   return score
+}
+
+/**
+ * Static evaluation of a non-terminal board from `who`'s perspective. Defined
+ * as own value minus opponent value so it's antisymmetric
+ * (evaluate(b, who) === -evaluate(b, opp)) — required for negamax to be sound.
+ */
+export function evaluate(board: Board, who: Disc): number {
+  const opp = who === AI ? PLAYER : AI
+  return heuristic(board, who) - heuristic(board, opp)
 }
 
 /** Move-ordering: try center columns first for better alpha-beta pruning. */

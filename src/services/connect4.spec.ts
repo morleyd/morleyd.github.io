@@ -82,6 +82,10 @@ describe('evaluate', () => {
     const edge = play(emptyBoard(), 0, AI)
     expect(evaluate(center, AI)).toBeGreaterThan(evaluate(edge, AI))
   })
+  it('is antisymmetric between players (required for negamax)', () => {
+    const b = withMoves([[3, AI], [3, PLAYER], [2, AI], [4, PLAYER], [2, AI]])
+    expect(evaluate(b, AI)).toBe(-evaluate(b, PLAYER))
+  })
 })
 
 describe('bestMove', () => {
