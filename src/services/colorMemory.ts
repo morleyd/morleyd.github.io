@@ -24,7 +24,7 @@ export function randomColor(rng: () => number): RGB {
 
 export function hslToRgb(h: number, s: number, l: number): RGB {
   const c = (1 - Math.abs(2 * l - 1)) * s
-  const hp = h / 60
+  const hp = (((h % 360) + 360) % 360) / 60 // normalize so 360 wraps to 0 (red)
   const x = c * (1 - Math.abs((hp % 2) - 1))
   let r = 0
   let g = 0

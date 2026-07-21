@@ -25,6 +25,9 @@ let peekTimer: ReturnType<typeof setInterval> | null = null
 const guessCss = computed(() => toCss(guess.value))
 const targetCss = computed(() => toCss(target.value))
 const average = computed(() => (round.value > 0 ? Math.round(total.value / round.value) : 0))
+// The round currently in play: while guessing it's the next one; on the result
+// screen it's the one just scored.
+const currentRound = computed(() => (phase.value === 'result' ? round.value : round.value + 1))
 
 const stopPeek = () => {
   if (peekTimer) clearInterval(peekTimer)
@@ -105,7 +108,7 @@ onBeforeUnmount(stopPeek)
 
     <!-- Stats -->
     <div class="d-flex align-center ga-3 mb-4">
-      <div class="text-body-2 text-medium-emphasis">Round {{ round + (phase === 'result' ? 0 : 1) }}</div>
+      <div class="text-body-2 text-medium-emphasis">Round {{ currentRound }}</div>
       <v-spacer />
       <div class="text-body-2 text-medium-emphasis">Avg: {{ average }}</div>
       <div class="text-body-2 text-medium-emphasis">Best: {{ best }}</div>

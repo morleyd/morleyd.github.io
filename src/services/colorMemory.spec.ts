@@ -25,6 +25,9 @@ describe('hslToRgb', () => {
     expect(hslToRgb(240, 1, 0.5)).toEqual({ r: 0, g: 0, b: 255 }) // blue
     expect(hslToRgb(0, 0, 0.5)).toEqual({ r: 128, g: 128, b: 128 }) // gray
   })
+  it('wraps hue at 360 back to 0 (red)', () => {
+    expect(hslToRgb(360, 1, 0.5)).toEqual({ r: 255, g: 0, b: 0 })
+  })
 })
 
 describe('randomColor', () => {
