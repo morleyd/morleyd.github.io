@@ -36,6 +36,9 @@ let seed = 1
 let maxY = 0
 let cameraY = 0
 let steer: -1 | 0 | 1 = 0
+let pointerActive = false
+let leftKey = false
+let rightKey = false
 let raf = 0
 let lastTs = 0
 
@@ -49,6 +52,9 @@ const reset = () => {
   maxY = 0
   cameraY = 0
   steer = 0
+  pointerActive = false
+  leftKey = false
+  rightKey = false
 }
 
 const gameOver = () => {
@@ -56,6 +62,9 @@ const gameOver = () => {
   cancelAnimationFrame(raf)
   raf = 0
   steer = 0
+  pointerActive = false
+  leftKey = false
+  rightKey = false
   if (score.value > best.value) {
     best.value = score.value
     try {
@@ -160,32 +169,40 @@ const steerFromX = (clientX: number, el: HTMLElement) => {
 }
 
 const onPointerDown = (e: PointerEvent) => {
-  if (state.value !== 'running') {
-    start()
-    return
-  }
-  steerFromX(e.clientX, e.currentTarget as HTMLElement)
+  if (state.value !== 'running') start()
+  pointerActive = true
+  steerFromX(e.clientX, e.currentTarget as HTMLElement) // steer even on the starting press
 }
 const onPointerMove = (e: PointerEvent) => {
-  if (state.value === 'running' && steer !== 0) steerFromX(e.clientX, e.currentTarget as HTMLElement)
+  if (state.value === 'running' && pointerActive) steerFromX(e.clientX, e.currentTarget as HTMLElement)
 }
 const stopSteer = () => {
+  pointerActive = false
   steer = 0
 }
 
+// Track both arrow keys so releasing one doesn't cancel the other still held.
+const applyKeySteer = () => {
+  steer = leftKey === rightKey ? 0 : leftKey ? -1 : 1
+}
 const onKeyDown = (e: KeyboardEvent) => {
   if (e.key === 'ArrowLeft' || e.key === 'a') {
     e.preventDefault()
-    if (state.value === 'running') steer = -1
-    else start()
+    if (state.value !== 'running') start()
+    leftKey = true
+    applyKeySteer()
   } else if (e.key === 'ArrowRight' || e.key === 'd') {
     e.preventDefault()
-    if (state.value === 'running') steer = 1
-    else start()
+    if (state.value !== 'running') start()
+    rightKey = true
+    applyKeySteer()
   }
 }
 const onKeyUp = (e: KeyboardEvent) => {
-  if (['ArrowLeft', 'ArrowRight', 'a', 'd'].includes(e.key)) steer = 0
+  if (e.key === 'ArrowLeft' || e.key === 'a') leftKey = false
+  else if (e.key === 'ArrowRight' || e.key === 'd') rightKey = false
+  else return
+  applyKeySteer()
 }
 
 watch([displayW, displayH], () => {
