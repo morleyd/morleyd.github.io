@@ -102,6 +102,15 @@ const games: GameCard[] = [
     gradient: 'linear-gradient(135deg, rgba(59, 130, 246, 0.36), rgba(148, 163, 184, 0.18))',
   },
   {
+    key: 'nonogram',
+    title: 'Nonogram',
+    description:
+      'Reveal a hidden pixel picture by filling cells that satisfy the row and column number clues. Drag to paint, X-mark the gaps, three sizes.',
+    icon: 'mdi-dots-grid',
+    to: '/nonogram',
+    gradient: 'linear-gradient(135deg, rgba(124, 58, 237, 0.4), rgba(15, 23, 42, 0.3))',
+  },
+  {
     key: 'flood-it',
     title: 'Flood It',
     description:
