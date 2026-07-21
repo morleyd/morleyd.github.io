@@ -52,7 +52,47 @@ const state = ref<'idle' | 'running' | 'paused' | 'over'>('idle')
 
 let timer: ReturnType<typeof setInterval> | null = null
 
+// Lock delay: a grounded piece doesn't lock instantly — it gets a short grace
+// window so it can be slid or rotated into a gap. Moves reset the window a
+// capped number of times so it can't be stalled forever.
+const LOCK_DELAY = 500
+const MAX_LOCK_RESETS = 15
+let lockTimer: ReturnType<typeof setTimeout> | null = null
+let lockResets = 0
+
 const colorOf = (type: PieceType) => COLOR_ORDER.indexOf(type) + 1
+
+const grounded = (): boolean =>
+  !!current.value && collides(board.value, { ...current.value, y: current.value.y + 1 })
+
+const clearLock = () => {
+  if (lockTimer) clearTimeout(lockTimer)
+  lockTimer = null
+  lockResets = 0
+}
+
+const scheduleLock = () => {
+  if (lockTimer) return
+  lockTimer = setTimeout(() => {
+    lockTimer = null
+    lockResets = 0
+    if (grounded()) lockPiece()
+  }, LOCK_DELAY)
+}
+
+// Called after a manual move/rotate: cancel the lock if the piece can now fall,
+// otherwise extend the grace window (up to the reset cap).
+const bumpLock = () => {
+  if (!lockTimer) return
+  if (!grounded()) {
+    clearLock()
+  } else if (lockResets < MAX_LOCK_RESETS) {
+    lockResets += 1
+    clearTimeout(lockTimer)
+    lockTimer = null
+    scheduleLock()
+  }
+}
 
 // Rendered board = settled cells + ghost landing spot + the active piece.
 const view = computed(() => {
@@ -116,6 +156,7 @@ const spawnNext = () => {
 
 const lockPiece = () => {
   if (!current.value) return
+  clearLock()
   const { board: cleared, cleared: n } = clearLines(merge(board.value, current.value))
   board.value = cleared
   if (n > 0) {
@@ -134,21 +175,24 @@ const lockPiece = () => {
 const tick = () => {
   if (state.value !== 'running' || !current.value) return
   const moved = { ...current.value, y: current.value.y + 1 }
-  if (collides(board.value, moved)) lockPiece()
+  if (collides(board.value, moved)) scheduleLock()
   else current.value = moved
 }
 
 const tryMove = (dx: number) => {
   if (state.value !== 'running' || !current.value) return
   const moved = { ...current.value, x: current.value.x + dx }
-  if (!collides(board.value, moved)) current.value = moved
+  if (!collides(board.value, moved)) {
+    current.value = moved
+    bumpLock()
+  }
 }
 
 const softDrop = () => {
   if (state.value !== 'running' || !current.value) return
   const moved = { ...current.value, y: current.value.y + 1 }
   if (collides(board.value, moved)) {
-    lockPiece()
+    scheduleLock()
   } else {
     current.value = moved
     score.value += 1
@@ -158,7 +202,10 @@ const softDrop = () => {
 const rotatePiece = (dir: 1 | -1) => {
   if (state.value !== 'running' || !current.value) return
   const rotated = rotate(board.value, current.value, dir)
-  if (rotated) current.value = rotated
+  if (rotated) {
+    current.value = rotated
+    bumpLock()
+  }
 }
 
 const hardDrop = () => {
@@ -202,12 +249,14 @@ const persistBest = () => {
 const gameOver = () => {
   state.value = 'over'
   stopTimer()
+  clearLock()
   current.value = null
   persistBest()
 }
 
 const reset = () => {
   stopTimer()
+  clearLock()
   board.value = emptyBoard()
   queue.value = []
   holdType.value = null
@@ -235,6 +284,7 @@ const togglePause = () => {
   if (state.value === 'running') {
     state.value = 'paused'
     stopTimer()
+    clearLock()
   } else if (state.value === 'paused') {
     start()
   }
@@ -245,7 +295,11 @@ const newGame = () => {
   start()
 }
 
+// Actions that must fire once per physical press, not on OS key auto-repeat.
+const NO_REPEAT = new Set([' ', 'ArrowUp', 'x', 'X', 'z', 'Z', 'c', 'C', 'p', 'P'])
+
 const onKey = (e: KeyboardEvent) => {
+  if (e.repeat && NO_REPEAT.has(e.key)) return
   switch (e.key) {
     case 'ArrowLeft':
     case 'a':
@@ -307,7 +361,7 @@ const onTouchEnd = (e: TouchEvent) => {
   const dy = t.clientY - touchStart.y
   const start0 = touchStart
   touchStart = null
-  if (Math.abs(dx) < 20 && Math.abs(dy) < 20 && e.timeStamp - start0.t < 250) {
+  if (Math.abs(dx) < 12 && Math.abs(dy) < 12 && e.timeStamp - start0.t < 250) {
     rotatePiece(1)
     return
   }
@@ -337,6 +391,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   stopTimer()
+  clearLock()
   persistBest()
   window.removeEventListener('keydown', onKey)
 })
