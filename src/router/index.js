@@ -121,6 +121,12 @@ const router = createRouter({
       meta: { gamePage: true, lockScroll: true },
     },
     {
+      path: '/ninja-climb',
+      name: 'ninja-climb',
+      component: () => import('../views/WallJumpView.vue'),
+      meta: { gamePage: true, lockScroll: true },
+    },
+    {
       path: '/wizard-chess/:seed?',
       name: 'wizard-chess',
       component: () => import('../views/WizardChessView.vue'),

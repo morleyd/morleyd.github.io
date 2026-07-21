@@ -93,6 +93,15 @@ const games: GameCard[] = [
     gradient: 'linear-gradient(135deg, rgba(56, 189, 248, 0.38), rgba(244, 114, 182, 0.3))',
   },
   {
+    key: 'ninja-climb',
+    title: 'Ninja Climb',
+    description:
+      'Cling to a wall, hold to charge, and leap to the other side — longer holds jump higher. Dodge spikes and outclimb the rising lava.',
+    icon: 'mdi-ninja',
+    to: '/ninja-climb',
+    gradient: 'linear-gradient(135deg, rgba(56, 189, 248, 0.34), rgba(239, 68, 68, 0.32))',
+  },
+  {
     key: 'snake',
     title: 'Snake',
     description:
