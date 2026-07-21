@@ -155,6 +155,7 @@ const setMode = (m: 'match' | 'simon') => {
   mode.value = m
   clearTimers()
   simonState.value = 'idle'
+  activePad.value = -1 // clear any pad left lit by an interrupted playback
   buildMatch()
 }
 
@@ -260,6 +261,7 @@ onBeforeUnmount(() => {
           type="button"
           class="pad"
           :class="[`pad--${p - 1}`, { 'pad--active': activePad === p - 1 }]"
+          :aria-label="['green', 'red', 'yellow', 'blue'][p - 1]"
           :disabled="simonState !== 'input'"
           @pointerdown="tapPad(p - 1)"
         />
