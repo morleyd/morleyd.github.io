@@ -48,6 +48,15 @@ const games: GameCard[] = [
     gradient: 'linear-gradient(135deg, hsl(0, 70%, 55%), hsl(140, 68%, 48%), hsl(255, 70%, 58%))',
   },
   {
+    key: '2048',
+    title: '2048',
+    description:
+      'Slide and merge numbered tiles to reach 2048 — then keep going. Swipe or arrow keys, one-level undo, and a saved best score.',
+    icon: 'mdi-numeric',
+    to: '/2048',
+    gradient: 'linear-gradient(135deg, rgba(249, 115, 22, 0.42), rgba(250, 204, 21, 0.24))',
+  },
+  {
     key: 'snake',
     title: 'Snake',
     description:
