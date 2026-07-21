@@ -76,6 +76,8 @@ const newGame = () => {
   code.value = randomSeed()
   syncUrl()
   build()
+  // Drop focus from the New button so a subsequent Enter submits, not re-news.
+  if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
 }
 
 const pressKey = (k: string) => {

@@ -126,8 +126,9 @@ export function generateEquation(seed: string): string {
     let a: number
     let b: number
     if (op === '/') {
-      // Build a clean division: b * quotient = a.
-      b = randInt(rng, 1, 9)
+      // Build a clean division a/b=q. Wide operand range so the string can
+      // actually reach WIDTH (small operands cap the dividend too low).
+      b = randInt(rng, 1, 99)
       const q = randInt(rng, 1, 9)
       a = b * q
     } else {

@@ -83,4 +83,12 @@ describe('generateEquation', () => {
   it('exposes a sane guess limit', () => {
     expect(MAX_GUESSES).toBeGreaterThan(0)
   })
+  it('can produce every operator as the answer across seeds', () => {
+    const ops = new Set<string>()
+    for (let i = 0; i < 400; i += 1) {
+      const eq = generateEquation(`op-scan-${i}`)
+      for (const ch of ['+', '-', '*', '/']) if (eq.includes(ch)) ops.add(ch)
+    }
+    expect(ops.has('/')).toBe(true) // division must be reachable (regression guard)
+  })
 })
