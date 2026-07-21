@@ -75,6 +75,15 @@ const games: GameCard[] = [
     gradient: 'linear-gradient(135deg, rgba(34, 211, 238, 0.32), rgba(168, 85, 247, 0.30))',
   },
   {
+    key: 'memory',
+    title: 'Memory',
+    description:
+      'Two quick memory games in one: flip cards to find the pairs, or watch a growing color sequence and repeat it back (Simon).',
+    icon: 'mdi-cards-outline',
+    to: '/memory',
+    gradient: 'linear-gradient(135deg, rgba(52, 211, 153, 0.32), rgba(59, 130, 246, 0.3))',
+  },
+  {
     key: 'snake',
     title: 'Snake',
     description:
