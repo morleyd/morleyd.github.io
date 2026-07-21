@@ -192,6 +192,15 @@ const games: GameCard[] = [
     gradient: 'linear-gradient(135deg, rgba(142, 36, 170, 0.42), rgba(15, 23, 42, 0.35))',
   },
   {
+    key: 'count-blocks',
+    title: 'Count the Blocks',
+    description:
+      'Tetromino shapes stream past for a few seconds — then say how many there were (or how many of one shape). Each right answer levels you up.',
+    icon: 'mdi-counter',
+    to: '/count-blocks',
+    gradient: 'linear-gradient(135deg, rgba(168, 85, 247, 0.36), rgba(34, 211, 238, 0.28))',
+  },
+  {
     key: 'color-memory',
     title: 'Color from Memory',
     description:

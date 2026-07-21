@@ -133,6 +133,12 @@ const router = createRouter({
       meta: { gamePage: true, lockScroll: true },
     },
     {
+      path: '/count-blocks',
+      name: 'count-blocks',
+      component: () => import('../views/CountBlocksView.vue'),
+      meta: { gamePage: true, lockScroll: true },
+    },
+    {
       path: '/wizard-chess/:seed?',
       name: 'wizard-chess',
       component: () => import('../views/WizardChessView.vue'),
