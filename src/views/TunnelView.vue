@@ -5,7 +5,7 @@
  * Hit a wall and it's over. Rendered on a canvas; physics/course come from
  * services/tunnel. Endless, with a best-distance score in localStorage.
  */
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import GameToolbar from '@/components/GameToolbar.vue'
 import { useSquareFit } from '@/composables/useSquareFit'
 import {
@@ -117,7 +117,9 @@ const tick = (ts: number) => {
   distance.value += (scrollSpeed * dt) / 1000
   flyer = stepFlyer(flyer, dt)
 
-  const seg = segmentAt(seed, Math.round(distance.value), difficultyFor(distance.value))
+  // The wall band drawn at the flyer's y is row floor(distance); test that one.
+  const row = Math.floor(distance.value)
+  const seg = segmentAt(seed, row, difficultyFor(row))
   if (collides(flyer.x, seg)) {
     draw()
     gameOver()
@@ -162,6 +164,11 @@ const onKey = (e: KeyboardEvent) => {
     if (state.value !== 'running') start()
   }
 }
+
+// Redraw when the board is resized while not actively animating.
+watch([displayW, displayH], () => {
+  if (state.value !== 'running') draw()
+})
 
 onMounted(() => {
   try {
