@@ -48,6 +48,15 @@ const games: GameCard[] = [
     gradient: 'linear-gradient(135deg, hsl(0, 70%, 55%), hsl(140, 68%, 48%), hsl(255, 70%, 58%))',
   },
   {
+    key: 'nerdle',
+    title: 'Nerdle',
+    description:
+      'Wordle for math: guess the hidden 8-tile equation in six tries. Tiles reveal which digits and operators are right, and where.',
+    icon: 'mdi-calculator-variant-outline',
+    to: '/nerdle',
+    gradient: 'linear-gradient(135deg, rgba(34, 197, 94, 0.34), rgba(168, 85, 247, 0.30))',
+  },
+  {
     key: '2048',
     title: '2048',
     description:
