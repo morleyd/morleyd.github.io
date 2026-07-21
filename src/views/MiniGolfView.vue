@@ -255,8 +255,13 @@ onMounted(() => {
   seedCode.value = p || randomSeed()
   if (!p) router.replace({ name: 'mini-golf', params: { seed: seedCode.value } })
   loadHole()
+  // Catch a mouse-up that lands outside the canvas so aiming never sticks.
+  window.addEventListener('pointerup', onPointerUp)
 })
-onBeforeUnmount(stopLoop)
+onBeforeUnmount(() => {
+  stopLoop()
+  window.removeEventListener('pointerup', onPointerUp)
+})
 </script>
 
 <template>

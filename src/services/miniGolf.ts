@@ -100,6 +100,10 @@ export function collide(state: BallState, walls: Rect[]): BallState {
     }
   }
 
+  // Re-clamp: pushing out of an inner wall must never leave the play area.
+  px = Math.max(r, Math.min(1 - r, px))
+  py = Math.max(r, Math.min(1 - r, py))
+
   return { p: { x: px, y: py }, v: { x: vx, y: vy } }
 }
 
