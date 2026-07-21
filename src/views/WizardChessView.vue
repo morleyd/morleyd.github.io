@@ -10,6 +10,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import GameToolbar from '@/components/GameToolbar.vue'
+import GameControls from '@/components/GameControls.vue'
 import { copyToClipboard } from '@/services/share'
 import { randomSeed } from '@/services/seed'
 import { kingSquare } from '@/services/chess/chaos'
@@ -54,9 +55,14 @@ const settings = ref(loadSettings())
 game.settings = settings.value
 watch(settings, (s) => saveSettings(s), { deep: true })
 
-// The team's trust persists across games; the controller mutates game.trust as
-// you play, so save it whenever the board version bumps.
-game.trust = loadTrust()
+// The team's trust persists across games, but a fresh game gives you the benefit
+// of the doubt: it never STARTS below 50, so a rough previous run doesn't leave
+// the army already mutinous at the opening. A good run keeps its earned trust in
+// full (we only raise a collapsed value up to the floor, never lower a high one).
+const START_FLOOR = 50
+const freshTrust = (t: number) => Math.max(START_FLOOR, Math.round(t))
+// The controller mutates game.trust as you play; we save it on each version bump.
+game.trust = freshTrust(loadTrust())
 
 const code = ref(initialSeed)
 const level = ref(3)
@@ -212,6 +218,7 @@ const FX_LABEL: Record<string, string> = {
   entourage: 'MOVE AS ONE!',
   swap: 'SWITCHEROO!',
   telegraph: 'UP TO SOMETHING…',
+  reprimand: 'BACK IN LINE!',
 }
 function stuntMark(f: { kind: StuntFx['kind']; from: Square | null; to: Square }) {
   stuntFx.value = f
@@ -864,6 +871,7 @@ function start(fen?: string) {
 }
 function newGame() {
   code.value = randomSeed()
+  game.trust = freshTrust(game.trust) // a new game earns the army's benefit of the doubt
   syncUrl()
   start()
 }
@@ -948,42 +956,6 @@ onBeforeUnmount(() => {
       <template #intro>
         Ordinary chess, extraordinary pieces. Every one of your soldiers has a name and a temper —
         and the occasional strong opinion about where it will and won't go.
-      </template>
-      <template #settings>
-        <div class="d-flex flex-column ga-4">
-          <div class="slider-wrap">
-            <label class="text-caption text-medium-emphasis">
-              Difficulty: {{ level }} — {{ LEVEL_NAMES[level] }}
-            </label>
-            <v-slider
-              :model-value="level"
-              :min="1"
-              :max="6"
-              :step="1"
-              hide-details
-              density="compact"
-              thumb-label
-              @update:model-value="setLevel"
-            />
-          </div>
-          <div class="slider-wrap">
-            <label class="text-caption text-medium-emphasis">Chattiness</label>
-            <v-slider v-model="settings.chatter" :min="0" :max="1" :step="0.1" hide-details density="compact" />
-          </div>
-          <div class="slider-wrap">
-            <label class="text-caption text-medium-emphasis">Animation</label>
-            <v-slider v-model="settings.animation" :min="0" :max="1" :step="0.1" hide-details density="compact" />
-          </div>
-          <div class="slider-wrap">
-            <label class="text-caption text-medium-emphasis">Hints &amp; opinions</label>
-            <v-slider v-model="settings.agency" :min="0" :max="1" :step="0.1" hide-details density="compact" />
-          </div>
-          <div class="slider-wrap">
-            <label class="text-caption text-medium-emphasis">Chaos</label>
-            <v-slider v-model="settings.chaos" :min="0" :max="1" :step="0.1" hide-details density="compact" color="secondary" />
-          </div>
-          <v-btn variant="tonal" color="primary" prepend-icon="mdi-refresh" @click="newGame">New game</v-btn>
-        </div>
       </template>
       <template #info>
         <h3>The idea</h3>
@@ -1184,6 +1156,29 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="wc-log-col">
+        <GameControls title="Settings" class="mb-4">
+          <div class="slider-wrap">
+            <label class="text-caption text-medium-emphasis">Difficulty: {{ level }} — {{ LEVEL_NAMES[level] }}</label>
+            <v-slider :model-value="level" :min="1" :max="6" :step="1" hide-details density="compact" thumb-label @update:model-value="setLevel" />
+          </div>
+          <div class="slider-wrap">
+            <label class="text-caption text-medium-emphasis">Chattiness</label>
+            <v-slider v-model="settings.chatter" :min="0" :max="1" :step="0.1" hide-details density="compact" />
+          </div>
+          <div class="slider-wrap">
+            <label class="text-caption text-medium-emphasis">Animation</label>
+            <v-slider v-model="settings.animation" :min="0" :max="1" :step="0.1" hide-details density="compact" />
+          </div>
+          <div class="slider-wrap">
+            <label class="text-caption text-medium-emphasis">Hints &amp; opinions</label>
+            <v-slider v-model="settings.agency" :min="0" :max="1" :step="0.1" hide-details density="compact" />
+          </div>
+          <div class="slider-wrap">
+            <label class="text-caption text-medium-emphasis">Chaos</label>
+            <v-slider v-model="settings.chaos" :min="0" :max="1" :step="0.1" hide-details density="compact" color="secondary" />
+          </div>
+        </GameControls>
+
         <div class="trust">
           <div class="d-flex align-center justify-space-between mb-1">
             <span class="text-overline text-medium-emphasis">Team trust</span>
@@ -1296,11 +1291,17 @@ onBeforeUnmount(() => {
 .board-frame {
   position: relative;
   width: 100%;
-  max-width: min(82vh, 600px);
+  /* svh (small viewport height) is stable — unlike vh/dvh it doesn't grow and
+     shrink as the mobile address bar hides/shows on scroll, which made the whole
+     board twitch in and out. */
+  max-width: min(82svh, 600px);
   aspect-ratio: 1 / 1;
   margin: 0 auto;
   padding: 0;
   border-radius: 16px;
+  /* Kill the browser's double-tap-to-zoom on the board (and its 300ms tap delay)
+     while still allowing pinch-zoom elsewhere. */
+  touch-action: manipulation;
   background: radial-gradient(circle at 50% 35%, #2c1e52 0%, #1a1330 78%);
   box-shadow:
     inset 0 0 0 1px rgba(250, 204, 21, 0.28),
@@ -1570,6 +1571,12 @@ onBeforeUnmount(() => {
     chaosPulse 0.9s ease-in-out infinite,
     fxFade 5.5s ease-out forwards;
 }
+/* Reprimand marches an enemy cheat back to its post — the player enforcing the
+   rules, so it reads gold/positive, not like an ominous enemy telegraph. */
+.stunt-ring.fx-reprimand {
+  box-shadow: inset 0 0 0 3px #facc15;
+  background: radial-gradient(circle, rgba(250, 204, 21, 0.28), transparent 70%);
+}
 .stunt-label {
   position: absolute;
   transform: translate(var(--tx, -50%), -130%);
@@ -1593,6 +1600,10 @@ onBeforeUnmount(() => {
 .stunt-label.fx-coldfeet {
   background: rgba(30, 58, 138, 0.92);
   color: #dbeafe;
+}
+.stunt-label.fx-reprimand {
+  background: rgba(133, 100, 4, 0.94);
+  color: #fef9c3;
 }
 @keyframes fxFade {
   0%,

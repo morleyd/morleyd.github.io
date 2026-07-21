@@ -4,26 +4,47 @@
  * them all off. Seeded (shareable). Optimal (fewest clicks) computed exactly via
  * Gaussian elimination over GF(2).
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import GameToolbar from '@/components/GameToolbar.vue'
+import GameControls from '@/components/GameControls.vue'
 import { copyToClipboard } from '@/services/share'
 import { randomSeed, rngFromSeed } from '@/services/seed'
-import { useSquareFit } from '@/composables/useSquareFit'
-
-const { el: boardEl, px: boardPx } = useSquareFit(150)
 
 const route = useRoute()
 const router = useRouter()
 
 const size = ref(5)
+// The slider binds to a draft and only rebuilds on release, so dragging doesn't
+// reseed a fresh puzzle on every tick.
+const sizeDraft = ref(5)
 const code = ref('')
 const lights = ref<number[]>([])
 const moves = ref(0)
 const optimal = ref(0)
 const snackbar = ref(false)
+const hintCell = ref(-1)
+const hintsUsed = ref(0)
+let hintTimer: ReturnType<typeof setTimeout> | null = null
 
 const solved = computed(() => lights.value.length > 0 && lights.value.every((v) => v === 0))
+
+const clearHint = () => {
+  hintCell.value = -1
+  if (hintTimer) clearTimeout(hintTimer)
+  hintTimer = null
+}
+// Glow one cell that the optimal solution presses from the CURRENT position.
+const showHint = () => {
+  if (solved.value) return
+  const press = solveLights(lights.value, size.value)
+  const cell = press.findIndex((v) => v === 1)
+  if (cell < 0) return
+  hintsUsed.value += 1
+  hintCell.value = cell
+  if (hintTimer) clearTimeout(hintTimer)
+  hintTimer = setTimeout(() => (hintCell.value = -1), 2600)
+}
 
 const neighbors = (i: number, n: number): number[] => {
   const x = i % n
@@ -38,6 +59,7 @@ const neighbors = (i: number, n: number): number[] => {
 
 const toggle = (i: number) => {
   if (solved.value) return
+  clearHint()
   const next = lights.value.slice()
   next[i] ^= 1
   for (const j of neighbors(i, size.value)) next[j] ^= 1
@@ -45,7 +67,11 @@ const toggle = (i: number) => {
   moves.value += 1
 }
 
-const optimalMoves = (state: number[], n: number): number => {
+const weight = (x: number[]) => x.reduce((a, b) => a + b, 0)
+
+// The minimal-weight set of presses that clears `state` (which cells to click),
+// via Gaussian elimination over GF(2). Returns a press vector (0/1 per cell).
+const solveLights = (state: number[], n: number): number[] => {
   const N = n * n
   const rows: bigint[] = []
   for (let i = 0; i < N; i += 1) {
@@ -80,14 +106,15 @@ const optimalMoves = (state: number[], n: number): number => {
     return x
   }
   const dim = freeCols.length
-  const weight = (x: number[]) => x.reduce((a, b) => a + b, 0)
-  if (dim > 16) return weight(solveWith(new Array(dim).fill(0)))
-  let best = Infinity
-  for (let mask = 0; mask < 1 << dim; mask += 1) {
-    best = Math.min(best, weight(solveWith(Array.from({ length: dim }, (_, k) => (mask >> k) & 1))))
+  if (dim > 16) return solveWith(new Array(dim).fill(0))
+  let best = solveWith(new Array(dim).fill(0))
+  for (let mask = 1; mask < 1 << dim; mask += 1) {
+    const x = solveWith(Array.from({ length: dim }, (_, k) => (mask >> k) & 1))
+    if (weight(x) < weight(best)) best = x
   }
   return best
 }
+const optimalMoves = (state: number[], n: number): number => weight(solveLights(state, n))
 
 const build = () => {
   const n = size.value
@@ -111,11 +138,14 @@ const build = () => {
 const syncUrl = () => router.replace({ name: 'lights-out', params: { seed: `${size.value}.${code.value}` } })
 const newGame = () => {
   code.value = randomSeed()
+  clearHint()
+  hintsUsed.value = 0
   syncUrl()
   build()
 }
-const setSize = (v: number) => {
-  size.value = v
+const commitSize = () => {
+  if (sizeDraft.value === size.value) return
+  size.value = sizeDraft.value
   newGame()
 }
 
@@ -185,24 +215,17 @@ onMounted(() => {
   } else {
     newGame()
   }
+  sizeDraft.value = size.value
 })
+onBeforeUnmount(clearHint)
 </script>
 
 <template>
-  <v-container class="py-6" max-width="620">
+  <v-container class="py-6" max-width="960">
     <GameToolbar title="Lights Out" shareable @share="share">
       <template #intro>
         Click a light to flip it and its neighbors. Turn every light off — in as few clicks as
         possible.
-      </template>
-      <template #settings>
-        <div class="d-flex flex-column ga-4">
-          <div class="slider-wrap">
-            <label class="text-caption text-medium-emphasis">Size: {{ size }}×{{ size }}</label>
-            <v-slider :model-value="size" :min="3" :max="7" :step="1" hide-details density="compact" thumb-label @update:model-value="setSize" />
-          </div>
-          <v-btn variant="tonal" color="primary" prepend-icon="mdi-refresh" @click="newGame">New puzzle</v-btn>
-        </div>
       </template>
       <template #info>
         <h3>Goal</h3>
@@ -245,26 +268,44 @@ onMounted(() => {
       </template>
     </GameToolbar>
 
-    <div class="d-flex align-center justify-space-between mb-3">
-      <div class="text-h6">
-        Moves: <span class="font-weight-bold">{{ moves }}</span>
-        <span class="text-medium-emphasis"> / {{ optimal }} optimal</span>
-      </div>
-      <v-chip v-if="solved" :color="moves === optimal ? 'success' : 'primary'" variant="flat">
-        <v-icon start icon="mdi-check-circle-outline" />
-        {{ moves === optimal ? 'Perfect!' : 'Solved!' }}
-      </v-chip>
-    </div>
+    <div class="game-stage">
+      <div class="game-stage__board">
+        <div class="d-flex align-center justify-space-between mb-3">
+          <div class="text-h6">
+            Moves: <span class="font-weight-bold">{{ moves }}</span>
+            <span class="text-medium-emphasis"> / {{ optimal }} optimal</span>
+            <span v-if="hintsUsed" class="text-medium-emphasis"> · {{ hintsUsed }} hint{{ hintsUsed === 1 ? '' : 's' }}</span>
+          </div>
+          <v-chip v-if="solved" :color="moves === optimal && !hintsUsed ? 'success' : 'primary'" variant="flat">
+            <v-icon start icon="mdi-check-circle-outline" />
+            {{ moves === optimal && !hintsUsed ? 'Perfect!' : 'Solved!' }}
+          </v-chip>
+        </div>
 
-    <div ref="boardEl" class="board-wrap" :style="{ width: boardPx + 'px', height: boardPx + 'px' }">
-      <div class="board" :style="{ gridTemplateColumns: `repeat(${size}, 1fr)` }">
-        <button v-for="(v, i) in lights" :key="i" type="button" class="light" :class="{ 'light--on': v === 1 }" @click="toggle(i)"></button>
+        <div class="board-wrap game-board">
+          <div class="board" :style="{ gridTemplateColumns: `repeat(${size}, 1fr)` }">
+            <button v-for="(v, i) in lights" :key="i" type="button" class="light" :class="{ 'light--on': v === 1, 'light--hint': hintCell === i }" @click="toggle(i)"></button>
+          </div>
+          <div v-if="solved" class="overlay">
+            <p class="text-h5 mb-1">{{ moves === optimal && !hintsUsed ? 'Perfect!' : 'Lights out!' }}</p>
+            <p class="text-body-2 mb-3">
+              Solved in {{ moves }} ({{ optimal }} optimal)<span v-if="hintsUsed"> · {{ hintsUsed }} hint{{ hintsUsed === 1 ? '' : 's' }}</span>
+            </p>
+            <v-btn color="primary" variant="flat" prepend-icon="mdi-refresh" @click="newGame">New puzzle</v-btn>
+          </div>
+        </div>
       </div>
-      <div v-if="solved" class="overlay">
-        <p class="text-h5 mb-1">{{ moves === optimal ? 'Perfect!' : 'Lights out!' }}</p>
-        <p class="text-body-2 mb-3">Solved in {{ moves }} ({{ optimal }} optimal)</p>
-        <v-btn color="primary" variant="flat" prepend-icon="mdi-refresh" @click="newGame">New puzzle</v-btn>
-      </div>
+
+      <GameControls class="game-stage__controls" title="Settings">
+        <template #actions>
+          <v-btn color="primary" variant="flat" prepend-icon="mdi-refresh" @click="newGame">New puzzle</v-btn>
+          <v-btn color="secondary" variant="tonal" prepend-icon="mdi-lightbulb-on-outline" :disabled="solved" @click="showHint">Hint</v-btn>
+        </template>
+        <div class="slider-wrap">
+          <label class="text-caption text-medium-emphasis">Size: {{ sizeDraft }}×{{ sizeDraft }}</label>
+          <v-slider v-model="sizeDraft" :min="3" :max="7" :step="1" hide-details density="compact" @end="commitSize" />
+        </div>
+      </GameControls>
     </div>
     <v-snackbar v-model="snackbar" :timeout="2600" color="secondary">Link copied — challenge a friend!</v-snackbar>
   </v-container>
@@ -301,6 +342,26 @@ onMounted(() => {
   background: #fbbf24;
   border-color: #fbbf24;
   box-shadow: 0 0 16px rgba(251, 191, 36, 0.6);
+}
+/* Hint: pulse the cell the optimal solution says to press next. */
+.light--hint {
+  animation: lightHint 0.85s ease-in-out infinite;
+  z-index: 1;
+}
+@keyframes lightHint {
+  0%,
+  100% {
+    box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.8), 0 0 12px 2px rgba(96, 165, 250, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.95), 0 0 22px 6px rgba(96, 165, 250, 0.75);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .light--hint {
+    animation: none;
+    box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.95), 0 0 22px 6px rgba(96, 165, 250, 0.75);
+  }
 }
 .overlay {
   position: absolute;

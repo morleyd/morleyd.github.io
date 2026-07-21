@@ -87,6 +87,7 @@ describe('chaos offers and limits (controller)', () => {
     const g = new WizardGame('defect')
     g.reset('defect', '3qk3/8/8/8/8/8/4P3/4K3 w - - 0 1')
     g.settings.chaos = 1
+    g.society.ply = 20 // middlegame — a defection must be earned this game, not on turn one
     g.soulAt('e2')!.persona.obedience = 0.1 // ready to quit
 
     // Trust still respectable → no defection, however bad the position.
