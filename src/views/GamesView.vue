@@ -102,6 +102,15 @@ const games: GameCard[] = [
     gradient: 'linear-gradient(135deg, rgba(56, 189, 248, 0.34), rgba(239, 68, 68, 0.32))',
   },
   {
+    key: 'ball-bounce',
+    title: 'Ball Bounce',
+    description:
+      'A doodle-jump climber: the ball bounces on its own, you steer left/right to land the next platform. The screen only rises — don’t drop off.',
+    icon: 'mdi-circle-outline',
+    to: '/ball-bounce',
+    gradient: 'linear-gradient(135deg, rgba(52, 211, 153, 0.34), rgba(244, 114, 182, 0.3))',
+  },
+  {
     key: 'snake',
     title: 'Snake',
     description:
