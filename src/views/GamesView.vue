@@ -93,6 +93,15 @@ const games: GameCard[] = [
     gradient: 'linear-gradient(135deg, rgba(142, 36, 170, 0.42), rgba(251, 191, 36, 0.24))',
   },
   {
+    key: 'sudoku',
+    title: 'Sudoku',
+    description:
+      'The classic 1–9 logic puzzle, in four difficulties. Pencil notes, conflict highlighting, hints, and a fresh guaranteed-unique board every time.',
+    icon: 'mdi-grid-large',
+    to: '/sudoku',
+    gradient: 'linear-gradient(135deg, rgba(59, 130, 246, 0.36), rgba(148, 163, 184, 0.18))',
+  },
+  {
     key: 'flood-it',
     title: 'Flood It',
     description:
