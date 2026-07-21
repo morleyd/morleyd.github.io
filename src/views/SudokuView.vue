@@ -135,13 +135,14 @@ const inputDigit = (v: number) => {
     cells.value = next
     notes.value[i].clear()
     if (next[i]) clearPeerNotes(i, v)
+    notes.value = [...notes.value]
     if (solved.value) stopTimer()
   }
 }
 
 const erase = () => {
   const i = selected.value
-  if (i === null || given.value[i]) return
+  if (i === null || given.value[i] || solved.value) return
   const next = cells.value.slice()
   next[i] = 0
   cells.value = next
@@ -150,13 +151,20 @@ const erase = () => {
 }
 
 const hint = () => {
-  const i = selected.value
-  if (i === null || given.value[i] || cells.value[i] === solution.value[i]) return
+  if (solved.value) return
+  let i = selected.value
+  // With no usable selection, hint the first cell that's still empty or wrong.
+  if (i === null || given.value[i] || cells.value[i] === solution.value[i]) {
+    i = cells.value.findIndex((v, idx) => !given.value[idx] && v !== solution.value[idx])
+    if (i === -1) return
+    selected.value = i
+  }
   const next = cells.value.slice()
   next[i] = solution.value[i]
   cells.value = next
   notes.value[i].clear()
   clearPeerNotes(i, next[i])
+  notes.value = [...notes.value]
   if (solved.value) stopTimer()
 }
 
