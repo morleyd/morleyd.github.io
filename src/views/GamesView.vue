@@ -48,6 +48,60 @@ const games: GameCard[] = [
     gradient: 'linear-gradient(135deg, hsl(0, 70%, 55%), hsl(140, 68%, 48%), hsl(255, 70%, 58%))',
   },
   {
+    key: '2048',
+    title: '2048',
+    description:
+      'Slide and merge numbered tiles to reach 2048 — then keep going. Swipe or arrow keys, one-level undo, and a saved best score.',
+    icon: 'mdi-numeric',
+    to: '/2048',
+    gradient: 'linear-gradient(135deg, rgba(249, 115, 22, 0.42), rgba(250, 204, 21, 0.24))',
+  },
+  {
+    key: 'tetris',
+    title: 'Tetris',
+    description:
+      'The falling-blocks classic: rotate and stack tetrominoes to clear lines. Ghost piece, hold slot, next queue, and rising speed.',
+    icon: 'mdi-view-quilt-outline',
+    to: '/tetris',
+    gradient: 'linear-gradient(135deg, rgba(34, 211, 238, 0.32), rgba(168, 85, 247, 0.30))',
+  },
+  {
+    key: 'memory',
+    title: 'Memory',
+    description:
+      'Two quick memory games in one: flip cards to find the pairs, or watch a growing color sequence and repeat it back (Simon).',
+    icon: 'mdi-cards-outline',
+    to: '/memory',
+    gradient: 'linear-gradient(135deg, rgba(52, 211, 153, 0.32), rgba(59, 130, 246, 0.3))',
+  },
+  {
+    key: 'tunnel',
+    title: 'Vertical Tunnel',
+    description:
+      'Fly up an endless, narrowing tunnel — tap the left or right side to flap that way, and don’t drift into the walls. It speeds up as you climb.',
+    icon: 'mdi-airplane',
+    to: '/tunnel',
+    gradient: 'linear-gradient(135deg, rgba(56, 189, 248, 0.38), rgba(244, 114, 182, 0.3))',
+  },
+  {
+    key: 'ninja-climb',
+    title: 'Ninja Climb',
+    description:
+      'Cling to a wall, hold to charge, and leap to the other side — longer holds jump higher. Dodge spikes and outclimb the rising lava.',
+    icon: 'mdi-ninja',
+    to: '/ninja-climb',
+    gradient: 'linear-gradient(135deg, rgba(56, 189, 248, 0.34), rgba(239, 68, 68, 0.32))',
+  },
+  {
+    key: 'ball-bounce',
+    title: 'Ball Bounce',
+    description:
+      'A doodle-jump climber: the ball bounces on its own, you steer left/right to land the next platform. The screen only rises — don’t drop off.',
+    icon: 'mdi-circle-outline',
+    to: '/ball-bounce',
+    gradient: 'linear-gradient(135deg, rgba(52, 211, 153, 0.34), rgba(244, 114, 182, 0.3))',
+  },
+  {
     key: 'snake',
     title: 'Snake',
     description:
@@ -75,6 +129,33 @@ const games: GameCard[] = [
     gradient: 'linear-gradient(135deg, rgba(142, 36, 170, 0.42), rgba(251, 191, 36, 0.24))',
   },
   {
+    key: 'sudoku',
+    title: 'Sudoku',
+    description:
+      'The classic 1–9 logic puzzle, in four difficulties. Pencil notes, conflict highlighting, hints, and a fresh guaranteed-unique board every time.',
+    icon: 'mdi-grid-large',
+    to: '/sudoku',
+    gradient: 'linear-gradient(135deg, rgba(59, 130, 246, 0.36), rgba(148, 163, 184, 0.18))',
+  },
+  {
+    key: 'nonogram',
+    title: 'Nonogram',
+    description:
+      'Reveal a hidden pixel picture by filling cells that satisfy the row and column number clues. Drag to paint, X-mark the gaps, three sizes.',
+    icon: 'mdi-dots-grid',
+    to: '/nonogram',
+    gradient: 'linear-gradient(135deg, rgba(124, 58, 237, 0.4), rgba(15, 23, 42, 0.3))',
+  },
+  {
+    key: 'tango',
+    title: 'Tango',
+    description:
+      'Fill a 6×6 grid with Suns and Moons: balance every row and column, no three in a row, and honor the =/× links. Pure logic, always solvable.',
+    icon: 'mdi-weather-sunny',
+    to: '/tango',
+    gradient: 'linear-gradient(135deg, rgba(250, 204, 21, 0.34), rgba(129, 140, 248, 0.30))',
+  },
+  {
     key: 'flood-it',
     title: 'Flood It',
     description:
@@ -84,6 +165,15 @@ const games: GameCard[] = [
     gradient: 'linear-gradient(135deg, rgba(59, 130, 246, 0.35), rgba(34, 197, 94, 0.28))',
   },
   {
+    key: 'connect-4',
+    title: 'Connect 4',
+    description:
+      'Drop discs to line up four in a row against a negamax AI with alpha-beta pruning. Three difficulties and you choose who starts.',
+    icon: 'mdi-circle-multiple-outline',
+    to: '/connect-4',
+    gradient: 'linear-gradient(135deg, rgba(37, 99, 235, 0.4), rgba(234, 179, 8, 0.28))',
+  },
+  {
     key: 'wizard-chess',
     title: 'Wizard Chess',
     description:
@@ -91,6 +181,42 @@ const games: GameCard[] = [
     icon: 'mdi-chess-queen',
     to: '/wizard-chess',
     gradient: 'linear-gradient(135deg, rgba(142, 36, 170, 0.42), rgba(15, 23, 42, 0.35))',
+  },
+  {
+    key: 'count-blocks',
+    title: 'Count the Blocks',
+    description:
+      'Tetromino shapes stream past for a few seconds — then say how many there were (or how many of one shape). Each right answer levels you up.',
+    icon: 'mdi-counter',
+    to: '/count-blocks',
+    gradient: 'linear-gradient(135deg, rgba(168, 85, 247, 0.36), rgba(34, 211, 238, 0.28))',
+  },
+  {
+    key: 'color-memory',
+    title: 'Color from Memory',
+    description:
+      'A color flashes for a few seconds — then recreate it from memory with RGB sliders. Scored on how close it looks, not just the numbers.',
+    icon: 'mdi-palette-outline',
+    to: '/color-memory',
+    gradient: 'linear-gradient(135deg, hsl(330, 80%, 55%), hsl(190, 80%, 50%), hsl(50, 90%, 55%))',
+  },
+  {
+    key: 'mini-golf',
+    title: 'Mini Golf',
+    description:
+      'Nine seeded holes. Pull back to aim and set power, then putt — bank off the walls and sink it in as few strokes as you can.',
+    icon: 'mdi-golf',
+    to: '/mini-golf',
+    gradient: 'linear-gradient(135deg, rgba(22, 101, 52, 0.5), rgba(52, 211, 153, 0.3))',
+  },
+  {
+    key: 'nerdle',
+    title: 'Nerdle',
+    description:
+      'Wordle for math: guess the hidden 8-tile equation in six tries. Tiles reveal which digits and operators are right, and where.',
+    icon: 'mdi-calculator-variant-outline',
+    to: '/nerdle',
+    gradient: 'linear-gradient(135deg, rgba(34, 197, 94, 0.34), rgba(168, 85, 247, 0.30))',
   },
   {
     key: 'time-since',
