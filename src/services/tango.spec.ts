@@ -112,6 +112,17 @@ describe('generateTango', () => {
   })
 })
 
+describe('solver rejects inconsistent givens', () => {
+  it('returns 0 / null when givens already break a rule', () => {
+    const given: Grid = new Array(CELLS).fill(EMPTY)
+    given[0] = SUN
+    given[1] = SUN
+    given[2] = SUN // three-in-a-row among givens
+    expect(countSolutions(given, [], 2)).toBe(0)
+    expect(solve(given, [])).toBeNull()
+  })
+})
+
 describe('isSolved', () => {
   it('is true only for a full, valid grid', () => {
     const { solution, constraints } = generateTango('done')

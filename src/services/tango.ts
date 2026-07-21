@@ -112,6 +112,7 @@ const constraintMap = (constraints: Constraint[]): Map<string, 'eq' | 'opp'> => 
  * Fills cells in order, pruning with `violates`.
  */
 export function countSolutions(given: Grid, constraints: Constraint[], limit = 2): number {
+  if (findConflicts(given, constraints).size > 0) return 0 // givens already break a rule
   const map = constraintMap(constraints)
   const work = given.slice()
   let count = 0
@@ -142,6 +143,7 @@ export function countSolutions(given: Grid, constraints: Constraint[], limit = 2
 
 /** Solve givens+constraints; returns the completed grid or null. */
 export function solve(given: Grid, constraints: Constraint[]): Grid | null {
+  if (findConflicts(given, constraints).size > 0) return null // givens already break a rule
   const map = constraintMap(constraints)
   const work = given.slice()
   let result: Grid | null = null
