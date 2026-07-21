@@ -17,28 +17,23 @@ Each new game follows the same shape as the existing ones:
 _None outstanding from the first round — 2048, Tetris, Sudoku, Nonogram, Tango,
 Nerdle, Memory/Simon, and Connect 4 all shipped. New ideas below._
 
-## Arcade concepts to explore
+## Arcade concepts — all built ✅
 
-Fast, one-more-go arcade games (the kind that are satisfying to replay), sketched
-from games David enjoyed:
+These were David's own ideas from games he enjoyed. All six shipped:
 
-- **Ninja wall-jump** — climb upward between two walls, kicking side to side;
-  avoid spikes. A **long press jumps higher** than a tap. Endless vertical climb,
-  score = height.
-- **Ball bounce** — bounce a ball up a tower of ascending platforms; timing/aim
-  based, don't fall.
-- **Vertical tunnel flapper** — fly upward through a narrowing tunnel; tap the
-  **left or right side** to flap in that direction, no tap = fall. Avoid the
-  walls. (Flappy-Bird-like but vertical and two-sided.)
-- **Mini golf** — aim-and-power putting across a series of holes with obstacles;
-  par per hole, seedable courses.
-- **Color-from-memory** — shown a target color briefly, then recreate it from
-  memory with RGB/HSL sliders; scored by perceptual distance to the target.
-- **Count-the-blocks memory** — Tetris-like shapes slide across the screen; after
-  they pass, recall **how many** there were (or how many of a given type). Speed
-  and count ramp up.
+- **Ninja wall-jump** → **Ninja Climb** (`/ninja-climb`) — hold to charge, longer =
+  higher; spikes + rising lava.
+- **Ball bounce** → **Ball Bounce** (`/ball-bounce`) — doodle-jump auto-bouncer,
+  steer with screen wrap.
+- **Vertical tunnel flapper** → **Vertical Tunnel** (`/tunnel`) — tap left/right to
+  flap that way; narrowing course.
+- **Mini golf** → **Mini Golf** (`/mini-golf`) — 9 seeded holes, pull-back-to-putt.
+- **Color-from-memory** → **Color from Memory** (`/color-memory`) — recreate a
+  flashed color; perceptual scoring.
+- **Count-the-blocks memory** → **Count the Blocks** (`/count-blocks`) — tally the
+  shapes that streamed past; levels up.
 
-## Other candidates
+## Other candidates (not yet built)
 
 - **Connections** — sort 16 words into 4 hidden groups, auto-generated from the
   existing word lists so it never runs out.
@@ -51,3 +46,6 @@ from games David enjoyed:
 - **Nonogram** generation is random-fill (~55%), so puzzles can be ambiguous and
   aren't curated pictures. Improve with a real nonogram solver (for uniqueness)
   and/or a library of hand-designed picture bitmaps.
+- **Mini Golf** hole layouts are random walls with no solvability check, so a rare
+  combination could be very hard or effectively blocked (and there's no skip). Add
+  a pathfinding/solvability check or curated layouts.
