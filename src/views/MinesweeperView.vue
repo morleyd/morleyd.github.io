@@ -6,11 +6,9 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import GameToolbar from '@/components/GameToolbar.vue'
+import GameControls from '@/components/GameControls.vue'
 import { copyToClipboard } from '@/services/share'
 import { randomSeed, rngFromSeed } from '@/services/seed'
-import { useSquareFit } from '@/composables/useSquareFit'
-
-const { el: boardEl, px: boardPx } = useSquareFit(160)
 
 interface Cell {
   mine: boolean
@@ -203,18 +201,10 @@ onBeforeUnmount(stopTimer)
 </script>
 
 <template>
-  <v-container class="py-6" max-width="640">
+  <v-container class="py-6" max-width="960">
     <GameToolbar title="Minesweeper" shareable @share="share">
       <template #intro>
         Dig every cell that isn't a mine. Number clues tell you how many mines touch that cell.
-      </template>
-      <template #settings>
-        <div class="d-flex flex-column ga-4">
-          <v-btn-toggle :model-value="level" mandatory density="compact" variant="outlined" divided @update:model-value="changeLevel">
-            <v-btn v-for="l in ['Easy', 'Medium', 'Hard']" :key="l" :value="l" size="small">{{ l }}</v-btn>
-          </v-btn-toggle>
-          <v-btn variant="tonal" color="primary" prepend-icon="mdi-refresh" @click="newGame">New game</v-btn>
-        </div>
       </template>
       <template #info>
         <h3>Goal</h3>
@@ -237,40 +227,56 @@ onBeforeUnmount(stopTimer)
       </template>
     </GameToolbar>
 
-    <div class="d-flex align-center justify-space-between mb-3 ga-2">
-      <v-chip variant="tonal" prepend-icon="mdi-mine">{{ minesLeft }}</v-chip>
-      <v-btn :color="flagMode ? 'secondary' : undefined" :variant="flagMode ? 'flat' : 'tonal'" prepend-icon="mdi-flag" size="small" @click="flagMode = !flagMode">
-        Flag{{ flagMode ? ' on' : '' }}
-      </v-btn>
-      <v-chip variant="tonal" prepend-icon="mdi-timer-outline">{{ fmtTime(elapsed) }}</v-chip>
-    </div>
+    <div class="game-stage">
+      <div class="game-stage__board">
+        <div class="d-flex align-center justify-space-between mb-3 ga-2">
+          <v-chip variant="tonal" prepend-icon="mdi-mine">{{ minesLeft }}</v-chip>
+          <v-btn :color="flagMode ? 'secondary' : undefined" :variant="flagMode ? 'flat' : 'tonal'" prepend-icon="mdi-flag" size="small" @click="flagMode = !flagMode">
+            Flag{{ flagMode ? ' on' : '' }}
+          </v-btn>
+          <v-chip variant="tonal" prepend-icon="mdi-timer-outline">{{ fmtTime(elapsed) }}</v-chip>
+        </div>
 
-    <div ref="boardEl" class="board-wrap" :style="{ width: boardPx + 'px', height: boardPx + 'px' }">
-      <div class="board" :style="{ gridTemplateColumns: `repeat(${size}, 1fr)` }">
-        <button
-          v-for="(cell, i) in cells"
-          :key="i"
-          type="button"
-          class="cell"
-          :class="{ 'cell--revealed': cell.revealed, 'cell--mine': cell.revealed && cell.mine }"
-          @click="onCell(i)"
-          @contextmenu="onContext(i, $event)"
-        >
-          <template v-if="cell.flagged && !cell.revealed">🚩</template>
-          <template v-else-if="cell.revealed && cell.mine">💣</template>
-          <template v-else-if="cell.revealed && cell.adjacent > 0">
-            <span :style="{ color: numberColors[cell.adjacent] }">{{ cell.adjacent }}</span>
-          </template>
-        </button>
-      </div>
-      <div v-if="state === 'won' || state === 'lost'" class="overlay">
-        <p class="text-h5 mb-1">{{ state === 'won' ? 'Cleared! 🎉' : 'Boom 💥' }}</p>
-        <p v-if="state === 'won'" class="text-body-2 mb-3">Time {{ fmtTime(elapsed) }}</p>
-        <v-btn color="primary" variant="flat" prepend-icon="mdi-refresh" @click="newGame">New game</v-btn>
-      </div>
-    </div>
+        <div class="board-wrap game-board">
+          <div class="board" :style="{ gridTemplateColumns: `repeat(${size}, 1fr)` }">
+            <button
+              v-for="(cell, i) in cells"
+              :key="i"
+              type="button"
+              class="cell"
+              :class="{ 'cell--revealed': cell.revealed, 'cell--mine': cell.revealed && cell.mine }"
+              @click="onCell(i)"
+              @contextmenu="onContext(i, $event)"
+            >
+              <template v-if="cell.flagged && !cell.revealed">🚩</template>
+              <template v-else-if="cell.revealed && cell.mine">💣</template>
+              <template v-else-if="cell.revealed && cell.adjacent > 0">
+                <span :style="{ color: numberColors[cell.adjacent] }">{{ cell.adjacent }}</span>
+              </template>
+            </button>
+          </div>
+          <div v-if="state === 'won' || state === 'lost'" class="overlay">
+            <p class="text-h5 mb-1">{{ state === 'won' ? 'Cleared! 🎉' : 'Boom 💥' }}</p>
+            <p v-if="state === 'won'" class="text-body-2 mb-3">Time {{ fmtTime(elapsed) }}</p>
+            <v-btn color="primary" variant="flat" prepend-icon="mdi-refresh" @click="newGame">New game</v-btn>
+          </div>
+        </div>
 
-    <p class="text-caption text-medium-emphasis mt-3">Best ({{ level }}): {{ bestLabel }}</p>
+        <p class="text-caption text-medium-emphasis mt-3">Best ({{ level }}): {{ bestLabel }}</p>
+      </div>
+
+      <GameControls class="game-stage__controls" title="Settings">
+        <template #actions>
+          <v-btn color="primary" variant="flat" prepend-icon="mdi-refresh" @click="newGame">New game</v-btn>
+        </template>
+        <div>
+          <label class="text-caption text-medium-emphasis d-block mb-1">Difficulty</label>
+          <v-btn-toggle :model-value="level" mandatory density="compact" variant="outlined" divided @update:model-value="changeLevel">
+            <v-btn v-for="l in ['Easy', 'Medium', 'Hard']" :key="l" :value="l" size="small">{{ l }}</v-btn>
+          </v-btn-toggle>
+        </div>
+      </GameControls>
+    </div>
     <v-snackbar v-model="snackbar" :timeout="2600" color="secondary">Link copied — challenge a friend!</v-snackbar>
   </v-container>
 </template>

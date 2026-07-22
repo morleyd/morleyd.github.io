@@ -65,7 +65,7 @@ interface ChaosOffer {
 /** A lingering board marker after any stunt, so the player can read what just
  * happened where (the view renders it for several seconds). */
 export interface StuntFx {
-  kind: ChaosType | 'breakout' | 'coldfeet' | 'defect' | 'telegraph'
+  kind: ChaosType | 'breakout' | 'coldfeet' | 'defect' | 'telegraph' | 'reprimand'
   from: Square | null
   to: Square
   seq: number // bumps every new fx so the view can restart its linger timer
@@ -707,7 +707,7 @@ export class WizardGame {
       this.society.bySquare[cheat.to] = victim.id
       this.graveyard = this.graveyard.filter((id) => id !== victim.id)
     }
-    this.setFx('telegraph', from as Square, cheat.home)
+    this.setFx('reprimand', from as Square, cheat.home)
     this.logMove(`${cheat.home} (reprimanded)`, soul.color, true)
     this.lastFrom = from as Square
     this.lastTo = cheat.home
@@ -788,9 +788,14 @@ export class WizardGame {
     // the board). Makes the red state actually pay off.
     const soul = this.soulAt(from)
     if (soul && soul.vengefulUntil >= this.society.ply && !this.usedStunts.has('rage') && this.rng() < this.settings.chaos) {
+      // Only offer rage on a neighbour the piece CAN'T just take normally.
+      // Otherwise a tap the player meant as an ordinary capture gets hijacked into
+      // a rage-strike (which doesn't move the piece), leaving e.g. a pawn stranded
+      // in its own file. If it's a legal capture, let the normal move win.
+      const legalCaptures = new Set(this.chess.moves({ square: from, verbose: true }).map((m) => m.to as Square))
       const foes = adjacentSquares(from).filter((a) => {
         const p = this.chess.get(a)
-        return !!p && p.color !== PLAYER && p.type !== 'k'
+        return !!p && p.color !== PLAYER && p.type !== 'k' && !legalCaptures.has(a)
       })
       if (foes.length) return { type: 'rage', from, targets: foes }
     }
@@ -844,9 +849,13 @@ export class WizardGame {
         let pieceCount = 0
         for (const row of this.chess.board()) for (const cell of row) if (cell) pieceCount += 1
         const endgame = pieceCount <= 12
+        // "Exposed" must be a real, legible danger — the king is in check, or an
+        // enemy piece is right up against it. (The old test — ANY adjacent square
+        // merely attacked — is true through most of a game, so the rally kept
+        // being offered "any time"; a king huddle should be a rare, earned beat.)
         const exposed =
           this.chess.attackers(from, opponent(PLAYER)).length > 0 ||
-          adjacentSquares(from).some((a) => this.chess.attackers(a, opponent(PLAYER)).length > 0)
+          adjacentSquares(from).some((a) => this.chess.get(a)?.color === opponent(PLAYER))
         if (endgame || exposed) {
           const targets = adjacentSquares(from).filter(
             (to) => !this.chess.get(to) && !!entourageShift(new Chess(fen), from, to),
@@ -1180,8 +1189,13 @@ export class WizardGame {
       this.usedStunts.add('breakout')
       this.setFx('breakout', sq, choice.dest)
       this.logMove(`${choice.dest}${trample ? ' (breakout, trampled)' : ' (breakout)'}`, s.color, true)
-      // A wayward charger of YOURS can be ordered back to its post (the coax).
+      // A wayward charger of YOURS can be ordered back to its post (the coax); an
+      // ENEMY that jailbroke can be reprimanded back where it bolted from (same
+      // recourse as an enemy that got cold feet), so the player isn't powerless to
+      // undo the opponent's rule-break. The shoved pawn stays put — reprimand only
+      // marches the offender home — but the jailbreak itself is reversed.
       if (s.color === PLAYER) this.spooked = { soulId: s.id, home: sq, until: this.society.ply + 8, kind: 'wayward' }
+      else this.cheat = { soulId: s.id, home: sq, to: choice.dest, victimId: null, until: this.society.ply }
       return {
         soulId: s.id,
         square: choice.dest,
@@ -1235,6 +1249,11 @@ export class WizardGame {
    * turncoat stays identifiable even if it later promotes. */
   private defector(): Utterance | null {
     if (this.usedStunts.has('defector')) return null
+    // Never in the opening. Trust persists between games, so a fresh game can start
+    // below 33 purely on the last game's grudge — a pawn bolting on turn one reads
+    // as a glitch. Requiring the middlegame means the collapse must be earned THIS
+    // game (per-ply mean-reversion lifts an unmerited low back toward 50 by then).
+    if (this.society.ply < 16) return null
     if (this.trust >= 33) return null // morale must have genuinely bottomed out
     const pawns = Object.values(this.society.souls)
       .filter((s) => !s.captured && s.color === PLAYER && s.type === 'p' && s.square && (s.persona.obedience ?? 0.6) < 0.55)

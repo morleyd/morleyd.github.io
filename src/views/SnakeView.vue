@@ -6,10 +6,8 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import GameToolbar from '@/components/GameToolbar.vue'
+import GameControls from '@/components/GameControls.vue'
 import { copyToClipboard } from '@/services/share'
-import { useSquareFit } from '@/composables/useSquareFit'
-
-const { el: boardEl, px: boardPx } = useSquareFit(200)
 
 interface Cell {
   x: number
@@ -175,8 +173,12 @@ const onTouchEnd = (e: TouchEvent) => {
   touchStart = null
 }
 
-const changeSize = (v: number) => {
-  size.value = v
+// The slider binds to a draft and only rebuilds on release, so dragging doesn't
+// reset the board on every tick.
+const sizeDraft = ref(17)
+const commitSize = () => {
+  if (sizeDraft.value === size.value) return
+  size.value = sizeDraft.value
   reset()
 }
 const changeSpeed = (v: 'Slow' | 'Normal' | 'Fast') => {
@@ -207,7 +209,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <v-container class="py-6" max-width="620">
+  <v-container class="py-6" max-width="960">
     <GameToolbar title="Snake" shareable @share="share">
       <template #intro>
         Arrow keys / WASD, the d-pad, or swipe. Eat the food to grow — don't hit the walls or
@@ -233,75 +235,69 @@ onBeforeUnmount(() => {
           <li>Leave yourself an exit — don't coil into a dead end.</li>
         </ul>
       </template>
-      <template #settings>
-        <div class="d-flex align-center flex-wrap ga-6">
-          <div class="slider-wrap">
-            <label class="text-caption text-medium-emphasis">Board: {{ size }}×{{ size }}</label>
-            <v-slider
-              :model-value="size"
-              :min="10"
-              :max="24"
-              :step="1"
-              hide-details
-              density="compact"
-              @update:model-value="changeSize"
-            />
+    </GameToolbar>
+
+    <div class="game-stage">
+      <div class="game-stage__board">
+        <!-- Scoreboard -->
+        <div class="d-flex align-center justify-space-between mb-3">
+          <div class="text-h6">
+            Score: <span class="font-weight-bold">{{ score }}</span>
           </div>
-          <v-btn-toggle
-            :model-value="speedLabel"
-            mandatory
-            density="compact"
-            variant="outlined"
-            divided
-            @update:model-value="changeSpeed"
+          <div class="text-body-2 text-medium-emphasis">Best: {{ best }}</div>
+        </div>
+
+        <!-- Board -->
+        <div class="board-wrap game-board">
+          <div
+            class="board"
+            :style="{ gridTemplateColumns: `repeat(${size}, 1fr)` }"
+            @touchstart.passive="onTouchStart"
+            @touchend="onTouchEnd"
           >
+            <div v-for="i in size * size" :key="i" class="cell" :class="cellClass(i - 1)"></div>
+          </div>
+
+          <!-- Overlays -->
+          <div v-if="state !== 'running'" class="overlay">
+            <template v-if="state === 'idle'">
+              <p class="text-h6 mb-3">Ready?</p>
+              <v-btn color="primary" variant="flat" @click="start">Start</v-btn>
+            </template>
+            <template v-else>
+              <p class="text-h5 mb-1">Game over</p>
+              <p class="text-body-1 mb-3">
+                Score {{ score }}<span v-if="score === best && score > 0"> — new best!</span>
+              </p>
+              <v-btn color="primary" variant="flat" prepend-icon="mdi-restart" @click="start">Play again</v-btn>
+            </template>
+          </div>
+        </div>
+
+        <!-- On-screen d-pad -->
+        <div class="dpad mt-5">
+          <v-btn icon="mdi-chevron-up" variant="tonal" class="dpad--up" @click="setDir(0, -1)" />
+          <v-btn icon="mdi-chevron-left" variant="tonal" class="dpad--left" @click="setDir(-1, 0)" />
+          <v-btn icon="mdi-chevron-right" variant="tonal" class="dpad--right" @click="setDir(1, 0)" />
+          <v-btn icon="mdi-chevron-down" variant="tonal" class="dpad--down" @click="setDir(0, 1)" />
+        </div>
+      </div>
+
+      <GameControls class="game-stage__controls" title="Settings">
+        <template #actions>
+          <v-btn color="primary" variant="flat" prepend-icon="mdi-restart" @click="start">New game</v-btn>
+        </template>
+        <div class="slider-wrap">
+          <label class="text-caption text-medium-emphasis">Board: {{ sizeDraft }}×{{ sizeDraft }}</label>
+          <v-slider v-model="sizeDraft" :min="10" :max="24" :step="1" hide-details density="compact" @end="commitSize" />
+        </div>
+        <div>
+          <label class="text-caption text-medium-emphasis d-block mb-1">Speed</label>
+          <v-btn-toggle :model-value="speedLabel" mandatory density="compact" variant="outlined" divided @update:model-value="changeSpeed">
             <v-btn v-for="s in ['Slow', 'Normal', 'Fast']" :key="s" :value="s" size="small">{{ s }}</v-btn>
           </v-btn-toggle>
         </div>
-      </template>
-    </GameToolbar>
-
-    <!-- Scoreboard -->
-    <div class="d-flex align-center justify-space-between mb-3">
-      <div class="text-h6">
-        Score: <span class="font-weight-bold">{{ score }}</span>
-      </div>
-      <div class="text-body-2 text-medium-emphasis">Best: {{ best }}</div>
-    </div>
-
-    <!-- Board -->
-    <div ref="boardEl" class="board-wrap" :style="{ width: boardPx + 'px', height: boardPx + 'px' }">
-      <div
-        class="board"
-        :style="{ gridTemplateColumns: `repeat(${size}, 1fr)` }"
-        @touchstart.passive="onTouchStart"
-        @touchend="onTouchEnd"
-      >
-        <div v-for="i in size * size" :key="i" class="cell" :class="cellClass(i - 1)"></div>
-      </div>
-
-      <!-- Overlays -->
-      <div v-if="state !== 'running'" class="overlay">
-        <template v-if="state === 'idle'">
-          <p class="text-h6 mb-3">Ready?</p>
-          <v-btn color="primary" variant="flat" @click="start">Start</v-btn>
-        </template>
-        <template v-else>
-          <p class="text-h5 mb-1">Game over</p>
-          <p class="text-body-1 mb-3">
-            Score {{ score }}<span v-if="score === best && score > 0"> — new best!</span>
-          </p>
-          <v-btn color="primary" variant="flat" prepend-icon="mdi-restart" @click="start">Play again</v-btn>
-        </template>
-      </div>
-    </div>
-
-    <!-- On-screen d-pad -->
-    <div class="dpad mt-5">
-      <v-btn icon="mdi-chevron-up" variant="tonal" class="dpad--up" @click="setDir(0, -1)" />
-      <v-btn icon="mdi-chevron-left" variant="tonal" class="dpad--left" @click="setDir(-1, 0)" />
-      <v-btn icon="mdi-chevron-right" variant="tonal" class="dpad--right" @click="setDir(1, 0)" />
-      <v-btn icon="mdi-chevron-down" variant="tonal" class="dpad--down" @click="setDir(0, 1)" />
+      </GameControls>
     </div>
     <v-snackbar v-model="snackbar" :timeout="2600" color="secondary">Score copied — challenge a friend!</v-snackbar>
   </v-container>
@@ -310,7 +306,6 @@ onBeforeUnmount(() => {
 <style scoped>
 .slider-wrap {
   min-width: 200px;
-  flex: 1 1 200px;
 }
 
 .board-wrap {

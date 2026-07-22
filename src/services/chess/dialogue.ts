@@ -323,10 +323,18 @@ export function speak(
     if (pool.length === 0) continue
 
     const ctx = contextFor(event, society)
+    // A "{target}" is a direct call-out to a specific opponent, and only reads
+    // right with a real name ("Checkmate, Gertrude."). With no named target it
+    // would fill to "the enemy" and address the whole army as if it were a person
+    // ("Checkmate, the enemy!") — dumb. So when unnamed, drop the vocative lines
+    // and speak without one. ("the enemy" stays fine as description elsewhere.)
+    const hasTarget = !!(event.otherId && society.souls[event.otherId])
+    const usable = hasTarget ? pool : pool.filter((t) => !t.includes('{target}'))
+    const speakPool = usable.length ? usable : pool
     let text = ''
     let template = ''
     for (let attempt = 0; attempt < 4; attempt += 1) {
-      template = pick(pool, rng)
+      template = pick(speakPool, rng)
       text = fill(template, ctx) // fall back to a repeat rather than staying silent
       if (!state.recent.includes(text) && !state.recentTemplates.includes(template)) break
     }

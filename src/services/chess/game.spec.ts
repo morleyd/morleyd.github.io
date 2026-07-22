@@ -217,23 +217,44 @@ describe('WizardGame interaction', () => {
   })
 
   it('lets a vengeful piece rage-strike an adjacent enemy off the board', () => {
+    // Diagonal-adjacent enemy the rook CANNOT legally capture — rage-strike is
+    // reserved for exactly this (a neighbour you can't just take normally), so it
+    // never hijacks an ordinary capture.
     const g = new WizardGame('rage')
-    g.reset('rage', '4k3/8/8/3p4/3R4/8/8/4K3 w - - 0 1') // white rook d4, black pawn d5
+    g.reset('rage', '4k3/8/8/4p3/3R4/8/8/4K3 w - - 0 1') // white rook d4, black pawn e5 (diagonal)
     g.settings.chaos = 1
     const rook = g.soulAt('d4')!
     rook.vengefulUntil = 10 // still within its vengeful window (ply 0)
 
     g.playerTap('d4')
     expect(g.chaosOfferType()).toBe('rage')
-    expect(g.chaosTargets()).toContain('d5')
+    expect(g.chaosTargets()).toContain('e5')
 
-    const strike = g.playerTap('d5')
+    const strike = g.playerTap('e5')
     expect(strike.moved).toBe(true)
-    expect(g.chess.get('d5')).toBeFalsy() // the pawn is gone
+    expect(g.chess.get('e5')).toBeFalsy() // the pawn is gone
     expect(g.chess.get('d4')?.type).toBe('r') // the rook stayed put
     expect(g.turn).toBe('b') // the strike was the turn
     expect(rook.vengefulUntil).toBe(-1) // rage spent
     expect(g.fallen().some((f) => f.type === 'p')).toBe(true) // the victim is in the box
+  })
+
+  it('never hijacks a normal capture with a rage-strike', () => {
+    // Rook d4, black pawn d5 — a legal capture. A vengeful rook must NOT be
+    // offered rage there; tapping d5 should take the pawn the ordinary way (rook
+    // ends on d5), not strike it off while staying put in the wrong square.
+    const g = new WizardGame('rage-capture')
+    g.reset('rage-capture', '4k3/8/8/3p4/3R4/8/8/4K3 w - - 0 1')
+    g.settings.chaos = 1
+    g.soulAt('d4')!.vengefulUntil = 10
+
+    g.playerTap('d4')
+    expect(g.chaosTargets()).not.toContain('d5') // rage not offered on a capturable foe
+
+    const res = g.playerTap('d5')
+    expect(res.moved).toBe(true)
+    expect(g.chess.get('d5')?.type).toBe('r') // the rook actually moved onto d5
+    expect(g.chess.get('d4')).toBeFalsy()
   })
 
   // A middlegame board: rook boxed at a1, but the side is deployed (Bc4, Nf4).

@@ -31,13 +31,38 @@
 
 /* A square game board that always fits within the viewport (never off-screen).
    Each game sets --board-fit to leave room for its own controls. */
-/* Sized to the smaller of the container width and the *visible* viewport height
-   (dvh, so it's correct on mobile where the address bar shrinks the viewport). */
+/* Sized to the smaller of the column width and the *stable* viewport height.
+   svh (small viewport height) is used, not vh/dvh: those grow and shrink as the
+   mobile address bar hides/shows on scroll, which made the whole board twitch. */
 .game-board {
   width: 100%;
-  max-width: min(100%, var(--board-fit, 70dvh));
+  max-width: min(100%, var(--board-fit, 74svh));
+  aspect-ratio: 1 / 1;
   margin-left: auto;
   margin-right: auto;
+}
+
+/* Shared responsive layout for a grid game: the square board and its controls
+   sit side by side on a wide screen (using the horizontal room a square board
+   leaves), and the controls wrap underneath on a narrow/tall screen (using the
+   vertical room) — so the settings are always visible, never hidden in a menu
+   while the page sits half-empty. */
+.game-stage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  align-items: flex-start;
+  justify-content: center;
+}
+.game-stage__board {
+  flex: 1 1 360px;
+  min-width: 0; /* allow shrinking below intrinsic size on very narrow screens */
+  max-width: 560px;
+}
+.game-stage__controls {
+  flex: 1 1 260px;
+  min-width: 240px;
+  max-width: 360px;
 }
 
 /* Shared styling for the in-game info dialogs */

@@ -7,11 +7,9 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import GameToolbar from '@/components/GameToolbar.vue'
+import GameControls from '@/components/GameControls.vue'
 import { copyToClipboard } from '@/services/share'
 import { randomSeed, rngFromSeed } from '@/services/seed'
-import { useSquareFit } from '@/composables/useSquareFit'
-
-const { el: boardEl, px: boardPx } = useSquareFit(140)
 
 type RGB = [number, number, number]
 interface Palette {
@@ -29,8 +27,14 @@ const palettes: Palette[] = [
 const route = useRoute()
 const router = useRouter()
 
+// The board is always square (N×N) — one size control, not separate row/column
+// sliders. rows and cols are kept equal so the gradient math below is unchanged.
 const rows = ref(4)
 const cols = ref(4)
+// Draft value the size slider binds to while dragging. Rebuilding the board on
+// every drag tick fought the thumb (it "jumped back"); instead we track the
+// draft live and only rebuild when the drag ends.
+const sizeDraft = ref(4)
 const code = ref('')
 const order = ref<number[]>([])
 const moves = ref(0)
@@ -38,6 +42,9 @@ const optimal = ref(0)
 const selected = ref(-1)
 const palette = ref<Palette>(palettes[0])
 const snackbar = ref(false)
+const hintPos = ref(-1)
+const hintsUsed = ref(0)
+let hintTimer: ReturnType<typeof setTimeout> | null = null
 
 const size = computed(() => rows.value * cols.value)
 const cornerSet = computed(
@@ -112,22 +119,39 @@ const build = () => {
 const syncUrl = () => {
   router.replace({ name: 'gradient-sort', params: { seed: `${rows.value}.${cols.value}.${code.value}` } })
 }
+const clearHint = () => {
+  hintPos.value = -1
+  if (hintTimer) clearTimeout(hintTimer)
+  hintTimer = null
+}
 const newGame = () => {
   code.value = randomSeed()
+  clearHint()
+  hintsUsed.value = 0
   syncUrl()
   build()
 }
-const setRows = (v: number) => {
-  rows.value = v
+// Applied when the size slider is released: only rebuild if the size actually
+// changed, so mid-drag ticks never rebuild (which made the thumb jump back).
+const commitSize = () => {
+  if (sizeDraft.value === rows.value) return
+  rows.value = sizeDraft.value
+  cols.value = sizeDraft.value
   newGame()
 }
-const setCols = (v: number) => {
-  cols.value = v
-  newGame()
+// Glow one tile that's out of place, for a few seconds, to unstick the player.
+const showHint = () => {
+  const misplaced = order.value.findIndex((home, pos) => home !== pos && !isCorner(pos))
+  if (misplaced < 0) return
+  hintsUsed.value += 1
+  hintPos.value = misplaced
+  if (hintTimer) clearTimeout(hintTimer)
+  hintTimer = setTimeout(() => (hintPos.value = -1), 2600)
 }
 
 const swap = (i: number, j: number) => {
   if (i === j || i < 0 || j < 0 || solved.value || isCorner(i) || isCorner(j)) return
+  clearHint()
   const arr = order.value.slice()
   ;[arr[i], arr[j]] = [arr[j], arr[i]]
   order.value = arr
@@ -183,35 +207,26 @@ onMounted(() => {
   const p = typeof route.params.seed === 'string' ? route.params.seed : ''
   const m = /^(\d+)\.(\d+)\.(.+)$/.exec(p)
   if (m) {
-    rows.value = Math.min(8, Math.max(3, +m[1]))
-    cols.value = Math.min(8, Math.max(3, +m[2]))
+    // Force square even if an old link carried differing dimensions.
+    const n = Math.min(8, Math.max(3, +m[1]))
+    rows.value = n
+    cols.value = n
     code.value = m[3]
     build()
   } else {
     newGame()
   }
+  sizeDraft.value = rows.value
 })
+onBeforeUnmount(clearHint)
 </script>
 
 <template>
-  <v-container class="py-6" max-width="720">
+  <v-container class="py-6" max-width="960">
     <GameToolbar title="Gradient Sort" shareable @share="share">
       <template #intro>
         Every tile is a step in a smooth gradient. The four corners are locked anchors — drag (or tap
         two) to swap the rest back into order.
-      </template>
-      <template #settings>
-        <div class="d-flex align-center flex-wrap ga-6">
-          <div class="slider-wrap">
-            <label class="text-caption text-medium-emphasis">Rows: {{ rows }}</label>
-            <v-slider :model-value="rows" :min="3" :max="8" :step="1" hide-details density="compact" thumb-label @update:model-value="setRows" />
-          </div>
-          <div class="slider-wrap">
-            <label class="text-caption text-medium-emphasis">Columns: {{ cols }}</label>
-            <v-slider :model-value="cols" :min="3" :max="8" :step="1" hide-details density="compact" thumb-label @update:model-value="setCols" />
-          </div>
-          <v-btn variant="tonal" color="primary" prepend-icon="mdi-shuffle-variant" @click="newGame">New game</v-btn>
-        </div>
       </template>
       <template #info>
         <h3>Goal</h3>
@@ -231,32 +246,47 @@ onMounted(() => {
       </template>
     </GameToolbar>
 
-    <div class="d-flex align-center justify-space-between mb-3">
-      <div class="text-h6">
-        Moves: <span class="font-weight-bold">{{ moves }}</span>
-        <span class="text-medium-emphasis"> / {{ optimal }} optimal</span>
-      </div>
-      <v-chip v-if="solved" :color="moves === optimal ? 'success' : 'primary'" variant="flat">
-        <v-icon start icon="mdi-check-circle-outline" />
-        {{ moves === optimal ? 'Perfect!' : 'Solved!' }}
-      </v-chip>
-    </div>
+    <div class="game-stage">
+      <div class="game-stage__board">
+        <div class="d-flex align-center justify-space-between mb-3">
+          <div class="text-h6">
+            Moves: <span class="font-weight-bold">{{ moves }}</span>
+            <span class="text-medium-emphasis"> / {{ optimal }} optimal</span>
+            <span v-if="hintsUsed" class="text-medium-emphasis"> · {{ hintsUsed }} hint{{ hintsUsed === 1 ? '' : 's' }}</span>
+          </div>
+          <v-chip v-if="solved" :color="moves === optimal && !hintsUsed ? 'success' : 'primary'" variant="flat">
+            <v-icon start icon="mdi-check-circle-outline" />
+            {{ moves === optimal && !hintsUsed ? 'Perfect!' : 'Solved!' }}
+          </v-chip>
+        </div>
 
-    <div
-      ref="boardEl"
-      class="sort-grid"
-      :class="{ 'sort-grid--solved': solved }"
-      :style="{ gridTemplateColumns: `repeat(${cols}, 1fr)`, width: boardPx + 'px', height: boardPx + 'px' }"
-    >
-      <div
-        v-for="(home, pos) in order"
-        :key="pos"
-        class="sort-block"
-        :class="{ 'sort-block--selected': selected === pos, 'sort-block--fixed': isCorner(pos) }"
-        :style="{ background: colorFor(home) }"
-        :data-index="pos"
-        @pointerdown="onDown(pos)"
-      ></div>
+        <div
+          class="sort-grid game-board"
+          :class="{ 'sort-grid--solved': solved }"
+          :style="{ gridTemplateColumns: `repeat(${cols}, 1fr)` }"
+        >
+          <div
+            v-for="(home, pos) in order"
+            :key="pos"
+            class="sort-block"
+            :class="{ 'sort-block--selected': selected === pos, 'sort-block--fixed': isCorner(pos), 'sort-block--hint': hintPos === pos }"
+            :style="{ background: colorFor(home) }"
+            :data-index="pos"
+            @pointerdown="onDown(pos)"
+          ></div>
+        </div>
+      </div>
+
+      <GameControls class="game-stage__controls" title="Settings">
+        <template #actions>
+          <v-btn color="primary" variant="flat" prepend-icon="mdi-shuffle-variant" @click="newGame">New game</v-btn>
+          <v-btn color="secondary" variant="tonal" prepend-icon="mdi-lightbulb-on-outline" :disabled="solved" @click="showHint">Hint</v-btn>
+        </template>
+        <div class="slider-wrap">
+          <label class="text-caption text-medium-emphasis">Size: {{ sizeDraft }}×{{ sizeDraft }}</label>
+          <v-slider v-model="sizeDraft" :min="3" :max="8" :step="1" hide-details density="compact" @end="commitSize" />
+        </div>
+      </GameControls>
     </div>
 
     <v-snackbar v-model="snackbar" :timeout="2600" color="secondary">Link copied — share it with friends!</v-snackbar>
@@ -269,11 +299,14 @@ onMounted(() => {
 }
 .sort-grid {
   display: grid;
+  grid-auto-rows: 1fr; /* equal-height rows within the square board */
   gap: 8px;
   padding: 10px;
   border-radius: 14px;
   background: rgba(15, 23, 42, 0.5);
   transition: box-shadow 0.3s ease;
+  /* No double-tap-to-zoom on the board (tiles are tapped to swap). */
+  touch-action: manipulation;
 }
 .sort-grid--solved {
   box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.6), 0 0 32px rgba(34, 197, 94, 0.35);
@@ -296,5 +329,25 @@ onMounted(() => {
 }
 .sort-block--fixed {
   cursor: default;
+}
+/* Hint: pulse a tile that's out of place. */
+.sort-block--hint {
+  animation: hintGlow 0.85s ease-in-out infinite;
+  z-index: 3;
+}
+@keyframes hintGlow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.9), 0 0 10px 2px rgba(255, 255, 255, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.95), 0 0 22px 6px rgba(255, 255, 255, 0.7);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sort-block--hint {
+    animation: none;
+    box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.95), 0 0 22px 6px rgba(255, 255, 255, 0.7);
+  }
 }
 </style>
