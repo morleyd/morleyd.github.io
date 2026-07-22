@@ -268,12 +268,17 @@ const pointerPos = (e: PointerEvent) => {
   return { x: e.clientX - rect.left, y: e.clientY - rect.top }
 }
 
+// The one pointer that owns the current drag; other pointers (a second finger on
+// a touchscreen) are ignored so they can't hijack the aim or fire a stray shot.
+let activePointerId: number | null = null
+
 // While dragging, track the pointer on the window so aim + power keep updating
 // (and the putt still registers) even when the pointer leaves the play area.
 const detachDrag = () => {
   window.removeEventListener('pointermove', onPointerMove)
   window.removeEventListener('pointerup', onPointerUp)
   window.removeEventListener('pointercancel', onPointerUp)
+  activePointerId = null
 }
 
 const onPointerDown = (e: PointerEvent) => {
@@ -281,7 +286,9 @@ const onPointerDown = (e: PointerEvent) => {
   // during the aim (physics never pauses); on release the shot redirects it from
   // wherever it is. `aiming` only controls the aim overlay + drag capture.
   if (phase.value !== 'aim' && phase.value !== 'rolling') return
+  if (aiming) return // already dragging with another pointer — ignore extra touches
   aiming = true
+  activePointerId = e.pointerId
   dragStart = pointerPos(e)
   dragCur = { ...dragStart }
   window.addEventListener('pointermove', onPointerMove)
@@ -289,12 +296,12 @@ const onPointerDown = (e: PointerEvent) => {
   window.addEventListener('pointercancel', onPointerUp)
 }
 function onPointerMove(e: PointerEvent) {
-  if (!aiming) return
+  if (!aiming || e.pointerId !== activePointerId) return
   dragCur = pointerPos(e)
   draw()
 }
-function onPointerUp() {
-  if (!aiming) return
+function onPointerUp(e: PointerEvent) {
+  if (!aiming || e.pointerId !== activePointerId) return
   aiming = false
   detachDrag()
   const putt = planPutt(

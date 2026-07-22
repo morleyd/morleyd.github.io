@@ -236,11 +236,9 @@ onBeforeUnmount(stopLoop)
     <div ref="boardEl" class="stage" :style="{ width: boardPx + 'px', height: boardPx + 'px' }">
       <canvas ref="canvasEl" class="canvas" :style="{ width: boardPx + 'px', height: boardPx + 'px' }" />
 
-      <template v-if="phase === 'watch'">
-        <div class="timer">
-          <div class="timer-fill" :style="{ width: progress + '%' }" />
-        </div>
-      </template>
+      <div v-if="phase === 'watch'" class="timer">
+        <div class="timer-fill" :style="{ width: progress + '%' }" />
+      </div>
 
       <div v-else class="overlay">
         <template v-if="phase === 'answer'">

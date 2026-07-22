@@ -7,6 +7,7 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import GameToolbar from '@/components/GameToolbar.vue'
+import { useViewportFit } from '@/composables/useViewportFit'
 import { copyToClipboard } from '@/services/share'
 import {
   BALL_RADIUS,
@@ -22,36 +23,12 @@ import {
 } from '@/services/ballBounce'
 
 // The play area is a vertical column: as TALL as the visible viewport allows and
-// proportionally wide. We size it directly (rather than the square-fit helper)
-// so desktop gets a big column instead of a tiny sliver, while mobile still fills
-// the width. COLUMN_ASPECT is width / height; RESERVE_BOTTOM is space kept for the
-// page's bottom padding/footer beneath the board.
+// proportionally wide, so desktop gets a big column instead of a tiny sliver
+// while mobile still fills the width. COLUMN_ASPECT is width / height;
+// RESERVE_BOTTOM is space kept for the page's bottom padding/footer.
 const COLUMN_ASPECT = 0.72
 const RESERVE_BOTTOM = 28
-const boardEl = ref<HTMLElement | null>(null)
-const displayH = ref(420)
-const displayW = ref(Math.round(420 * COLUMN_ASPECT))
-
-const recomputeSize = () => {
-  const node = boardEl.value
-  const parent = node?.parentElement
-  if (!node || !parent) return
-  const cs = getComputedStyle(parent)
-  const availW = parent.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
-  const top = node.getBoundingClientRect().top
-  // Smallest of every viewport-height signal — mobile browsers disagree on which
-  // reports the visible area, so the min is safest (matches useSquareFit).
-  const viewportH = Math.min(
-    window.visualViewport?.height ?? Infinity,
-    window.innerHeight || Infinity,
-    document.documentElement.clientHeight || Infinity,
-  )
-  const availH = viewportH - top - RESERVE_BOTTOM
-  // Fill the height, but never let the proportional width overflow the container.
-  const h = Math.max(200, Math.floor(Math.min(availH, availW / COLUMN_ASPECT)))
-  displayH.value = h
-  displayW.value = Math.floor(h * COLUMN_ASPECT)
-}
+const { el: boardEl, w: displayW, h: displayH } = useViewportFit(COLUMN_ASPECT, RESERVE_BOTTOM)
 
 const BEST_KEY = 'ballbounce-best'
 const UNITS_VISIBLE = 7 // keeps at most ~5 shelves on screen at the tightest spacing
@@ -262,8 +239,6 @@ watch([displayW, displayH], () => {
   if (state.value !== 'running') draw()
 })
 
-const onResize = () => recomputeSize()
-
 onMounted(() => {
   try {
     best.value = Number(localStorage.getItem(BEST_KEY)) || 0
@@ -271,23 +246,12 @@ onMounted(() => {
     best.value = 0
   }
   reset()
-  recomputeSize()
-  // Re-measure after layout/fonts settle and the mobile address bar animates.
-  requestAnimationFrame(recomputeSize)
-  setTimeout(recomputeSize, 150)
-  setTimeout(recomputeSize, 500)
   draw()
-  window.addEventListener('resize', onResize)
-  window.addEventListener('orientationchange', onResize)
-  window.visualViewport?.addEventListener('resize', onResize)
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
 })
 onBeforeUnmount(() => {
   cancelAnimationFrame(raf)
-  window.removeEventListener('resize', onResize)
-  window.removeEventListener('orientationchange', onResize)
-  window.visualViewport?.removeEventListener('resize', onResize)
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
 })

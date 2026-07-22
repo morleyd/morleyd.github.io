@@ -4,7 +4,7 @@
  * to find all the matching pairs in as few moves as possible.
  * Logic (deck build, match rule, stars) lives in services/memory.
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import GameToolbar from '@/components/GameToolbar.vue'
 import {
   DIFFICULTIES,
@@ -81,6 +81,7 @@ const setDifficulty = (d: Difficulty) => {
 }
 
 onMounted(buildMatch)
+onBeforeUnmount(clearTimers)
 </script>
 
 <template>

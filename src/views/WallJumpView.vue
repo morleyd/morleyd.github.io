@@ -7,6 +7,7 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import GameToolbar from '@/components/GameToolbar.vue'
+import { useViewportFit } from '@/composables/useViewportFit'
 import {
   GRAVITY,
   MAX_JUMP_VY,
@@ -28,34 +29,8 @@ import {
 // available space — so it fills the height on desktop and the width on phones,
 // which the square-fit helper can't do for a tall shaft.
 const ASPECT = 0.64 // width / height of the shaft
-const boardEl = ref<HTMLElement | null>(null)
-const displayW = ref(300)
-const displayH = ref(480)
-
-const fit = () => {
-  const node = boardEl.value
-  if (!node) return
-  const parent = node.parentElement
-  if (!parent) return
-  const cs = getComputedStyle(parent)
-  const availW = parent.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
-  const top = node.getBoundingClientRect().top
-  // Smallest of every viewport-height signal is safest across mobile browsers.
-  const viewportH = Math.min(
-    window.visualViewport?.height ?? Infinity,
-    window.innerHeight || Infinity,
-    document.documentElement.clientHeight || Infinity,
-  )
-  const availH = Math.max(360, viewportH - top - 24)
-  let w = Math.min(availW, availH * ASPECT)
-  let h = w / ASPECT
-  if (h > availH) {
-    h = availH
-    w = h * ASPECT
-  }
-  displayW.value = Math.max(240, Math.floor(w))
-  displayH.value = Math.max(360, Math.floor(h))
-}
+const RESERVE_BOTTOM = 24
+const { el: boardEl, w: displayW, h: displayH } = useViewportFit(ASPECT, RESERVE_BOTTOM)
 
 const BEST_KEY = 'walljump-best'
 const WALL_THICK = 0.1 // fraction of width
@@ -417,8 +392,18 @@ const releaseCharge = () => {
   }
 }
 
+// Abort a charge without jumping — the pointer left the canvas, a system gesture
+// cancelled it, or the window lost focus — so the meter can't be left oscillating
+// with nothing held down.
+const cancelCharge = () => {
+  if (!charging) return
+  charging = false
+  chargeMs.value = 0
+}
+
 const onPointerDown = () => beginCharge()
 const onPointerUp = () => releaseCharge()
+const onBlur = () => cancelCharge()
 
 const onKeyDown = (e: KeyboardEvent) => {
   if (e.key === ' ' && !e.repeat) {
@@ -437,10 +422,6 @@ watch([displayW, displayH], () => {
   if (state.value !== 'running') draw()
 })
 
-const onResize = () => fit()
-const onOrient = () => setTimeout(fit, 300)
-const vv = window.visualViewport
-
 onMounted(() => {
   try {
     best.value = Number(localStorage.getItem(BEST_KEY)) || 0
@@ -448,29 +429,16 @@ onMounted(() => {
     best.value = 0
   }
   reset()
-  fit()
-  // Re-measure after layout/fonts settle and the mobile address bar animates.
-  requestAnimationFrame(fit)
-  setTimeout(fit, 150)
-  setTimeout(fit, 500)
   draw()
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
-  window.addEventListener('resize', onResize)
-  window.addEventListener('orientationchange', onResize)
-  window.addEventListener('orientationchange', onOrient)
-  vv?.addEventListener('resize', onResize)
-  vv?.addEventListener('scroll', onResize)
+  window.addEventListener('blur', onBlur)
 })
 onBeforeUnmount(() => {
   cancelAnimationFrame(raf)
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
-  window.removeEventListener('resize', onResize)
-  window.removeEventListener('orientationchange', onResize)
-  window.removeEventListener('orientationchange', onOrient)
-  vv?.removeEventListener('resize', onResize)
-  vv?.removeEventListener('scroll', onResize)
+  window.removeEventListener('blur', onBlur)
 })
 </script>
 
@@ -510,6 +478,8 @@ onBeforeUnmount(() => {
         :style="{ width: displayW + 'px', height: displayH + 'px' }"
         @pointerdown.prevent="onPointerDown"
         @pointerup.prevent="onPointerUp"
+        @pointercancel.prevent="cancelCharge"
+        @pointerleave="cancelCharge"
       />
       <div v-if="state !== 'running'" class="overlay">
         <template v-if="state === 'idle'">

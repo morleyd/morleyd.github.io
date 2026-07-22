@@ -6,6 +6,7 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import GameToolbar from '@/components/GameToolbar.vue'
+import { useViewportFit } from '@/composables/useViewportFit'
 import {
   AI,
   COLS,
@@ -24,37 +25,15 @@ import {
 } from '@/services/connect4'
 
 // The board is a 7×6 (wider-than-tall) rectangle, so a plain square fit would
-// waste vertical space. Size it to the largest COLS:ROWS box that fits the live
-// viewport — filling most of the height on desktop while staying width-bound on
-// mobile. Space measured live above; RESERVE_BOTTOM covers the footer + padding.
+// waste vertical space. Fit the largest COLS:ROWS box into the live viewport —
+// filling most of the height on desktop while staying width-bound on mobile.
+// RESERVE_BOTTOM covers the footer + padding below the board.
 const RESERVE_BOTTOM = 84
-const boardEl = ref<HTMLElement | null>(null)
-const boardW = ref(320)
-const boardH = ref(Math.round((320 * ROWS) / COLS))
-
-const recompute = () => {
-  const node = boardEl.value
-  const parent = node?.parentElement
-  if (!node || !parent) return
-  const cs = getComputedStyle(parent)
-  const availW = parent.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
-  const top = node.getBoundingClientRect().top
-  // Smallest of every viewport-height signal — mobile browsers disagree on which
-  // reports the visible area, so the min is safest.
-  const viewportH = Math.min(
-    window.visualViewport?.height ?? Infinity,
-    window.innerHeight || Infinity,
-    document.documentElement.clientHeight || Infinity,
-  )
-  const availH = viewportH - top - RESERVE_BOTTOM
-  const scale = Math.max(28, Math.min(availW / COLS, availH / ROWS))
-  boardW.value = Math.floor(scale * COLS)
-  boardH.value = Math.floor(scale * ROWS)
-}
-
-const onResize = () => recompute()
-const onOrient = () => setTimeout(recompute, 300)
-const vv = typeof window !== 'undefined' ? window.visualViewport : null
+const { el: boardEl, w } = useViewportFit(COLS / ROWS, RESERVE_BOTTOM)
+// Square cells derived from the fitted width; the board is exactly COLS×ROWS cells.
+const cell = computed(() => w.value / COLS)
+const boardW = computed(() => Math.round(cell.value * COLS))
+const boardH = computed(() => Math.round(cell.value * ROWS))
 
 const LEVELS: Level[] = ['easy', 'medium', 'hard']
 
@@ -149,24 +128,9 @@ const statusText = computed(() => {
 
 onMounted(() => {
   newGame()
-  recompute()
-  // Re-measure after layout/fonts settle and after the address bar animates.
-  requestAnimationFrame(recompute)
-  setTimeout(recompute, 150)
-  setTimeout(recompute, 500)
-  window.addEventListener('resize', onResize)
-  window.addEventListener('orientationchange', onResize)
-  window.addEventListener('orientationchange', onOrient)
-  vv?.addEventListener('resize', onResize)
-  vv?.addEventListener('scroll', onResize)
 })
 onBeforeUnmount(() => {
   clearAiTimer()
-  window.removeEventListener('resize', onResize)
-  window.removeEventListener('orientationchange', onResize)
-  window.removeEventListener('orientationchange', onOrient)
-  vv?.removeEventListener('resize', onResize)
-  vv?.removeEventListener('scroll', onResize)
 })
 </script>
 

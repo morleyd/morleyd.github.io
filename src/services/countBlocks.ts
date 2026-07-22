@@ -12,7 +12,7 @@
  * a shorter reveal. Generation is pure and testable.
  */
 
-import { mulberry32 } from './seed'
+import { mulberry32, strToSeed } from './seed'
 
 /** How the pattern is presented: a static flash, or a sliding stream. */
 export type CountMode = 'normal' | 'hard'
@@ -84,7 +84,7 @@ const neighbors = (x: number, y: number): Array<[number, number]> => [
  * cohesive pattern rather than a scatter of separate pieces.
  */
 export function makeRound(level: number, seed: string, mode: CountMode = 'normal'): Round {
-  const rng = mulberry32((hash(seed) + level * 2654435761) >>> 0)
+  const rng = mulberry32((strToSeed(seed) + level * 2654435761) >>> 0)
   const count = countForLevel(level)
   const size = gridSizeForCount(count)
   const cols = size
@@ -134,13 +134,4 @@ export function makeRound(level: number, seed: string, mode: CountMode = 'normal
 /** The correct answer for a round: the number of blocks the player can see. */
 export function correctAnswer(round: Round): number {
   return round.blockCount
-}
-
-function hash(str: string): number {
-  let h = 2166136261
-  for (let i = 0; i < str.length; i += 1) {
-    h ^= str.charCodeAt(i)
-    h = Math.imul(h, 16777619)
-  }
-  return h >>> 0
 }

@@ -191,6 +191,18 @@ const applyClear = (n: number) => {
   }
 }
 
+// Finish a pending line-clear right now: collapse the flashed rows and spawn the
+// next piece. During the flash board.value holds the merged (pre-clear) board, so
+// clearLines(board.value) is the settled board. Safe to call with no clear pending.
+const finishClear = () => {
+  if (!clearTimer) return
+  clearTimeout(clearTimer)
+  clearTimer = null
+  clearingRows.value = []
+  board.value = clearLines(board.value).board
+  spawnNext()
+}
+
 const lockPiece = () => {
   if (!current.value) return
   clearLock()
@@ -209,10 +221,7 @@ const lockPiece = () => {
   applyClear(full.length)
   stopTimer() // keep gravity paused through the flash, even after a level-up
   clearTimer = setTimeout(() => {
-    clearTimer = null
-    clearingRows.value = []
-    board.value = clearLines(merged).board
-    spawnNext()
+    finishClear()
     if (state.value === 'running') restartGravity()
   }, CLEAR_ANIM_MS)
 }
@@ -308,6 +317,7 @@ const persistBest = () => {
 const gameOver = () => {
   state.value = 'over'
   stopTimer()
+  stopSoftDropRepeat()
   clearLock()
   cancelClear()
   current.value = null
@@ -343,6 +353,8 @@ const start = () => {
 
 const togglePause = () => {
   if (state.value === 'running') {
+    finishClear() // resolve an in-progress line clear before freezing
+    if (state.value !== 'running') return // a topped-out spawn already ended the game
     state.value = 'paused'
     stopTimer()
     clearLock()
