@@ -10,6 +10,7 @@
  * that fit the current board size. Fully self-contained — no network.
  */
 import type { NonogramPattern } from './nonogram'
+import { rngFromSeed } from './seed'
 
 /** 5×5 pictures — bold, single-glance shapes. */
 const P5: NonogramPattern[] = [
@@ -254,3 +255,18 @@ export const patternsForSize = (size: number): NonogramPattern[] =>
 /** Look up a picture by its id (optionally constrained to a board size). */
 export const patternById = (id: string, size?: number): NonogramPattern | undefined =>
   NONOGRAM_PATTERNS.find((p) => p.id === id && (size === undefined || p.size === size))
+
+/**
+ * Deterministically pick one picture that fits `size`, chosen by `seed`. Used
+ * for the default / "Random" puzzle so it is always a recognisable picture (not
+ * random noise) while staying shareable — the same seed reproduces the same one.
+ */
+export const randomPatternForSize = (
+  size: number,
+  seed: string,
+): NonogramPattern | undefined => {
+  const options = patternsForSize(size)
+  if (!options.length) return undefined
+  const i = Math.floor(rngFromSeed(`nono-pick:${size}:${seed}`)() * options.length)
+  return options[Math.min(i, options.length - 1)]
+}

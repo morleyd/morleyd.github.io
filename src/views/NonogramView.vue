@@ -5,7 +5,7 @@
  * "empty". Seeded and shareable; a puzzle is solved when every clue is met.
  * Clue derivation and checking live in services/nonogram.
  */
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import GameToolbar from '@/components/GameToolbar.vue'
 import { copyToClipboard } from '@/services/share'
@@ -14,34 +14,37 @@ import { useSquareFit } from '@/composables/useSquareFit'
 import {
   generateNonogram,
   isSolved,
+  lineComplete,
   lineConsistent,
   nonogramFromPattern,
   satisfiedClues,
   type Cell,
   type Nonogram,
 } from '@/services/nonogram'
-import { patternById, patternsForSize } from '@/services/nonogramPatterns'
+import { patternById, patternsForSize, randomPatternForSize } from '@/services/nonogramPatterns'
 
-const { el: boardEl, px: boardPx } = useSquareFit(96)
+const { el: boardEl, px: boardPx } = useSquareFit(72)
 
 const route = useRoute()
 const router = useRouter()
 
 const SIZES = [5, 10, 15]
 
-// Fill-color themes for the painted cells (picked in settings).
+// Fill-color themes for the painted cells (picked in settings). Gold is the
+// default accent — warm and picture-friendly; green/others stay available.
 const THEMES = [
-  { id: 'violet', label: 'Violet', fill: '#7c3aed' },
+  { id: 'gold', label: 'Gold', fill: '#f5c518' },
+  { id: 'forest', label: 'Green', fill: '#22c55e' },
   { id: 'ocean', label: 'Ocean', fill: '#0ea5e9' },
   { id: 'sunset', label: 'Sunset', fill: '#f97316' },
-  { id: 'forest', label: 'Forest', fill: '#22c55e' },
+  { id: 'violet', label: 'Violet', fill: '#7c3aed' },
 ] as const
 
 const size = ref(10)
 const code = ref('')
-const pattern = ref('random') // 'random' or a pattern id
-const theme = ref<string>('violet')
-const puzzle = ref<Nonogram>(generateNonogram(10, 10, 'init'))
+const pattern = ref('random') // 'random' picks a random picture; else a pattern id
+const theme = ref<string>('gold')
+const puzzle = ref<Nonogram>(nonogramFromPattern(patternsForSize(10)[0]))
 const marks = ref<number[]>([]) // 0 empty · 1 filled · 2 X-marked
 const mode = ref<'fill' | 'mark'>('fill')
 const snackbar = ref(false)
@@ -80,6 +83,40 @@ const gridStyle = computed(() => ({
 const asBool = computed(() => marks.value.map((m) => m === 1))
 const solved = computed(() => marks.value.length > 0 && isSolved(asBool.value, puzzle.value))
 
+// --- Timer --------------------------------------------------------------
+// Counts up while the player is solving. Pauses whenever the tab/app is hidden
+// (Page Visibility API) and stops for good once the puzzle is solved.
+const seconds = ref(0)
+let timer: ReturnType<typeof setInterval> | null = null
+const stopTimer = () => {
+  if (timer) clearInterval(timer)
+  timer = null
+}
+const startTimer = () => {
+  stopTimer()
+  if (solved.value || document.hidden) return
+  timer = setInterval(() => {
+    seconds.value += 1
+  }, 1000)
+}
+const resetTimer = () => {
+  seconds.value = 0
+  startTimer()
+}
+const timeLabel = computed(() => {
+  const m = Math.floor(seconds.value / 60)
+  const s = seconds.value % 60
+  return `${m}:${String(s).padStart(2, '0')}`
+})
+const onVisibility = () => {
+  if (document.hidden) stopTimer()
+  else startTimer()
+}
+// Stop the clock the instant the board is solved.
+watch(solved, (v) => {
+  if (v) stopTimer()
+})
+
 // Extract a row / column of the player's marks as service `Cell`s.
 const rowCells = (r: number): Cell[] =>
   marks.value.slice(r * cols.value, (r + 1) * cols.value) as Cell[]
@@ -97,17 +134,30 @@ const colSatisfied = computed(() =>
   puzzle.value.colClues.map((clue, c) => satisfiedClues(colCells(c), clue)),
 )
 
-// Validation: lines flagged RED because their fills can no longer match the
-// clues. Set by the Check button, cleared per-line as soon as a square changes.
+// Validation, set by the Check button and cleared per-line as soon as a square
+// on that line changes. A line is flagged RED when its fills can no longer match
+// the clue, or GREEN when they already form it correctly and completely.
 const rowBad = ref<boolean[]>([])
 const colBad = ref<boolean[]>([])
+const rowGood = ref<boolean[]>([])
+const colGood = ref<boolean[]>([])
 const validate = () => {
-  rowBad.value = puzzle.value.rowClues.map((clue, r) => !lineConsistent(rowCells(r), clue))
-  colBad.value = puzzle.value.colClues.map((clue, c) => !lineConsistent(colCells(c), clue))
+  rowGood.value = puzzle.value.rowClues.map((clue, r) => lineComplete(rowCells(r), clue))
+  colGood.value = puzzle.value.colClues.map((clue, c) => lineComplete(colCells(c), clue))
+  // Only flag red where it isn't already green (the two are exclusive, but keep
+  // green authoritative for a done line).
+  rowBad.value = puzzle.value.rowClues.map(
+    (clue, r) => !rowGood.value[r] && !lineConsistent(rowCells(r), clue),
+  )
+  colBad.value = puzzle.value.colClues.map(
+    (clue, c) => !colGood.value[c] && !lineConsistent(colCells(c), clue),
+  )
 }
 const clearValidation = () => {
   rowBad.value = []
   colBad.value = []
+  rowGood.value = []
+  colGood.value = []
 }
 // A square at index i sits on one row and one column — clear only their flags.
 const clearLineValidation = (i: number) => {
@@ -115,22 +165,30 @@ const clearLineValidation = (i: number) => {
   const c = i % cols.value
   if (rowBad.value.length) rowBad.value[r] = false
   if (colBad.value.length) colBad.value[c] = false
+  if (rowGood.value.length) rowGood.value[r] = false
+  if (colGood.value.length) colGood.value[c] = false
 }
 
-const build = () => {
-  if (pattern.value !== 'random') {
-    const p = patternById(pattern.value, size.value)
-    if (p) {
-      puzzle.value = nonogramFromPattern(p)
-      marks.value = new Array(size.value * size.value).fill(0)
-      clearValidation()
-      return
-    }
-    pattern.value = 'random' // no such picture at this size — fall back
-  }
-  puzzle.value = generateNonogram(size.value, size.value, code.value)
+const reset = () => {
   marks.value = new Array(size.value * size.value).fill(0)
   clearValidation()
+  resetTimer()
+}
+const build = () => {
+  // A specific picture, or a random one chosen deterministically from the seed
+  // (so the default is always a recognisable picture, never random noise).
+  const p =
+    pattern.value === 'random'
+      ? randomPatternForSize(size.value, code.value)
+      : patternById(pattern.value, size.value)
+  if (p) {
+    puzzle.value = nonogramFromPattern(p)
+    reset()
+    return
+  }
+  if (pattern.value !== 'random') pattern.value = 'random' // no such picture at this size
+  puzzle.value = generateNonogram(size.value, size.value, code.value)
+  reset()
 }
 
 // A named picture shares as `@id`; a random puzzle shares its seed code.
@@ -224,14 +282,17 @@ onMounted(() => {
     newGame()
   }
   window.addEventListener('pointerup', endPaint)
+  document.addEventListener('visibilitychange', onVisibility)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('pointerup', endPaint)
+  document.removeEventListener('visibilitychange', onVisibility)
+  stopTimer()
 })
 </script>
 
 <template>
-  <v-container class="py-6" max-width="860">
+  <v-container class="py-6" max-width="640">
     <GameToolbar title="Nonogram" shareable @share="share">
       <template #intro>
         Fill the cells so each row and column matches its run-length clues — the numbers count
@@ -275,7 +336,7 @@ onBeforeUnmount(() => {
           <li>Tap or drag across cells to fill (or erase) them.</li>
           <li><span class="k">X</span> mode (or right-click) marks a cell you've deduced is empty — just an aid, it doesn't affect solving.</li>
           <li>Each clue number dims once its run is pinned in place.</li>
-          <li><span class="k">Check</span> turns a line's clues red when your fills can no longer match it; the red clears the moment you edit that line.</li>
+          <li><span class="k">Check</span> turns a line's clues green when it's complete and correct, or red when your fills can no longer match it; both clear the moment you edit that line.</li>
         </ul>
         <h3>Tips</h3>
         <ul>
@@ -301,20 +362,28 @@ onBeforeUnmount(() => {
         >Check</v-btn
       >
       <v-spacer />
+      <div class="text-body-2 text-medium-emphasis mr-1" aria-label="Elapsed time">
+        <v-icon icon="mdi-clock-outline" size="small" /> {{ timeLabel }}
+      </div>
       <v-btn variant="tonal" color="primary" prepend-icon="mdi-refresh" @click="newGame">New</v-btn>
     </div>
 
     <div ref="boardEl" class="nono-wrap">
-      <div class="nono" :style="gridStyle" @contextmenu.prevent>
+      <div class="nono" :class="{ 'nono--solved': solved }" :style="gridStyle" @contextmenu.prevent>
         <!-- Corner -->
         <div class="corner" />
         <!-- Column clues -->
-        <div v-for="(clue, c) in puzzle.colClues" :key="'c' + c" class="cclue" :class="{ 'clue--bad': colBad[c] }">
+        <div
+          v-for="(clue, c) in puzzle.colClues"
+          :key="'c' + c"
+          class="cclue"
+          :class="{ 'clue--bad': colBad[c], 'clue--good': colGood[c] }"
+        >
           <span v-for="(n, k) in clue" :key="k" :class="{ 'num--done': colSatisfied[c][k] }">{{ n }}</span>
         </div>
         <!-- Rows: row clue + cells -->
         <template v-for="r in rows" :key="'r' + r">
-          <div class="rclue" :class="{ 'clue--bad': rowBad[r - 1] }">
+          <div class="rclue" :class="{ 'clue--bad': rowBad[r - 1], 'clue--good': rowGood[r - 1] }">
             <span
               v-for="(n, k) in puzzle.rowClues[r - 1]"
               :key="k"
@@ -341,12 +410,20 @@ onBeforeUnmount(() => {
         </template>
       </div>
 
-      <div v-if="solved" class="overlay">
-        <p class="text-h4 mb-1">Solved! 🎉</p>
-        <p class="text-body-1 mb-4">{{ size }}×{{ size }} picture complete.</p>
-        <v-btn color="primary" variant="flat" prepend-icon="mdi-refresh" @click="newGame">New puzzle</v-btn>
-      </div>
     </div>
+
+    <!-- On solve: keep the finished picture on show (clues + X-marks fade on the
+         board itself) and celebrate with a compact banner below it, so the
+         player can admire the image rather than have it covered up. -->
+    <v-expand-transition>
+      <div v-if="solved" class="solved-banner mt-4">
+        <div class="solved-title">Solved! 🎉</div>
+        <div class="text-body-2 text-medium-emphasis">{{ size }}×{{ size }} picture complete · {{ timeLabel }}</div>
+        <v-btn class="mt-2" color="primary" variant="flat" prepend-icon="mdi-refresh" @click="newGame">
+          New puzzle
+        </v-btn>
+      </div>
+    </v-expand-transition>
 
     <v-snackbar v-model="snackbar" :timeout="2600" color="secondary">Puzzle link copied — share it!</v-snackbar>
   </v-container>
@@ -399,11 +476,16 @@ onBeforeUnmount(() => {
 .num--done {
   color: rgba(100, 116, 139, 0.5);
 }
-/* Validation: a line whose fills can no longer match its clue turns red until
-   the player edits a square on that line. Overrides the dimmed state. */
+/* Validation (set by Check, cleared on edit; overrides the dimmed state):
+   red = this line's fills can no longer match its clue; green = it's complete
+   and correct. */
 .clue--bad span,
 .clue--bad span.num--done {
   color: #f87171;
+}
+.clue--good span,
+.clue--good span.num--done {
+  color: #4ade80;
 }
 
 .ncell {
@@ -434,16 +516,46 @@ onBeforeUnmount(() => {
   line-height: 1;
 }
 
-.overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
+/* Solve reveal: clear the clutter so the finished picture reads as an image.
+   Clues dim right down, X-marks and the internal ambiguity of grid lines fade,
+   and the filled cells give one gentle celebratory pulse + a soft glow. */
+.nono--solved .cclue,
+.nono--solved .rclue {
+  opacity: 0.18;
+}
+.nono--solved .x {
+  display: none;
+}
+.nono--solved .ncell:not(.ncell--fill) {
+  background: transparent;
+}
+.nono--solved .ncell {
+  border-color: rgba(148, 163, 184, 0.06);
+  cursor: default;
+}
+.nono--solved .ncell--fill {
+  box-shadow: inset 0 0 0 1px var(--nono-fill, #f5c518);
+  animation: nono-pop 520ms ease;
+}
+@keyframes nono-pop {
+  0% {
+    transform: scale(0.72);
+    opacity: 0.4;
+  }
+  60% {
+    transform: scale(1.08);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.solved-banner {
   text-align: center;
-  background: rgba(2, 6, 23, 0.8);
-  backdrop-filter: blur(3px);
-  border-radius: 8px;
+}
+.solved-title {
+  font-size: 1.4rem;
+  font-weight: 700;
 }
 </style>

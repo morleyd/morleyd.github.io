@@ -2,12 +2,14 @@ import { describe, it, expect } from 'vitest'
 import {
   CELLS,
   N,
+  clearCell,
   countSolutions,
   findConflicts,
   generatePuzzle,
   generateSolved,
   isComplete,
   isValidPlacement,
+  placeLockedDigit,
   solve,
   usedValues,
   type Grid,
@@ -139,6 +141,65 @@ describe('findConflicts / isComplete', () => {
     const broken = solution.slice()
     broken[0] = 0
     expect(isComplete(broken)).toBe(false)
+  })
+})
+
+describe('placeLockedDigit (lock toggle-delete)', () => {
+  const givens = (indices: number[]): boolean[] => {
+    const g = new Array<boolean>(CELLS).fill(false)
+    for (const i of indices) g[i] = true
+    return g
+  }
+
+  it('places the locked digit into an empty cell (no delete)', () => {
+    const cells: Grid = new Array(CELLS).fill(0)
+    const { grid, cleared } = placeLockedDigit(cells, givens([]), 40, 3)
+    expect(grid[40]).toBe(3)
+    expect(cleared).toBe(false) // a placement — the caller may advance the lock
+    expect(cells[40]).toBe(0) // original grid is untouched (returns a copy)
+  })
+
+  it('clears the cell when it already holds the locked digit, and does not advance', () => {
+    const cells: Grid = new Array(CELLS).fill(0)
+    cells[40] = 3 // player already placed a 3 here
+    const { grid, cleared } = placeLockedDigit(cells, givens([]), 40, 3)
+    expect(grid[40]).toBe(0) // toggle-delete removed it
+    expect(cleared).toBe(true) // signals the caller NOT to advance the lock
+  })
+
+  it('replaces a different digit rather than deleting', () => {
+    const cells: Grid = new Array(CELLS).fill(0)
+    cells[40] = 5
+    const { grid, cleared } = placeLockedDigit(cells, givens([]), 40, 3)
+    expect(grid[40]).toBe(3)
+    expect(cleared).toBe(false)
+  })
+
+  it('never touches a given cell', () => {
+    const cells: Grid = new Array(CELLS).fill(0)
+    cells[40] = 3
+    const { grid, cleared } = placeLockedDigit(cells, givens([40]), 40, 3)
+    expect(grid[40]).toBe(3) // unchanged
+    expect(cleared).toBe(false)
+  })
+})
+
+describe('clearCell (erase)', () => {
+  it('clears a selected non-given cell', () => {
+    const cells: Grid = new Array(CELLS).fill(0)
+    cells[12] = 7
+    const given = new Array<boolean>(CELLS).fill(false)
+    const grid = clearCell(cells, given, 12)
+    expect(grid[12]).toBe(0)
+    expect(cells[12]).toBe(7) // returns a copy, original untouched
+  })
+
+  it('leaves a given cell untouched', () => {
+    const cells: Grid = new Array(CELLS).fill(0)
+    cells[12] = 7
+    const given = new Array<boolean>(CELLS).fill(false)
+    given[12] = true
+    expect(clearCell(cells, given, 12)[12]).toBe(7)
   })
 })
 

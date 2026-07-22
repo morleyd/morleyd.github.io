@@ -25,7 +25,9 @@ import {
 } from '@/services/tango'
 import { findHint, symbolName, type Hint } from '@/services/tangoHints'
 
-const { el: boardEl, px: boardPx } = useSquareFit(170)
+// Reserve just enough below the board for the hint alert + page padding, so the
+// board can grow to fill most of the viewport height.
+const { el: boardEl, px: boardPx } = useSquareFit(96)
 const cell = computed(() => boardPx.value / SIZE)
 
 const route = useRoute()
@@ -157,7 +159,7 @@ const cellClass = (i: number) => ({
 </script>
 
 <template>
-  <v-container class="py-6" max-width="560">
+  <v-container class="py-6" max-width="720">
     <GameToolbar title="Tango" shareable @share="share">
       <template #intro>
         Fill every cell with a Sun or a Moon. Each row and column needs three of each, no three of a
@@ -184,7 +186,7 @@ const cellClass = (i: number) => ({
       </template>
     </GameToolbar>
 
-    <div class="d-flex align-center ga-2 mb-3">
+    <div class="controls d-flex align-center ga-2 mb-4">
       <v-spacer />
       <v-btn variant="tonal" prepend-icon="mdi-lightbulb-on-outline" :disabled="solved" @click="nextHint">Hint</v-btn>
       <v-btn variant="tonal" color="primary" prepend-icon="mdi-refresh" @click="newGame">New</v-btn>
@@ -240,9 +242,18 @@ const cellClass = (i: number) => ({
 </template>
 
 <style scoped>
+/* The controls sit above the board in the stacking order so an edge badge can
+   never paint over the Hint/New buttons. */
+.controls {
+  position: relative;
+  z-index: 1;
+}
 .board-wrap {
   position: relative;
   margin: 0 auto;
+  /* Contain the badges' z-index inside the board so they can never rise above
+     the controls above them (belt-and-suspenders with the gap between them). */
+  isolation: isolate;
 }
 .board {
   display: grid;
@@ -320,6 +331,8 @@ const cellClass = (i: number) => ({
   background: rgba(2, 6, 23, 0.8);
   backdrop-filter: blur(3px);
   border-radius: 8px;
+  /* Above the constraint badges (z-index: 2) so the win scrim covers them. */
+  z-index: 3;
 }
 </style>
 

@@ -308,3 +308,39 @@ export function findConflicts(grid: Grid): Set<number> {
 export function isComplete(grid: Grid): boolean {
   return grid.every((v) => v !== 0) && findConflicts(grid).size === 0
 }
+
+/** Outcome of tapping a cell while a digit is "locked" on the number pad. */
+export interface LockPlacement {
+  grid: Grid // a new grid with the change applied
+  cleared: boolean // the tap REMOVED the locked digit (toggle-delete)
+}
+
+/**
+ * Apply a locked-digit tap to cell `i`. If the cell already holds `digit` (and
+ * isn't a given) the digit is toggled OFF — the natural way to clear it — and
+ * `cleared` is true; otherwise the digit is placed and `cleared` is false. The
+ * caller uses `cleared` to know NOT to advance the lock on a delete. Givens are
+ * left untouched.
+ */
+export function placeLockedDigit(
+  cells: Grid,
+  given: boolean[],
+  i: number,
+  digit: number,
+): LockPlacement {
+  const grid = cells.slice()
+  if (given[i]) return { grid, cleared: false }
+  if (grid[i] === digit) {
+    grid[i] = 0
+    return { grid, cleared: true }
+  }
+  grid[i] = digit
+  return { grid, cleared: false }
+}
+
+/** Clear cell `i` (erase). Returns a new grid; givens are left untouched. */
+export function clearCell(cells: Grid, given: boolean[], i: number): Grid {
+  const grid = cells.slice()
+  if (!given[i]) grid[i] = 0
+  return grid
+}

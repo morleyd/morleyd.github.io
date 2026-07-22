@@ -7,22 +7,51 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import GameToolbar from '@/components/GameToolbar.vue'
-import { useSquareFit } from '@/composables/useSquareFit'
 import { copyToClipboard } from '@/services/share'
 import {
   BALL_RADIUS,
   BOUNCE_VY,
   type Ball,
+  heightScore,
   nearestPlatformIndex,
   platformAt,
   platformBroken,
   stepBall,
+  trackMaxHeight,
   tryBounce,
 } from '@/services/ballBounce'
 
-const { el: boardEl, px: boardPx } = useSquareFit(150)
-const displayW = computed(() => Math.round(boardPx.value * 0.66))
-const displayH = computed(() => boardPx.value)
+// The play area is a vertical column: as TALL as the visible viewport allows and
+// proportionally wide. We size it directly (rather than the square-fit helper)
+// so desktop gets a big column instead of a tiny sliver, while mobile still fills
+// the width. COLUMN_ASPECT is width / height; RESERVE_BOTTOM is space kept for the
+// page's bottom padding/footer beneath the board.
+const COLUMN_ASPECT = 0.72
+const RESERVE_BOTTOM = 28
+const boardEl = ref<HTMLElement | null>(null)
+const displayH = ref(420)
+const displayW = ref(Math.round(420 * COLUMN_ASPECT))
+
+const recomputeSize = () => {
+  const node = boardEl.value
+  const parent = node?.parentElement
+  if (!node || !parent) return
+  const cs = getComputedStyle(parent)
+  const availW = parent.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
+  const top = node.getBoundingClientRect().top
+  // Smallest of every viewport-height signal — mobile browsers disagree on which
+  // reports the visible area, so the min is safest (matches useSquareFit).
+  const viewportH = Math.min(
+    window.visualViewport?.height ?? Infinity,
+    window.innerHeight || Infinity,
+    document.documentElement.clientHeight || Infinity,
+  )
+  const availH = viewportH - top - RESERVE_BOTTOM
+  // Fill the height, but never let the proportional width overflow the container.
+  const h = Math.max(200, Math.floor(Math.min(availH, availW / COLUMN_ASPECT)))
+  displayH.value = h
+  displayW.value = Math.floor(h * COLUMN_ASPECT)
+}
 
 const BEST_KEY = 'ballbounce-best'
 const UNITS_VISIBLE = 7 // keeps at most ~5 shelves on screen at the tightest spacing
@@ -35,7 +64,9 @@ const snackbar = ref(false)
 
 let ball: Ball = { x: 0.5, y: BALL_RADIUS, vx: 0, vy: BOUNCE_VY }
 let seed = 1
-let maxY = 0
+// Reactive so the Height readout updates as the ball climbs — a plain variable
+// here would leave the `score` computed frozen at its first value (always 0).
+const maxY = ref(0)
 let cameraY = 0
 let steer: -1 | 0 | 1 = 0
 let pointerActive = false
@@ -46,14 +77,14 @@ let lastTs = 0
 // How many times each shelf (by index) has been bounced — shelves break at MAX_BOUNCES.
 const bounceCounts = new Map<number, number>()
 
-const score = computed(() => Math.max(0, Math.round(maxY * 10)))
+const score = computed(() => heightScore(maxY.value))
 const fallLimit = (1 - BALL_SCREEN) * UNITS_VISIBLE
 
 const reset = () => {
   seed = (Math.floor(Math.random() * 0xffffffff) || 1) >>> 0
   const p0 = platformAt(seed, 0)
   ball = { x: p0.x, y: BALL_RADIUS, vx: 0, vy: BOUNCE_VY }
-  maxY = 0
+  maxY.value = 0
   cameraY = 0
   steer = 0
   pointerActive = false
@@ -157,7 +188,7 @@ const tick = (ts: number) => {
     }
   }
 
-  if (ball.y > maxY) maxY = ball.y
+  maxY.value = trackMaxHeight(maxY.value, ball.y)
   cameraY = Math.max(cameraY, ball.y) // camera only rises
 
   if (ball.y - cameraY < -fallLimit) {
@@ -231,6 +262,8 @@ watch([displayW, displayH], () => {
   if (state.value !== 'running') draw()
 })
 
+const onResize = () => recomputeSize()
+
 onMounted(() => {
   try {
     best.value = Number(localStorage.getItem(BEST_KEY)) || 0
@@ -238,19 +271,30 @@ onMounted(() => {
     best.value = 0
   }
   reset()
+  recomputeSize()
+  // Re-measure after layout/fonts settle and the mobile address bar animates.
+  requestAnimationFrame(recomputeSize)
+  setTimeout(recomputeSize, 150)
+  setTimeout(recomputeSize, 500)
   draw()
+  window.addEventListener('resize', onResize)
+  window.addEventListener('orientationchange', onResize)
+  window.visualViewport?.addEventListener('resize', onResize)
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
 })
 onBeforeUnmount(() => {
   cancelAnimationFrame(raf)
+  window.removeEventListener('resize', onResize)
+  window.removeEventListener('orientationchange', onResize)
+  window.visualViewport?.removeEventListener('resize', onResize)
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
 })
 </script>
 
 <template>
-  <v-container class="py-6" max-width="600">
+  <v-container class="py-6" max-width="720">
     <GameToolbar title="Ball Bounce" shareable @share="share">
       <template #intro>
         The ball bounces on its own — steer <strong>left</strong> and <strong>right</strong> (hold a

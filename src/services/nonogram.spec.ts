@@ -4,6 +4,7 @@ import {
   generateNonogram,
   isSolved,
   lineClue,
+  lineComplete,
   lineConsistent,
   lineSatisfied,
   nonogramFromPattern,
@@ -13,7 +14,12 @@ import {
   type Cell,
   type Solution,
 } from './nonogram'
-import { NONOGRAM_PATTERNS, patternById, patternsForSize } from './nonogramPatterns'
+import {
+  NONOGRAM_PATTERNS,
+  patternById,
+  patternsForSize,
+  randomPatternForSize,
+} from './nonogramPatterns'
 
 describe('lineClue', () => {
   it('counts consecutive runs', () => {
@@ -181,6 +187,56 @@ describe('satisfiedClues', () => {
   it('greys the 0 of an empty line only while nothing is filled', () => {
     expect(satisfiedClues(cells(0, 2, 2, 0), [0])).toEqual([true])
     expect(satisfiedClues(cells(0, 1, 0, 0), [0])).toEqual([false])
+  })
+})
+
+describe('lineComplete', () => {
+  it('flags a line whose filled cells form exactly the clue', () => {
+    // Gaps as plain unknowns.
+    expect(lineComplete(cells(1, 1, 0, 1), [2, 1])).toBe(true)
+    // Gaps as X-marks — X and unknown-empty both count as gaps here.
+    expect(lineComplete(cells(1, 0, 1, 2, 1), [1, 1, 1])).toBe(true)
+  })
+
+  it('does not flag an incomplete line', () => {
+    expect(lineComplete(cells(1, 0, 0, 0), [2, 1])).toBe(false)
+    expect(lineComplete(cells(1, 1, 0, 0), [2, 1])).toBe(false)
+  })
+
+  it('flags an empty line only while nothing is filled', () => {
+    expect(lineComplete(cells(0, 2, 2, 0), [0])).toBe(true)
+    expect(lineComplete(cells(0, 1, 0, 0), [0])).toBe(false)
+  })
+
+  it('is mutually exclusive with an inconsistent line', () => {
+    // Over-filled: inconsistent, so certainly not complete.
+    expect(lineConsistent(cells(1, 1, 1), [2])).toBe(false)
+    expect(lineComplete(cells(1, 1, 1), [2])).toBe(false)
+  })
+})
+
+describe('randomPatternForSize', () => {
+  it('returns a picture that fits the requested size', () => {
+    for (const size of [5, 10, 15]) {
+      const p = randomPatternForSize(size, 'seed-a')
+      expect(p).toBeDefined()
+      expect(p!.size).toBe(size)
+    }
+  })
+
+  it('is deterministic for a given size + seed', () => {
+    expect(randomPatternForSize(10, 'abc')!.id).toBe(randomPatternForSize(10, 'abc')!.id)
+  })
+
+  it('spreads across the library as the seed varies', () => {
+    const ids = new Set(
+      Array.from({ length: 40 }, (_, i) => randomPatternForSize(10, `s${i}`)!.id),
+    )
+    expect(ids.size).toBeGreaterThan(1)
+  })
+
+  it('returns undefined when no picture fits the size', () => {
+    expect(randomPatternForSize(7, 'x')).toBeUndefined()
   })
 })
 

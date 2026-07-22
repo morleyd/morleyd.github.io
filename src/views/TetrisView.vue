@@ -27,12 +27,15 @@ import {
   pieceCells,
   rotate,
   spawnPiece,
+  stepDown,
+  SOFT_DROP_REPEAT_MS,
   type Board,
   type Piece,
   type PieceType,
 } from '@/services/tetris'
 
-const { el: boardEl, px: boardPx } = useSquareFit(160)
+// Trim the reserved bottom space so the board fills most of the viewport height.
+const { el: boardEl, px: boardPx } = useSquareFit(92)
 // The board is twice as tall as wide; fit it inside the measured square.
 const cell = computed(() => boardPx.value / ROWS)
 const boardWidth = computed(() => cell.value * COLS)
@@ -232,13 +235,27 @@ const tryMove = (dx: number) => {
 
 const softDrop = () => {
   if (state.value !== 'running' || !current.value) return
-  const moved = { ...current.value, y: current.value.y + 1 }
-  if (collides(board.value, moved)) {
+  const moved = stepDown(board.value, current.value)
+  if (!moved) {
     scheduleLock()
   } else {
     current.value = moved
     score.value += 1
   }
+}
+
+// Press-and-hold soft drop: the on-screen down button soft-drops once on press,
+// then repeats on an interval until release. (Keyboard down-hold already repeats
+// via OS key auto-repeat.)
+let softDropTimer: ReturnType<typeof setInterval> | null = null
+const stopSoftDropRepeat = () => {
+  if (softDropTimer) clearInterval(softDropTimer)
+  softDropTimer = null
+}
+const startSoftDropRepeat = () => {
+  stopSoftDropRepeat()
+  softDrop()
+  softDropTimer = setInterval(softDrop, SOFT_DROP_REPEAT_MS)
 }
 
 const rotatePiece = (dir: 1 | -1) => {
@@ -417,6 +434,10 @@ const onTouchEnd = (e: TouchEvent) => {
   }
 }
 
+// Control tooltips: desktop hover only. Disabling open-on-click / open-on-focus
+// stops them sticking on-screen after a tap on touch devices.
+const tipProps = { openOnHover: true, openOnClick: false, openOnFocus: false } as const
+
 const snackbar = ref(false)
 const share = async () => {
   const url = window.location.origin + '/tetris'
@@ -435,6 +456,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   stopTimer()
+  stopSoftDropRepeat()
   clearLock()
   cancelClear()
   persistBest()
@@ -443,12 +465,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <v-container class="py-6" max-width="720">
+  <v-container class="py-4" max-width="720">
     <GameToolbar title="Tetris" shareable @share="share">
       <template #intro>
-        Move with arrows / WASD, rotate with up (Z for the other way), hard-drop with Space, hold
-        with C. On mobile, use the buttons or swipe. Clear lines to score. Every 10 lines you level
-        up: pieces fall faster and each line clear is worth more points.
+        Arrows / WASD to move, up to rotate, Space to hard-drop. Info button for the full guide.
       </template>
       <template #info>
         <h3>Goal</h3>
@@ -483,7 +503,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- Level progress: faster fall + higher line scores at the next level. -->
-    <div class="level-progress mb-3">
+    <div class="level-progress mb-2">
       <v-progress-linear :model-value="levelProgress" color="primary" height="6" rounded />
       <span class="level-progress-label text-caption text-medium-emphasis">
         {{ linesToNext }} more {{ linesToNext === 1 ? 'line' : 'lines' }} to level {{ level + 1 }} (faster fall, bigger scores)
@@ -567,27 +587,34 @@ onBeforeUnmount(() => {
     <div class="controls mt-4">
       <v-btn icon variant="tonal" @click="rotatePiece(1)">
         <v-icon icon="mdi-rotate-right-variant" />
-        <v-tooltip activator="parent" location="top" text="Rotate" />
+        <v-tooltip activator="parent" location="top" v-bind="tipProps" text="Rotate" />
       </v-btn>
       <v-btn icon variant="tonal" @click="tryMove(-1)">
         <v-icon icon="mdi-chevron-left" />
-        <v-tooltip activator="parent" location="top" text="Move left" />
+        <v-tooltip activator="parent" location="top" v-bind="tipProps" text="Move left" />
       </v-btn>
-      <v-btn icon variant="tonal" @click="softDrop">
+      <v-btn
+        icon
+        variant="tonal"
+        @pointerdown.prevent="startSoftDropRepeat"
+        @pointerup="stopSoftDropRepeat"
+        @pointerleave="stopSoftDropRepeat"
+        @pointercancel="stopSoftDropRepeat"
+      >
         <v-icon icon="mdi-chevron-down" />
-        <v-tooltip activator="parent" location="top" text="Soft drop (Space or swipe down to hard-drop)" />
+        <v-tooltip activator="parent" location="top" v-bind="tipProps" text="Soft drop — hold to drop faster (Space / swipe down to hard-drop)" />
       </v-btn>
       <v-btn icon variant="tonal" @click="tryMove(1)">
         <v-icon icon="mdi-chevron-right" />
-        <v-tooltip activator="parent" location="top" text="Move right" />
+        <v-tooltip activator="parent" location="top" v-bind="tipProps" text="Move right" />
       </v-btn>
       <v-btn icon variant="tonal" :disabled="!canHold" @click="hold">
         <v-icon icon="mdi-archive-arrow-down-outline" />
-        <v-tooltip activator="parent" location="top" text="Hold piece" />
+        <v-tooltip activator="parent" location="top" v-bind="tipProps" text="Hold piece" />
       </v-btn>
       <v-btn icon variant="tonal" @click="togglePause">
         <v-icon :icon="state === 'paused' ? 'mdi-play' : 'mdi-pause'" />
-        <v-tooltip activator="parent" location="top" :text="state === 'paused' ? 'Resume' : 'Pause'" />
+        <v-tooltip activator="parent" location="top" v-bind="tipProps" :text="state === 'paused' ? 'Resume' : 'Pause'" />
       </v-btn>
     </div>
 
@@ -726,15 +753,23 @@ onBeforeUnmount(() => {
     order: 0;
     flex-direction: column;
     justify-content: flex-start;
-    gap: 12px;
-    min-width: 76px;
+    gap: 18px;
+    min-width: 96px;
+  }
+  .side-label {
+    font-size: 0.8rem;
+    margin-bottom: 6px;
   }
   .mini-row {
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
   }
   .mini {
-    width: 68px;
+    width: 88px;
+    padding: 6px;
+    border-radius: 8px;
+    background: rgba(2, 6, 23, 0.6);
+    border: 1px solid rgba(148, 163, 184, 0.15);
   }
 }
 
@@ -743,18 +778,19 @@ onBeforeUnmount(() => {
   flex-direction: column;
   background: rgba(30, 41, 59, 0.75);
   border-radius: 8px;
-  padding: 4px 14px;
-  min-width: 72px;
+  padding: 2px 12px;
+  min-width: 68px;
 }
 .stat-label {
-  font-size: 0.68rem;
+  font-size: 0.64rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: rgba(148, 163, 184, 0.9);
 }
 .stat-value {
-  font-size: 1.3rem;
+  font-size: 1.15rem;
   font-weight: 800;
+  line-height: 1.3;
 }
 
 .overlay {

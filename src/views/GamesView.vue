@@ -201,10 +201,19 @@ const games: GameCard[] = [
     gradient: 'linear-gradient(135deg, rgba(142, 36, 170, 0.42), rgba(251, 191, 36, 0.24))',
   },
   {
+    key: 'simon',
+    title: 'Simon',
+    description:
+      'Watch a growing color sequence light up, then repeat it back from memory. One more step every round — a single wrong tap ends the run.',
+    icon: 'mdi-view-grid',
+    to: '/simon',
+    gradient: 'linear-gradient(135deg, rgba(239, 68, 68, 0.32), rgba(250, 204, 21, 0.28))',
+  },
+  {
     key: 'memory',
     title: 'Memory',
     description:
-      'Two quick memory games in one: flip cards to find the pairs, or watch a growing color sequence and repeat it back (Simon).',
+      'A concentration board: flip face-down cards two at a time to find every matching pair in as few moves as you can.',
     icon: 'mdi-cards-outline',
     to: '/memory',
     gradient: 'linear-gradient(135deg, rgba(52, 211, 153, 0.32), rgba(59, 130, 246, 0.3))',

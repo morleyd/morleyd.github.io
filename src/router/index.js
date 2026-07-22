@@ -97,6 +97,12 @@ const router = createRouter({
       meta: { gamePage: true, lockScroll: true },
     },
     {
+      path: '/simon',
+      name: 'simon',
+      component: () => import('../views/SimonView.vue'),
+      meta: { gamePage: true, lockScroll: true },
+    },
+    {
       path: '/memory',
       name: 'memory',
       component: () => import('../views/MemoryView.vue'),

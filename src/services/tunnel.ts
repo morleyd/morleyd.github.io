@@ -2,16 +2,25 @@
  * Vertical tunnel flapper — physics and course generation, kept pure so the
  * game loop in the view stays a thin driver and the tricky bits are testable.
  *
- * The tunnel scrolls downward past a fixed-height flyer, so "distance" (score)
- * grows as the course advances. Every length is a fraction of the play WIDTH,
- * so the model is resolution-independent; the view multiplies by its pixels.
+ * It's Flappy-Bird, rotated: a ball flaps its way UP a weaving tunnel. GRAVITY
+ * constantly pulls the ball down; each tap FLAPS it back up (and nudges it left
+ * or right toward the tapped side). The camera climbs to follow the ball's
+ * height and never scrolls back down, so if the ball sinks off the bottom of
+ * the visible course — or clips a wall — the run is over. "Distance" (score) is
+ * how many course rows the ball has climbed.
+ *
+ * Horizontal lengths are a fraction of the play WIDTH and vertical positions are
+ * measured in course ROWS, so the model is resolution-independent; the view
+ * multiplies by its pixels.
  */
 
 import { mulberry32 } from './seed'
 
 export interface FlyerState {
-  x: number // center, 0..1
+  x: number // horizontal center, 0..1
   vx: number // horizontal velocity, fraction of width per second
+  y: number // height in course rows, increases as the ball climbs
+  vy: number // vertical velocity in rows per second (+ is up)
 }
 
 /** A horizontal slice of the tunnel: passable gap between left and right walls. */
@@ -26,28 +35,73 @@ export interface Segment {
 export const FLAP_VX = 0.38 // horizontal speed imparted by a flap
 export const FLYER_RADIUS = 0.038 // as a fraction of width (small = more slack)
 
+// Vertical physics, in course rows. Gravity is a constant downward pull; a flap
+// resets the upward velocity to a fixed impulse (Flappy-Bird style — it sets,
+// not adds), so a steady rhythm hovers and a brisker one climbs. Tuned against a
+// viewport ~10 rows tall: one flap arcs up ≈ FLAP_VY²/(2·GRAVITY) ≈ 1 row, and a
+// player who taps a touch faster than ~1.5 Hz keeps net-rising.
+export const GRAVITY = 20 // rows per second², pulls the ball down
+export const FLAP_VY = 6.5 // rows per second of upward velocity per flap
+
+// Where the ball rests on screen while the camera is tracking it, as a fraction
+// up from the bottom edge. Leaves room above to read the upcoming tunnel and
+// room below (≈ VIEW_ANCHOR · viewRows) to recover from a dive before falling
+// off the bottom.
+export const VIEW_ANCHOR = 0.4
+
 /**
- * Advance the flyer horizontally. Velocity decays exponentially so taps feel
- * snappy but drift settles. dtMs is the frame time in milliseconds.
+ * Advance the flyer one frame. Horizontal velocity decays exponentially so taps
+ * feel snappy but drift settles; vertically, gravity is integrated with
+ * semi-implicit Euler (update velocity, then position) for stability. dtMs is
+ * the frame time in milliseconds.
  */
 export function stepFlyer(state: FlyerState, dtMs: number): FlyerState {
   const dt = dtMs / 1000
-  const vx = state.vx * Math.exp(-3 * dt)
-  const x = state.x + vx * dt
-  // Clamp to the play area; hitting the outer bound kills horizontal momentum.
-  if (x < FLYER_RADIUS) return { x: FLYER_RADIUS, vx: 0 }
-  if (x > 1 - FLYER_RADIUS) return { x: 1 - FLYER_RADIUS, vx: 0 }
-  return { x, vx }
+  // Horizontal: decaying drift, clamped to the play area.
+  const decayedVx = state.vx * Math.exp(-3 * dt)
+  let x = state.x + decayedVx * dt
+  let vx = decayedVx
+  if (x < FLYER_RADIUS) {
+    x = FLYER_RADIUS
+    vx = 0
+  } else if (x > 1 - FLYER_RADIUS) {
+    x = 1 - FLYER_RADIUS
+    vx = 0
+  }
+  // Vertical: gravity pulls down; nothing clamps it — sinking too far is death.
+  const vy = state.vy - GRAVITY * dt
+  const y = state.y + vy * dt
+  return { x, vx, y, vy }
 }
 
-/** Apply a flap toward -1 (left) or +1 (right). */
+/** Apply a horizontal nudge toward -1 (left) or +1 (right). */
 export function flap(state: FlyerState, dir: -1 | 1): FlyerState {
   return { ...state, vx: dir * FLAP_VX }
+}
+
+/** Flap upward: reset vertical velocity to the fixed upward impulse. */
+export function flapUp(state: FlyerState): FlyerState {
+  return { ...state, vy: FLAP_VY }
 }
 
 /** True if the flyer at center x overlaps either wall of a segment. */
 export function collides(x: number, seg: Segment): boolean {
   return x - FLYER_RADIUS < seg.left || x + FLYER_RADIUS > seg.right
+}
+
+/**
+ * The camera's bottom edge (in rows) after the ball reaches height y. It rises
+ * to keep the ball VIEW_ANCHOR of the way up the screen but never scrolls back
+ * down, so climbing pans the course while sinking runs the ball toward the
+ * bottom edge. `prev` is the previous bottom (pass -Infinity to initialise).
+ */
+export function cameraBottomFor(prev: number, y: number, viewRows: number): number {
+  return Math.max(prev, y - VIEW_ANCHOR * viewRows)
+}
+
+/** True once the ball has sunk below the bottom of the visible course. */
+export function hasFallenOff(y: number, cameraBottom: number): boolean {
+  return y < cameraBottom
 }
 
 /** Smallest half-gap the course will ever produce, so a passage always fits. */
@@ -80,21 +134,7 @@ export function segmentAt(seed: number, row: number, difficulty = 0): Segment {
   return { left, right }
 }
 
-/** Difficulty ramps with distance, capped so course shaping stays playable. */
+/** Difficulty ramps with how high you climb, capped so shaping stays playable. */
 export function difficultyFor(distance: number): number {
-  return Math.min(1, Math.max(0, distance) / 600)
-}
-
-/** Scroll speed at the start of a run, in course rows per second. */
-export const BASE_SCROLL_SPEED = 2.6
-
-/**
- * Scroll speed (rows/second) as a function of distance travelled. It keeps
- * accelerating for the whole run — a quick early ramp tied to `difficulty`
- * plus an unbounded but gently slowing logarithmic creep — so the tunnel never
- * settles into a constant, boring pace. Strictly increasing in distance.
- */
-export function scrollSpeedFor(distance: number): number {
-  const d = Math.max(0, distance)
-  return BASE_SCROLL_SPEED + 4.4 * difficultyFor(d) + Math.log1p(d / 160)
+  return Math.min(1, Math.max(0, distance) / 400)
 }

@@ -138,6 +138,20 @@ export function lineSatisfied(line: boolean[], clue: number[]): boolean {
 }
 
 /**
+ * Whether the line's FILLED cells already form exactly its clue — a complete,
+ * correct line (X-marks and unknown-empty cells are ignored). This is the GREEN
+ * counterpart to `lineConsistent`'s red: on Check a line is flagged green when it
+ * is done correctly, and red when its fills can no longer match the clue. The two
+ * are mutually exclusive — a complete line is always consistent.
+ */
+export function lineComplete(cells: Cell[], clue: number[]): boolean {
+  return lineSatisfied(
+    cells.map((c) => c === FILLED),
+    clue,
+  )
+}
+
+/**
  * A cell as the player has painted it: 0 = empty/unknown, 1 = filled,
  * 2 = X-marked (deduced empty). Matches the view's `marks` encoding, so a line
  * can be handed to these functions directly. X-marks and the line edge act as

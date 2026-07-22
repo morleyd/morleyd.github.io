@@ -125,6 +125,16 @@ export const nearestPlatformIndex = (y: number): number => Math.max(0, Math.roun
 export const platformBroken = (bounces: number): boolean => bounces >= MAX_BOUNCES
 
 /**
+ * The displayed Height score for a climbed world-y. The ball starts at ~0 and y
+ * only trends upward, so the best score is `heightScore(maxY)`. Clamped at 0 so
+ * a tiny initial dip never shows a negative height.
+ */
+export const heightScore = (maxY: number): number => Math.max(0, Math.round(maxY * 10))
+
+/** Running max of the climbed height — the tracked peak only ever rises. */
+export const trackMaxHeight = (prevMax: number, y: number): number => Math.max(prevMax, y)
+
+/**
  * Deterministic shelf for a given index. Shelves climb by the ramping spacing
  * and wander horizontally; higher shelves get slightly narrower.
  */

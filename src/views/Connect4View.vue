@@ -6,7 +6,6 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import GameToolbar from '@/components/GameToolbar.vue'
-import { useSquareFit } from '@/composables/useSquareFit'
 import {
   AI,
   COLS,
@@ -24,9 +23,38 @@ import {
   type Level,
 } from '@/services/connect4'
 
-const { el: boardEl, px: boardPx } = useSquareFit(180)
-const cell = computed(() => boardPx.value / COLS)
-const boardHeight = computed(() => cell.value * ROWS)
+// The board is a 7×6 (wider-than-tall) rectangle, so a plain square fit would
+// waste vertical space. Size it to the largest COLS:ROWS box that fits the live
+// viewport — filling most of the height on desktop while staying width-bound on
+// mobile. Space measured live above; RESERVE_BOTTOM covers the footer + padding.
+const RESERVE_BOTTOM = 84
+const boardEl = ref<HTMLElement | null>(null)
+const boardW = ref(320)
+const boardH = ref(Math.round((320 * ROWS) / COLS))
+
+const recompute = () => {
+  const node = boardEl.value
+  const parent = node?.parentElement
+  if (!node || !parent) return
+  const cs = getComputedStyle(parent)
+  const availW = parent.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
+  const top = node.getBoundingClientRect().top
+  // Smallest of every viewport-height signal — mobile browsers disagree on which
+  // reports the visible area, so the min is safest.
+  const viewportH = Math.min(
+    window.visualViewport?.height ?? Infinity,
+    window.innerHeight || Infinity,
+    document.documentElement.clientHeight || Infinity,
+  )
+  const availH = viewportH - top - RESERVE_BOTTOM
+  const scale = Math.max(28, Math.min(availW / COLS, availH / ROWS))
+  boardW.value = Math.floor(scale * COLS)
+  boardH.value = Math.floor(scale * ROWS)
+}
+
+const onResize = () => recompute()
+const onOrient = () => setTimeout(recompute, 300)
+const vv = typeof window !== 'undefined' ? window.visualViewport : null
 
 const LEVELS: Level[] = ['easy', 'medium', 'hard']
 
@@ -121,14 +149,29 @@ const statusText = computed(() => {
 
 onMounted(() => {
   newGame()
+  recompute()
+  // Re-measure after layout/fonts settle and after the address bar animates.
+  requestAnimationFrame(recompute)
+  setTimeout(recompute, 150)
+  setTimeout(recompute, 500)
+  window.addEventListener('resize', onResize)
+  window.addEventListener('orientationchange', onResize)
+  window.addEventListener('orientationchange', onOrient)
+  vv?.addEventListener('resize', onResize)
+  vv?.addEventListener('scroll', onResize)
 })
 onBeforeUnmount(() => {
   clearAiTimer()
+  window.removeEventListener('resize', onResize)
+  window.removeEventListener('orientationchange', onResize)
+  window.removeEventListener('orientationchange', onOrient)
+  vv?.removeEventListener('resize', onResize)
+  vv?.removeEventListener('scroll', onResize)
 })
 </script>
 
 <template>
-  <v-container class="py-6" max-width="560">
+  <v-container class="py-6" max-width="820">
     <GameToolbar title="Connect 4">
       <template #intro>
         Drop your discs and get four in a row — across, down, or diagonally — before the AI does.
@@ -158,7 +201,7 @@ onBeforeUnmount(() => {
         <h3>How to play</h3>
         <ul>
           <li>Click or tap a column to drop your disc into the lowest open slot.</li>
-          <li>You are <span class="chip chip--you">red</span>; the AI is <span class="chip chip--ai">yellow</span>.</li>
+          <li>You are <span class="chip chip--you">teal</span>; the AI is <span class="chip chip--ai">gold</span>.</li>
         </ul>
         <h3>Difficulty</h3>
         <p>The AI searches ahead with alpha-beta pruning — 2 moves on easy (with occasional random play), up to 6 on hard.</p>
@@ -176,7 +219,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- Board -->
-    <div ref="boardEl" class="board-wrap" :style="{ width: boardPx + 'px', height: boardHeight + 'px' }">
+    <div ref="boardEl" class="board-wrap" :style="{ width: boardW + 'px', height: boardH + 'px' }">
       <div class="board">
         <div
           v-for="c in COLS"
@@ -219,9 +262,9 @@ onBeforeUnmount(() => {
   height: 100%;
   gap: 0;
   padding: 6px;
-  border-radius: 12px;
-  background: linear-gradient(160deg, #1e3a8a, #1e40af);
-  box-shadow: 0 0 40px rgba(37, 99, 235, 0.25), inset 0 2px 8px rgba(0, 0, 0, 0.3);
+  border-radius: 16px;
+  background: linear-gradient(160deg, #7c3aed, #4c1d95);
+  box-shadow: 0 0 48px rgba(124, 58, 237, 0.35), inset 0 2px 10px rgba(0, 0, 0, 0.35);
 }
 .col {
   flex: 1;
@@ -246,25 +289,29 @@ onBeforeUnmount(() => {
   width: 78%;
   height: 78%;
   border-radius: 50%;
-  background: rgba(2, 6, 23, 0.55); /* empty hole */
-  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.5);
+  background: rgba(2, 6, 23, 0.5); /* empty hole */
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.55);
   transition: background 120ms ease;
 }
 .disc--you {
-  background: radial-gradient(circle at 35% 30%, #f87171, #dc2626);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  background: radial-gradient(circle at 35% 30%, #5eead4, #14b8a6);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.45);
 }
 .disc--ai {
-  background: radial-gradient(circle at 35% 30%, #fde047, #eab308);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  background: radial-gradient(circle at 35% 30%, #fde047, #f59e0b);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.45);
 }
 .disc--win {
-  outline: 3px solid #e2e8f0;
+  outline: 3px solid #f8fafc;
   outline-offset: -3px;
+  box-shadow: 0 0 16px 2px rgba(250, 204, 21, 0.9);
   animation: pulse 900ms ease-in-out infinite;
 }
 @keyframes pulse {
-  50% { outline-color: rgba(226, 232, 240, 0.4); }
+  50% {
+    outline-color: rgba(248, 250, 252, 0.35);
+    box-shadow: 0 0 8px 1px rgba(250, 204, 21, 0.45);
+  }
 }
 
 .dot {
@@ -273,8 +320,8 @@ onBeforeUnmount(() => {
   border-radius: 50%;
   display: inline-block;
 }
-.dot--you { background: #dc2626; }
-.dot--ai { background: #eab308; }
+.dot--you { background: #2dd4bf; }
+.dot--ai { background: #facc15; }
 
 .chip {
   padding: 0 6px;
@@ -282,7 +329,7 @@ onBeforeUnmount(() => {
   font-weight: 700;
   color: #1a1000;
 }
-.chip--you { background: #f87171; }
+.chip--you { background: #5eead4; }
 .chip--ai { background: #fde047; }
 
 .overlay {

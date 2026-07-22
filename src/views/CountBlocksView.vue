@@ -1,28 +1,34 @@
 <script setup lang="ts">
 /**
  * Count the Blocks — a memory game. A single cohesive pattern of blocks is
- * flashed on a grid; then you answer how many blocks it contained. What you
- * count is exactly the correct answer (no hidden target-shape twist). Each
- * correct answer advances a level (more blocks, bigger grid, shorter flash);
- * one wrong answer ends the run. Round data comes from services/countBlocks.
+ * shown; then you answer how many blocks it contained. What you count is
+ * exactly the correct answer (no hidden target-shape twist). Two modes:
+ *   - Normal: the pattern flashes statically on the grid.
+ *   - Hard: the same cohesive group slides across the screen — count the blocks
+ *     as they stream past.
+ * Each correct answer advances a level (more blocks, bigger grid, shorter
+ * reveal); one wrong answer ends the run. Round data comes from
+ * services/countBlocks.
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import GameToolbar from '@/components/GameToolbar.vue'
 import { useSquareFit } from '@/composables/useSquareFit'
-import { correctAnswer, makeRound, type Round } from '@/services/countBlocks'
+import { correctAnswer, makeRound, type CountMode, type Round } from '@/services/countBlocks'
 
 const { el: boardEl, px: boardPx } = useSquareFit(36)
 
 const BEST_KEY = 'countblocks-best'
+const MODE_KEY = 'countblocks-mode'
 
 const canvasEl = ref<HTMLCanvasElement | null>(null)
 const phase = ref<'watch' | 'answer' | 'result'>('watch')
+const mode = ref<CountMode>('normal')
 const level = ref(1)
 const answer = ref(0)
 const lastCorrect = ref(0)
 const wasRight = ref(false)
 const best = ref(0)
-const remaining = ref(0) // ms left in the flash, for the countdown bar
+const remaining = ref(0) // ms left in the reveal, for the countdown bar
 
 let round: Round = makeRound(1, 'init')
 let seed = 'seed'
@@ -46,7 +52,12 @@ const clearBoard = () => {
   ctx.fillRect(0, 0, canvasEl.value!.width, canvasEl.value!.height)
 }
 
-const drawPattern = () => {
+/**
+ * Draw the pattern at elapsed time `t` (ms). In normal mode the group is
+ * centered and static; in hard mode the whole group is translated horizontally
+ * so it slides from off the right edge to off the left edge across the reveal.
+ */
+const drawScene = (t: number) => {
   const canvas = canvasEl.value
   if (!canvas) return
   const ctx = canvas.getContext('2d')
@@ -61,14 +72,23 @@ const drawPattern = () => {
   ctx.fillStyle = '#0a0f1e'
   ctx.fillRect(0, 0, S, S)
 
-  // Center the grid within the square board.
+  // Blocks are the same size in both modes (so a level looks identical); only
+  // the group's horizontal position differs.
   const cell = Math.floor(S / Math.max(round.cols, round.rows))
   const gap = Math.max(2, Math.round(cell * 0.08))
   const gridW = cell * round.cols
   const gridH = cell * round.rows
-  const ox = Math.floor((S - gridW) / 2)
-  const oy = Math.floor((S - gridH) / 2)
   const r = Math.max(2, Math.round(cell * 0.14))
+
+  const oy = Math.floor((S - gridH) / 2)
+  let ox: number
+  if (round.mode === 'hard') {
+    // Slide the whole group from fully off the right to fully off the left.
+    const p = round.exposureMs ? Math.max(0, Math.min(1, t / round.exposureMs)) : 1
+    ox = Math.round(S - p * (S + gridW))
+  } else {
+    ox = Math.floor((S - gridW) / 2)
+  }
 
   for (const c of round.cells) {
     const x = ox + c.x * cell + gap / 2
@@ -90,7 +110,7 @@ const loop = (ts: number) => {
   if (!startTs) startTs = ts
   const t = ts - startTs
   remaining.value = round.exposureMs - t
-  drawPattern()
+  drawScene(t)
   if (t >= round.exposureMs) {
     stopLoop()
     clearBoard() // hide the pattern so the answer isn't given away
@@ -102,7 +122,7 @@ const loop = (ts: number) => {
 }
 
 const startWatch = () => {
-  round = makeRound(level.value, seed)
+  round = makeRound(level.value, seed, mode.value)
   phase.value = 'watch'
   remaining.value = round.exposureMs
   startTs = 0
@@ -141,13 +161,24 @@ const adjust = (delta: number) => {
 }
 
 watch(boardPx, () => {
-  if (phase.value === 'watch') drawPattern()
+  if (phase.value === 'watch') drawScene(startTs ? performance.now() - startTs : 0)
   else clearBoard()
+})
+
+// Switching difficulty restarts the run so the new mode applies cleanly.
+watch(mode, () => {
+  try {
+    localStorage.setItem(MODE_KEY, mode.value)
+  } catch {
+    // ignore
+  }
+  newGame()
 })
 
 onMounted(() => {
   try {
     best.value = Number(localStorage.getItem(BEST_KEY)) || 0
+    if (localStorage.getItem(MODE_KEY) === 'hard') mode.value = 'hard'
   } catch {
     best.value = 0
   }
@@ -160,16 +191,33 @@ onBeforeUnmount(stopLoop)
   <v-container class="py-4" max-width="820">
     <GameToolbar title="Count the Blocks">
       <template #intro>
-        A pattern of blocks flashes on the grid. Memorize it, then enter how many blocks it
-        contained. Get it right to level up — more blocks, a bigger grid, and a shorter flash.
+        A cohesive pattern of blocks appears briefly. Count them, then enter how many there were.
+        Get it right to level up — more blocks, a bigger grid, and a shorter reveal. In Hard mode the
+        blocks slide across the screen instead of flashing.
+      </template>
+      <template #settings>
+        <div class="text-subtitle-2 mb-2">Difficulty</div>
+        <v-btn-toggle v-model="mode" mandatory density="comfortable" color="primary" divided class="d-flex">
+          <v-btn value="normal" class="flex-grow-1">Normal</v-btn>
+          <v-btn value="hard" class="flex-grow-1">Hard</v-btn>
+        </v-btn-toggle>
+        <p class="text-caption text-medium-emphasis mt-2 mb-0">
+          Normal flashes the pattern in place. Hard slides the blocks across the screen — count them
+          as they stream past. Changing this starts a new run.
+        </p>
       </template>
       <template #info>
         <h3>Goal</h3>
         <p>One cohesive pattern of colored blocks is shown for a few seconds. When it disappears, enter the total number of blocks you saw. Each correct answer advances a level; one miss ends the run.</p>
+        <h3>Modes</h3>
+        <ul>
+          <li><strong>Normal</strong> — the pattern flashes statically on the grid.</li>
+          <li><strong>Hard</strong> — the same cohesive group slides across the screen; count the blocks as they stream past.</li>
+        </ul>
         <h3>How it works</h3>
         <ul>
           <li>Every block counts — the answer is simply the total number of blocks in the pattern.</li>
-          <li>Higher levels add more blocks, enlarge the grid, and shorten the flash.</li>
+          <li>Higher levels add more blocks, enlarge the grid, and shorten the reveal.</li>
         </ul>
         <h3>Tips</h3>
         <ul>
@@ -189,7 +237,6 @@ onBeforeUnmount(stopLoop)
       <canvas ref="canvasEl" class="canvas" :style="{ width: boardPx + 'px', height: boardPx + 'px' }" />
 
       <template v-if="phase === 'watch'">
-        <div class="banner">Memorize the pattern…</div>
         <div class="timer">
           <div class="timer-fill" :style="{ width: progress + '%' }" />
         </div>
@@ -197,7 +244,7 @@ onBeforeUnmount(stopLoop)
 
       <div v-else class="overlay">
         <template v-if="phase === 'answer'">
-          <p class="text-h6 mb-1">How many blocks were in the pattern?</p>
+          <p class="text-h6 mb-1">How many blocks did you count?</p>
           <div class="stepper my-3">
             <v-btn icon="mdi-minus" size="large" variant="tonal" @click="adjust(-1)" />
             <span class="answer-num">{{ answer }}</span>
@@ -234,17 +281,6 @@ onBeforeUnmount(stopLoop)
 }
 .canvas {
   display: block;
-}
-.banner {
-  position: absolute;
-  top: 10px;
-  left: 0;
-  right: 0;
-  text-align: center;
-  font-weight: 600;
-  color: rgba(226, 232, 240, 0.8);
-  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
-  pointer-events: none;
 }
 .timer {
   position: absolute;

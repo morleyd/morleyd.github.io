@@ -13,15 +13,21 @@ import { useSquareFit } from '@/composables/useSquareFit'
 import {
   CELLS,
   N,
+  clearCell,
   findConflicts,
   generatePuzzle,
   isComplete,
+  placeLockedDigit,
   type Difficulty,
   type Grid,
 } from '@/services/sudoku'
 import { findHint, type Hint } from '@/services/sudokuHints'
 
-const { el: boardEl, px: boardPx } = useSquareFit(220)
+// Space (px) taken up below the board by the number pad, lock caption, and
+// tools row. Desktop needs less reserve (roomier viewport) so the board can
+// grow taller; phones reserve more so nothing below the board overflows.
+const isWide = typeof window !== 'undefined' && window.matchMedia('(min-width: 960px)').matches
+const { el: boardEl, px: boardPx } = useSquareFit(isWide ? 190 : 236)
 
 const route = useRoute()
 const router = useRouter()
@@ -179,18 +185,19 @@ const inputDigit = (v: number) => {
 }
 
 // Place the currently locked digit into cell `i` (used by cell taps in lock
-// mode). Unlike inputDigit it never toggles off, and auto-advances the lock.
+// mode). Tapping a cell that ALREADY holds the locked digit clears it
+// (toggle-delete) and does NOT advance the lock; otherwise it places the digit
+// and, once every copy is down, advances to the next digit.
 const placeLocked = (i: number) => {
   const v = lockedDigit.value
   if (v === null || given.value[i] || solved.value) return
   clearHint()
-  const next = cells.value.slice()
-  next[i] = v
-  cells.value = next
+  const { grid, cleared } = placeLockedDigit(cells.value, given.value, i, v)
+  cells.value = grid
   notes.value[i].clear()
-  clearPeerNotes(i, v)
+  if (!cleared) clearPeerNotes(i, v)
   notes.value = [...notes.value]
-  advanceLock()
+  if (!cleared) advanceLock() // a delete must not skip the lock forward
   if (solved.value) stopTimer()
 }
 
@@ -241,13 +248,13 @@ const clickPad = (n: number) => {
   tapPad(n)
 }
 
+// Erase clears whatever is in the selected cell (a value or any notes) — a
+// direct clear, not an undo of the last move.
 const erase = () => {
   const i = selected.value
   if (i === null || given.value[i] || solved.value) return
   clearHint()
-  const next = cells.value.slice()
-  next[i] = 0
-  cells.value = next
+  cells.value = clearCell(cells.value, given.value, i)
   notes.value[i].clear()
   notes.value = [...notes.value]
 }
@@ -383,7 +390,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <v-container class="py-6" max-width="620">
+  <v-container class="py-4" max-width="560">
     <GameToolbar title="Sudoku" shareable @share="share">
       <template #intro>
         Fill the grid so every row, column, and 3×3 box holds 1–9. Tap a cell, then a number — or
@@ -415,7 +422,7 @@ onBeforeUnmount(() => {
           <li>Click/tap a cell, then a number (or press <span class="k">1</span>–<span class="k">9</span>).</li>
           <li><span class="k">Notes</span> mode (or <span class="k">N</span>) pencils in small candidates.</li>
           <li><span class="k">Backspace</span> / the erase button clears a cell; arrow keys move.</li>
-          <li><strong>Long-press a number</strong> to lock it: every cell you tap then gets that digit, and the lock jumps to the next digit once all nine are placed. Tap it again to unlock.</li>
+          <li><strong>Long-press a number</strong> to lock it: every cell you tap then gets that digit, and the lock jumps to the next digit once all nine are placed. Tap a cell that already holds the locked digit to remove it. Tap the digit on the pad again to unlock.</li>
           <li><span class="k">Hint</span> finds the next logical move by name (naked/hidden single, locked candidate, pairs) and nudges you step by step — press again to narrow in, and only the last step reveals the value.</li>
         </ul>
         <h3>Difficulty</h3>
@@ -477,7 +484,7 @@ onBeforeUnmount(() => {
     <!-- Lock status -->
     <div class="text-center text-caption text-medium-emphasis mt-2" style="min-height: 1.2em">
       <template v-if="lockedDigit !== null">
-        <v-icon icon="mdi-lock" size="x-small" /> {{ lockedDigit }} locked — tap cells to place it. Tap {{ lockedDigit }} again to unlock.
+        <v-icon icon="mdi-lock" size="x-small" /> {{ lockedDigit }} locked — tap a cell to place it, tap a {{ lockedDigit }} to remove it. Tap {{ lockedDigit }} on the pad to unlock.
       </template>
       <template v-else>Long-press a number to lock it for repeated placement.</template>
     </div>
@@ -516,18 +523,26 @@ onBeforeUnmount(() => {
 <style scoped>
 .board-wrap {
   position: relative;
+  max-width: 100%;
+  aspect-ratio: 1 / 1; /* safety net so the board stays square even before JS sizes it */
+  margin-inline: auto;
 }
 .board {
   display: grid;
-  grid-template-columns: repeat(9, 1fr);
-  grid-template-rows: repeat(9, 1fr);
+  /* minmax(0, 1fr) forces every track to exactly 1/9 of the board — without the
+     min(0) the implicit min-content floor lets rows grow past the square and
+     overflow gets clipped, which reads as a squashed 5-row grid on phones. */
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+  grid-template-rows: repeat(9, minmax(0, 1fr));
   width: 100%;
   height: 100%;
-  border: 2px solid rgba(148, 163, 184, 0.7);
+  box-sizing: border-box;
+  border: 3px solid rgba(203, 213, 225, 0.9);
   border-radius: 8px;
   overflow: hidden;
   background: rgba(2, 6, 23, 0.85);
   user-select: none;
+  container-type: size; /* let cells size their font off the board (cqmin) */
 }
 
 .cell {
@@ -535,16 +550,22 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   border: 1px solid rgba(148, 163, 184, 0.18);
-  font-size: clamp(1rem, 5vw, 1.6rem);
+  /* Font scales with the board's smaller side, so digits fit at any size. */
+  font-size: clamp(0.8rem, 6.4cqmin, 1.8rem);
+  line-height: 1;
   color: #93c5fd; /* player entries: light blue */
   background: transparent;
   cursor: pointer;
   transition: background 90ms ease;
 }
-/* Thicker lines between 3×3 boxes */
-.cell--r3 { border-left: 2px solid rgba(148, 163, 184, 0.6); }
-.cell--b3 { border-top: 2px solid rgba(148, 163, 184, 0.6); }
+/* Strong dividers between the 3×3 boxes so the nine boxes read clearly. */
+.cell--r3 { border-left: 3px solid rgba(203, 213, 225, 0.85); }
+.cell--b3 { border-top: 3px solid rgba(203, 213, 225, 0.85); }
 
 .cell--given {
   color: #e2e8f0;
@@ -573,7 +594,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.55rem;
+  font-size: clamp(0.4rem, 2.4cqmin, 0.62rem);
   line-height: 1;
   color: rgba(148, 163, 184, 0.85);
 }
@@ -594,12 +615,13 @@ onBeforeUnmount(() => {
 
 .pad {
   display: grid;
-  grid-template-columns: repeat(9, 1fr);
-  gap: 6px;
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+  gap: 4px;
 }
 .pad-btn {
   min-width: 0;
-  font-size: 1.15rem;
+  padding-inline: 0; /* let all nine buttons fit on a narrow phone row */
+  font-size: clamp(0.95rem, 4vw, 1.3rem);
   font-weight: 700;
   touch-action: manipulation; /* avoid text-selection / callout on long-press */
 }

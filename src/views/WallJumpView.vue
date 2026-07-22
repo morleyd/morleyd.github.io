@@ -72,7 +72,9 @@ const chargeMs = ref(0)
 
 let ninja: NinjaState = initialNinja()
 let seed = 1
-let maxY = 0
+// Reactive so the `score` computed re-evaluates as we climb — a plain variable
+// wouldn't be tracked and the height would read stuck at 0.
+const maxY = ref(0)
 let dangerY = LAVA_START_Y
 let elapsedMs = 0 // run time, drives lava acceleration
 let cameraY = 0 // lags ninja.y so the jump arc is visible on screen
@@ -84,12 +86,12 @@ let dying = false // playing the death fall before the game-over screen
 let deathMs = 0
 let deathVy = 0
 
-const score = computed(() => Math.max(0, Math.round(maxY * 10)))
+const score = computed(() => Math.max(0, Math.round(maxY.value * 10)))
 
 const reset = () => {
   ninja = initialNinja()
   seed = (Math.floor(Math.random() * 0xffffffff) || 1) >>> 0
-  maxY = 0
+  maxY.value = 0
   dangerY = LAVA_START_Y
   elapsedMs = 0
   cameraY = 0
@@ -356,10 +358,13 @@ const tick = (ts: number) => {
     return
   }
 
-  if (charging && !ninja.airborne) chargeMs.value = ts - chargeStart
+  // Charge is measured against one monotonic wall clock (performance.now), not
+  // accumulated per frame or read from the rAF timestamp — so the power sweep
+  // takes the same real time regardless of the loop's frame rate.
+  if (charging && !ninja.airborne) chargeMs.value = performance.now() - chargeStart
 
   ninja = stepNinja(ninja, dt)
-  if (ninja.y > maxY) maxY = ninja.y
+  if (ninja.y > maxY.value) maxY.value = ninja.y
   // Ease the camera toward the ninja so the jump arc is visible before it recenters.
   cameraY += (ninja.y - cameraY) * Math.min(1, (dt / 1000) * 5)
 
@@ -391,38 +396,40 @@ const start = () => {
   raf = requestAnimationFrame(tick)
 }
 
-const beginCharge = (ts: number) => {
+const beginCharge = () => {
   if (state.value !== 'running') {
     start()
   }
   if (!ninja.airborne) {
     charging = true
-    chargeStart = ts
+    chargeStart = performance.now()
     chargeMs.value = 0
   }
 }
-const releaseCharge = (ts: number) => {
+const releaseCharge = () => {
   if (state.value !== 'running' || !charging) return
   charging = false
   if (!ninja.airborne) {
-    ninja = jump(ninja, ts - chargeStart)
+    // Same wall clock as the arc preview, so the jump lands on exactly the power
+    // the player saw on the meter at the moment of release.
+    ninja = jump(ninja, performance.now() - chargeStart)
     chargeMs.value = 0
   }
 }
 
-const onPointerDown = (e: PointerEvent) => beginCharge(e.timeStamp)
-const onPointerUp = (e: PointerEvent) => releaseCharge(e.timeStamp)
+const onPointerDown = () => beginCharge()
+const onPointerUp = () => releaseCharge()
 
 const onKeyDown = (e: KeyboardEvent) => {
   if (e.key === ' ' && !e.repeat) {
     e.preventDefault()
-    beginCharge(e.timeStamp)
+    beginCharge()
   }
 }
 const onKeyUp = (e: KeyboardEvent) => {
   if (e.key === ' ') {
     e.preventDefault()
-    releaseCharge(e.timeStamp)
+    releaseCharge()
   }
 }
 

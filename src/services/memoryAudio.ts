@@ -60,7 +60,7 @@ export class SimonAudio {
 
     // Quick attack, gentle release so overlapping blips don't click.
     gain.gain.setValueAtTime(0.0001, now)
-    gain.gain.exponentialRampToValueAtTime(0.2, now + 0.02)
+    gain.gain.exponentialRampToValueAtTime(0.32, now + 0.02)
     gain.gain.exponentialRampToValueAtTime(0.0001, end)
 
     osc.connect(gain).connect(this.ctx.destination)

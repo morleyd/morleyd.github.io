@@ -33,6 +33,14 @@ describe('chargeToVy oscillation', () => {
     expect(chargeToVy(MAX_CHARGE_MS)).toBeCloseTo(MAX_JUMP_VY)
   })
 
+  it('uses a comfortably slow, phone-friendly period (~1.2-1.5s per full cycle)', () => {
+    // Long enough that a player can watch the meter and release on the power they
+    // want; MAX_CHARGE_MS (full power) is exactly half of it.
+    expect(CHARGE_PERIOD_MS).toBeGreaterThanOrEqual(1200)
+    expect(CHARGE_PERIOD_MS).toBeLessThanOrEqual(1500)
+    expect(MAX_CHARGE_MS).toBe(CHARGE_PERIOD_MS / 2)
+  })
+
   it('sweeps min → max → min: back to min after a full period', () => {
     expect(chargeToVy(CHARGE_PERIOD_MS)).toBeCloseTo(MIN_JUMP_VY)
     expect(chargeToVy(MAX_CHARGE_MS / 2)).toBeCloseTo((MIN_JUMP_VY + MAX_JUMP_VY) / 2)
@@ -228,11 +236,82 @@ describe('hitsSpike', () => {
   it('kills the ninja that flies into a spike near its wall', () => {
     const seed = 5
     const spike = presentSpike(seed)
-    // Airborne but pressed up against the spike's wall within its reach.
-    const s: NinjaState = { side: spike.side, x: WALL_X[spike.side], y: spike.y, vx: 0.9, vy: 0, airborne: true }
+    // Airborne, pressed against the spike's wall and moving toward it (arriving),
+    // so it is genuinely flying into the spike.
+    const s: NinjaState = {
+      side: spike.side,
+      x: WALL_X[spike.side],
+      y: spike.y,
+      vx: spike.side * 0.9,
+      vy: 0,
+      airborne: true,
+    }
     expect(hitsSpike(s, seed)).toBe(true)
   })
   it('is safe at the start (no spike near y=0)', () => {
     expect(hitsSpike(initialNinja(), 5)).toBe(false)
+  })
+})
+
+describe('hitsSpike — the launch wall cannot kill you', () => {
+  const presentSpike = (seed: number) => spikeAt(seed, 30)
+
+  it('does not die rising off the wall it just launched from, past a same-side spike', () => {
+    const seed = 5
+    const spike = presentSpike(seed)
+    expect(spike.present).toBe(true)
+    // Ninja launched off `spike.side`, so it is still against that wall but
+    // already airborne and moving AWAY toward the far wall (vx = -side * speed),
+    // rising past its own wall's spike. This must not be fatal.
+    const launched: NinjaState = {
+      side: spike.side,
+      x: WALL_X[spike.side],
+      y: spike.y,
+      vx: -spike.side * 0.9,
+      vy: 1.0,
+      airborne: true,
+    }
+    expect(hitsSpike(launched, seed)).toBe(false)
+  })
+
+  it('a real leap: launching next to a same-side spike and stepping upward stays alive', () => {
+    const seed = 5
+    const spike = presentSpike(seed)
+    // Sit the ninja on the spike's wall, right at the spike's height, and leap.
+    let s: NinjaState = { side: spike.side, x: WALL_X[spike.side], y: spike.y, vx: 0, vy: 0, airborne: false }
+    s = jump(s, MAX_CHARGE_MS)
+    // Simulate the departure/ascent: while still near the launch wall it is safe.
+    let diedOnAscent = false
+    for (let i = 0; i < 6 && s.airborne; i += 1) {
+      if (hitsSpike(s, seed)) diedOnAscent = true
+      s = stepNinja(s, 16)
+    }
+    expect(diedOnAscent).toBe(false)
+  })
+
+  it('still dies when it reaches the destination wall onto a spike there', () => {
+    // Find a seed whose row-30 spike sits on the right wall, then launch from the
+    // left toward it and confirm arriving on it is fatal.
+    let seed = 1
+    while (spikeAt(seed, 30).side !== 1) seed += 1
+    const spike = spikeAt(seed, 30)
+    expect(spike.present).toBe(true)
+    // Airborne, arriving at the destination (right) wall right at the spike.
+    const arriving: NinjaState = {
+      side: -1, // launched from the left
+      x: WALL_X['1'],
+      y: spike.y,
+      vx: 0.9, // moving right, into the destination wall
+      vy: 0,
+      airborne: true,
+    }
+    expect(hitsSpike(arriving, seed)).toBe(true)
+  })
+
+  it('landing (grounded) on a spike is still fatal', () => {
+    const seed = 5
+    const spike = presentSpike(seed)
+    const landed: NinjaState = { side: spike.side, x: WALL_X[spike.side], y: spike.y, vx: 0, vy: 0, airborne: false }
+    expect(hitsSpike(landed, seed)).toBe(true)
   })
 })

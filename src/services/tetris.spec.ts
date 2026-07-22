@@ -15,6 +15,8 @@ import {
   pieceCells,
   rotate,
   spawnPiece,
+  stepDown,
+  SOFT_DROP_REPEAT_MS,
   type Board,
 } from './tetris'
 
@@ -139,6 +141,35 @@ describe('dropRow', () => {
     for (let c = 0; c < COLS; c += 1) board[(ROWS - 1) * COLS + c] = 1
     const ghost = dropRow(board, spawnPiece('O'))
     expect(Math.max(...pieceCells(ghost).map((c) => c.y))).toBe(ROWS - 2)
+  })
+})
+
+describe('stepDown', () => {
+  it('moves the piece down one row on an empty board', () => {
+    const piece = spawnPiece('O')
+    const next = stepDown(emptyBoard(), piece)
+    expect(next).not.toBeNull()
+    expect(next!.y).toBe(piece.y + 1)
+    expect(next!.x).toBe(piece.x)
+  })
+  it('returns null when the piece is grounded on the floor', () => {
+    const landed = dropRow(emptyBoard(), spawnPiece('O'))
+    expect(stepDown(emptyBoard(), landed)).toBeNull()
+  })
+  it('returns null when a settled block sits directly below', () => {
+    const board = emptyBoard()
+    for (let c = 0; c < COLS; c += 1) board[(ROWS - 1) * COLS + c] = 1
+    const resting = dropRow(board, spawnPiece('O')) // lands on row ROWS-2
+    expect(stepDown(board, resting)).toBeNull()
+  })
+  it('is a pure one-row step matching repeated dropRow behaviour', () => {
+    // Stepping down repeatedly until null lands at the same spot as dropRow.
+    let p = spawnPiece('T')
+    for (let next = stepDown(emptyBoard(), p); next; next = stepDown(emptyBoard(), p)) p = next
+    expect(p.y).toBe(dropRow(emptyBoard(), spawnPiece('T')).y)
+  })
+  it('exposes a positive soft-drop repeat interval', () => {
+    expect(SOFT_DROP_REPEAT_MS).toBeGreaterThan(0)
   })
 })
 

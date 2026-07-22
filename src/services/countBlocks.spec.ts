@@ -35,6 +35,12 @@ describe('exposureForLevel', () => {
     expect(exposureForLevel(6)).toBeLessThan(exposureForLevel(1))
     expect(exposureForLevel(100)).toBeGreaterThanOrEqual(900)
   })
+
+  it('gives hard (sliding) mode more time than normal at the same level', () => {
+    for (let level = 1; level <= 15; level += 1) {
+      expect(exposureForLevel(level, 'hard')).toBeGreaterThan(exposureForLevel(level, 'normal'))
+    }
+  })
 })
 
 describe('makeRound', () => {
@@ -85,6 +91,18 @@ describe('makeRound', () => {
     expect(seen.size).toBe(r.cells.length)
   })
 
+  it('defaults to normal mode; hard mode keeps the same cluster but shows it longer', () => {
+    const normal = makeRound(6, 'mode-seed')
+    const hard = makeRound(6, 'mode-seed', 'hard')
+    expect(normal.mode).toBe('normal')
+    expect(hard.mode).toBe('hard')
+    // Same seed/level → identical positions and count in both modes, so the
+    // answer is never ambiguous — only the reveal duration differs.
+    expect(hard.cells).toEqual(normal.cells)
+    expect(hard.blockCount).toBe(normal.blockCount)
+    expect(hard.exposureMs).toBeGreaterThan(normal.exposureMs)
+  })
+
   it('enlarges the grid and shortens the flash as levels rise', () => {
     const a = makeRound(1, 's')
     const b = makeRound(8, 's')
@@ -96,11 +114,13 @@ describe('makeRound', () => {
 })
 
 describe('correctAnswer', () => {
-  it('equals the number of blocks the player can see and count', () => {
-    for (let level = 1; level <= 15; level += 1) {
-      const r = makeRound(level, 'answer-key')
-      expect(correctAnswer(r)).toBe(r.cells.length)
-      expect(correctAnswer(r)).toBe(r.blockCount)
+  it('equals the number of blocks the player can see and count — in both modes', () => {
+    for (const mode of ['normal', 'hard'] as const) {
+      for (let level = 1; level <= 15; level += 1) {
+        const r = makeRound(level, 'answer-key', mode)
+        expect(correctAnswer(r)).toBe(r.cells.length)
+        expect(correctAnswer(r)).toBe(r.blockCount)
+      }
     }
   })
 })

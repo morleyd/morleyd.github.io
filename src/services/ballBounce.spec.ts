@@ -9,12 +9,14 @@ import {
   type Ball,
   type Platform,
   bounceReach,
+  heightScore,
   nearestPlatformIndex,
   platformAt,
   platformBroken,
   platformY,
   spacingBefore,
   stepBall,
+  trackMaxHeight,
   tryBounce,
   wrapDist,
 } from './ballBounce'
@@ -148,6 +150,35 @@ describe('platformBroken (shelves vanish after a couple of bounces)', () => {
     for (let i = 0; i < MAX_BOUNCES; i += 1) expect(bounceOnce()).toBe(true)
     expect(platformBroken(count)).toBe(true)
     expect(bounceOnce()).toBe(false) // no infinite bouncing on one shelf
+  })
+})
+
+describe('height tracking (Height score climbs with the ball)', () => {
+  it('trackMaxHeight only ever rises as the ball ascends', () => {
+    let max = 0
+    for (const y of [0.5, 1.2, 1.0, 2.4, 2.0, 3.1]) max = trackMaxHeight(max, y)
+    expect(max).toBe(3.1) // dips (1.0, 2.0) never lower the tracked peak
+  })
+  it('trackMaxHeight ignores a lower current y', () => {
+    expect(trackMaxHeight(5, 3)).toBe(5)
+    expect(trackMaxHeight(5, 9)).toBe(9)
+  })
+  it('heightScore grows with climbed height and is never negative', () => {
+    expect(heightScore(0)).toBe(0)
+    expect(heightScore(-0.02)).toBe(0) // tiny initial dip clamps to 0, not negative
+    expect(heightScore(2.5)).toBe(25)
+    expect(heightScore(10)).toBeGreaterThan(heightScore(5))
+  })
+  it('simulating a climb reports a rising, non-zero Height', () => {
+    // Mirrors the view loop: step under gravity, track the peak, read the score.
+    let ball: Ball = { x: 0.5, y: 0, vx: 0, vy: BOUNCE_VY }
+    let max = 0
+    for (let i = 0; i < 20; i += 1) {
+      ball = stepBall(ball, 0, 16)
+      max = trackMaxHeight(max, ball.y)
+    }
+    expect(max).toBeGreaterThan(0)
+    expect(heightScore(max)).toBeGreaterThan(0)
   })
 })
 

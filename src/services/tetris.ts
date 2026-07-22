@@ -175,6 +175,19 @@ export function dropRow(board: Board, piece: Piece): Piece {
   return p
 }
 
+/**
+ * One soft-drop step: the piece moved down a single row, or null if it can't
+ * fall (it's grounded). Shared by the keyboard soft-drop and the on-screen
+ * press-and-hold repeat so both behave identically.
+ */
+export function stepDown(board: Board, piece: Piece): Piece | null {
+  const moved = { ...piece, y: piece.y + 1 }
+  return collides(board, moved) ? null : moved
+}
+
+/** Interval (ms) between repeats while the soft-drop button is held down. */
+export const SOFT_DROP_REPEAT_MS = 55
+
 const LINE_SCORES = [0, 100, 300, 500, 800]
 /** Points for clearing `lines` rows at the given level (1-based). */
 export function lineScore(lines: number, level: number): number {

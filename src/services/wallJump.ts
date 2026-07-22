@@ -37,7 +37,12 @@ export const MAX_JUMP_VY = Math.sqrt(2 * GRAVITY * MAX_JUMP_HEIGHT) // apex === 
 // min → max over CHARGE_PERIOD_MS, so the player must time the release to lock
 // in the power they want. Holding for exactly half a period lands on full power,
 // so MAX_CHARGE_MS (the hold that yields MAX_JUMP_VY) is that half-period.
-export const CHARGE_PERIOD_MS = 900 // one full min→max→min sweep
+//
+// The hold duration fed in is wall-clock milliseconds (measured against a single
+// monotonic clock, not accumulated per frame), so the sweep takes the same real
+// time on a 30fps phone as on a 120fps desktop. The period is a comfortable
+// ~1.4s so a player can watch the meter rise and release at the power they want.
+export const CHARGE_PERIOD_MS = 1400 // one full min→max→min sweep (wall-clock ms)
 export const MAX_CHARGE_MS = CHARGE_PERIOD_MS / 2 // hold time at the first power peak
 
 export const initialNinja = (): NinjaState => ({
@@ -182,6 +187,12 @@ export function spikeAt(seed: number, index: number): Spike {
  * whether it is clinging to that wall or still airborne but within the spike's
  * reach of it — so flying into a spike is fatal, not only landing on one. When
  * the ninja is out in the middle of the shaft (near neither wall) it is safe.
+ *
+ * Crucially, a spike on the wall the ninja just LAUNCHED FROM cannot catch it:
+ * while airborne and still moving away from a wall (departing it), that wall's
+ * spikes are ignored, so a ninja rising off a wall next to a spike is not killed
+ * by its own wall. Only the wall it is moving toward (arriving at), or a wall it
+ * is grounded on, is lethal — so flying into or landing on a spike still kills.
  */
 export function hitsSpike(state: NinjaState, seed: number): boolean {
   const leftX = WALL_X['-1']
@@ -190,6 +201,10 @@ export function hitsSpike(state: NinjaState, seed: number): boolean {
   if (state.x <= leftX + SPIKE_REACH) side = -1
   else if (state.x >= rightX - SPIKE_REACH) side = 1
   if (side === 0) return false
+
+  // Departing this wall (airborne and moving away from it) — it's the wall we
+  // launched off, so its spikes can't catch us on the way up/out.
+  if (state.airborne && state.vx * side < 0) return false
 
   const nearestIndex = Math.round((state.y - SPIKE_WARMUP) / SPIKE_SPACING)
   for (let i = Math.max(0, nearestIndex - 1); i <= nearestIndex + 1; i += 1) {

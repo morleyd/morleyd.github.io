@@ -113,6 +113,20 @@ describe('generateTango', () => {
     const { given } = generateTango('trim')
     expect(given.some((v) => v === EMPTY)).toBe(true)
   })
+
+  it('only links orthogonally adjacent cells (badge layout invariant)', () => {
+    // The view places each badge from this invariant: b is either the cell to
+    // the right (a+1, same row) or directly below (a+SIZE). Anything else would
+    // mis-position the "=" / "×" badge on the board.
+    for (const seed of ['a', 'b', 'c', 'd', 'e']) {
+      const { constraints } = generateTango(seed)
+      for (const { a, b } of constraints) {
+        const horizontal = b === a + 1 && Math.floor(a / SIZE) === Math.floor(b / SIZE)
+        const vertical = b === a + SIZE
+        expect(horizontal || vertical).toBe(true)
+      }
+    }
+  })
 })
 
 describe('solver rejects inconsistent givens', () => {

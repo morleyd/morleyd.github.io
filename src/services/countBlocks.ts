@@ -1,12 +1,21 @@
 /**
  * Count the Blocks — a memory game. A SINGLE cohesive pattern of blocks is
- * flashed on a grid for a short time; then you answer how many blocks were in
- * it. The asked quantity is always the total number of blocks shown, so what
- * you count is exactly the correct answer. Rounds get harder: more blocks, a
- * bigger grid, and a shorter flash. Generation is pure and testable.
+ * shown for a short time; then you answer how many blocks were in it. The
+ * asked quantity is always the total number of blocks shown, so what you count
+ * is exactly the correct answer — in BOTH presentation modes:
+ *   - Normal: the pattern is flashed statically on the grid.
+ *   - Hard: the same one cohesive group slides across the screen and you count
+ *     the blocks as they stream past.
+ * The generated cluster (positions + count) is identical for a given
+ * level/seed regardless of mode, so the answer is never ambiguous; only how
+ * long it is shown changes. Rounds get harder: more blocks, a bigger grid, and
+ * a shorter reveal. Generation is pure and testable.
  */
 
 import { mulberry32 } from './seed'
+
+/** How the pattern is presented: a static flash, or a sliding stream. */
+export type CountMode = 'normal' | 'hard'
 
 export interface Cell {
   x: number // grid column
@@ -16,11 +25,13 @@ export interface Cell {
 
 export interface Round {
   level: number
+  /** How the pattern is presented (flash vs. sliding stream). */
+  mode: CountMode
   /** The one cohesive pattern of blocks the player must count. */
   cells: Cell[]
   cols: number
   rows: number
-  /** How long the pattern is shown before it's hidden. */
+  /** How long the pattern is shown (flash duration / slide traversal time). */
   exposureMs: number
   /** The number of blocks in the pattern — this IS the correct answer. */
   blockCount: number
@@ -48,10 +59,15 @@ export function gridSizeForCount(count: number): number {
   return Math.min(12, Math.max(4, Math.ceil(Math.sqrt(count)) + 2))
 }
 
-/** How long the pattern is flashed (ms): eases down as the level rises. */
-export function exposureForLevel(level: number): number {
+/**
+ * How long the pattern is shown (ms): eases down as the level rises. Hard mode
+ * lasts longer because the group has to slide the whole way across the screen —
+ * that traversal time is what makes the blocks countable as they stream past.
+ */
+export function exposureForLevel(level: number, mode: CountMode = 'normal'): number {
   const count = countForLevel(level)
-  return Math.max(900, Math.round(2000 + count * 40 - level * 150))
+  const base = Math.max(900, Math.round(2000 + count * 40 - level * 150))
+  return mode === 'hard' ? Math.round(base * 1.6) : base
 }
 
 const key = (x: number, y: number): string => `${x},${y}`
@@ -67,7 +83,7 @@ const neighbors = (x: number, y: number): Array<[number, number]> => [
  * connected cluster grown from the grid center, so the reveal is a single
  * cohesive pattern rather than a scatter of separate pieces.
  */
-export function makeRound(level: number, seed: string): Round {
+export function makeRound(level: number, seed: string, mode: CountMode = 'normal'): Round {
   const rng = mulberry32((hash(seed) + level * 2654435761) >>> 0)
   const count = countForLevel(level)
   const size = gridSizeForCount(count)
@@ -106,10 +122,11 @@ export function makeRound(level: number, seed: string): Round {
 
   return {
     level,
+    mode,
     cells,
     cols,
     rows,
-    exposureMs: exposureForLevel(level),
+    exposureMs: exposureForLevel(level, mode),
     blockCount: cells.length,
   }
 }
