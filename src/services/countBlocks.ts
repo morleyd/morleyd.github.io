@@ -1,104 +1,122 @@
 /**
- * Count the Blocks — a memory game. A set of tetromino-like shapes slides across
- * the screen; afterward you answer how many there were (and, later, how many of
- * a target shape). Rounds get harder: more shapes, faster, shorter exposure.
- * Generation and difficulty are pure and testable.
+ * Count the Blocks — a memory game. A SINGLE cohesive pattern of blocks is
+ * flashed on a grid for a short time; then you answer how many blocks were in
+ * it. The asked quantity is always the total number of blocks shown, so what
+ * you count is exactly the correct answer. Rounds get harder: more blocks, a
+ * bigger grid, and a shorter flash. Generation is pure and testable.
  */
 
 import { mulberry32 } from './seed'
 
-export const SHAPES = ['I', 'O', 'T', 'S', 'Z', 'L', 'J'] as const
-export type Shape = (typeof SHAPES)[number]
-
-export interface Piece {
-  shape: Shape
-  lane: number // vertical lane index (row it travels along)
+export interface Cell {
+  x: number // grid column
+  y: number // grid row
   color: string
-  /** Fraction along its travel where it starts, so pieces are staggered. */
-  startOffset: number
 }
 
 export interface Round {
   level: number
-  pieces: Piece[]
-  target: Shape // "how many <target>?" is asked from level 3 on
-  speed: number // lanes-per-second-ish scroll factor (view scales it)
-  exposureMs: number // how long the shapes stream past
-  lanes: number
+  /** The one cohesive pattern of blocks the player must count. */
+  cells: Cell[]
+  cols: number
+  rows: number
+  /** How long the pattern is shown before it's hidden. */
+  exposureMs: number
+  /** The number of blocks in the pattern — this IS the correct answer. */
+  blockCount: number
 }
 
-const COLORS: Record<Shape, string> = {
-  I: '#22d3ee',
-  O: '#facc15',
-  T: '#a855f7',
-  S: '#22c55e',
-  Z: '#ef4444',
-  L: '#f97316',
-  J: '#3b82f6',
-}
+/** Per-block fill colors, cycled so the pattern reads as a mosaic of blocks. */
+export const PALETTE = [
+  '#22d3ee',
+  '#facc15',
+  '#a855f7',
+  '#22c55e',
+  '#ef4444',
+  '#f97316',
+  '#3b82f6',
+  '#ec4899',
+] as const
 
-export const colorOf = (shape: Shape): string => COLORS[shape]
-
-/** How many shapes appear at a given level. */
+/** How many blocks appear at a given level (ramps up, then caps). */
 export function countForLevel(level: number): number {
-  return Math.min(24, 3 + level * 2)
+  return Math.min(30, 3 + level * 2)
 }
 
-/** Whether this level asks the harder "how many of shape X" question. */
-export function asksTarget(level: number): boolean {
-  return level >= 3
+/** Square grid side length for a given block count (with breathing room). */
+export function gridSizeForCount(count: number): number {
+  return Math.min(12, Math.max(4, Math.ceil(Math.sqrt(count)) + 2))
 }
 
-/** Build a deterministic round for a level from a seed. */
+/** How long the pattern is flashed (ms): eases down as the level rises. */
+export function exposureForLevel(level: number): number {
+  const count = countForLevel(level)
+  return Math.max(900, Math.round(2000 + count * 40 - level * 150))
+}
+
+const key = (x: number, y: number): string => `${x},${y}`
+const neighbors = (x: number, y: number): Array<[number, number]> => [
+  [x + 1, y],
+  [x - 1, y],
+  [x, y + 1],
+  [x, y - 1],
+]
+
+/**
+ * Build a deterministic round for a level from a seed. The blocks form ONE
+ * connected cluster grown from the grid center, so the reveal is a single
+ * cohesive pattern rather than a scatter of separate pieces.
+ */
 export function makeRound(level: number, seed: string): Round {
   const rng = mulberry32((hash(seed) + level * 2654435761) >>> 0)
   const count = countForLevel(level)
-  const lanes = Math.min(8, 4 + Math.floor(level / 2))
-  const pieces: Piece[] = []
-  for (let i = 0; i < count; i += 1) {
-    const shape = SHAPES[Math.floor(rng() * SHAPES.length)]
-    pieces.push({ shape, lane: Math.floor(rng() * lanes), color: colorOf(shape), startOffset: 0 })
+  const size = gridSizeForCount(count)
+  const cols = size
+  const rows = size
+
+  const inBounds = (x: number, y: number): boolean => x >= 0 && x < cols && y >= 0 && y < rows
+
+  // Grow a connected blob outward from the center by repeatedly filling a
+  // random empty cell adjacent to the cluster.
+  const filled = new Set<string>()
+  const order: Array<[number, number]> = []
+  const add = (x: number, y: number): void => {
+    filled.add(key(x, y))
+    order.push([x, y])
   }
-  // Spread pieces that share a lane into separated time slots so they never
-  // overlap on screen and get miscounted.
-  const byLane: Piece[][] = Array.from({ length: lanes }, () => [])
-  for (const p of pieces) byLane[p.lane].push(p)
-  for (const lanePieces of byLane) {
-    const m = lanePieces.length
-    lanePieces.forEach((p, k) => {
-      p.startOffset = (k + 0.5) / m + (rng() - 0.5) * (0.4 / m) // centered in its slot, small jitter
-    })
+  add(Math.floor(cols / 2), Math.floor(rows / 2))
+
+  while (order.length < count) {
+    const frontier: Array<[number, number]> = []
+    for (const [fx, fy] of order) {
+      for (const [nx, ny] of neighbors(fx, fy)) {
+        if (inBounds(nx, ny) && !filled.has(key(nx, ny))) frontier.push([nx, ny])
+      }
+    }
+    if (frontier.length === 0) break
+    const [gx, gy] = frontier[Math.floor(rng() * frontier.length)]
+    add(gx, gy)
   }
-  const target = SHAPES[Math.floor(rng() * SHAPES.length)]
+
+  const cells: Cell[] = order.map(([x, y]) => ({
+    x,
+    y,
+    color: PALETTE[Math.floor(rng() * PALETTE.length)],
+  }))
+
   return {
     level,
-    pieces,
-    target,
-    speed: 0.5 + level * 0.12,
-    exposureMs: Math.max(2200, 5200 - level * 260),
-    lanes,
+    cells,
+    cols,
+    rows,
+    exposureMs: exposureForLevel(level),
+    blockCount: cells.length,
   }
 }
 
-/** Count pieces matching a shape (answer key for the target question). */
-export function countOf(round: Round, shape: Shape): number {
-  return round.pieces.filter((p) => p.shape === shape).length
-}
-
-/** The correct answer for a round given whether it's the targeted variant. */
+/** The correct answer for a round: the number of blocks the player can see. */
 export function correctAnswer(round: Round): number {
-  return asksTarget(round.level) ? countOf(round, round.target) : round.pieces.length
-}
-
-/** Cell layout (unit squares) for drawing each shape, normalized to origin. */
-export const SHAPE_CELLS: Record<Shape, Array<[number, number]>> = {
-  I: [[0, 0], [1, 0], [2, 0], [3, 0]],
-  O: [[0, 0], [1, 0], [0, 1], [1, 1]],
-  T: [[0, 0], [1, 0], [2, 0], [1, 1]],
-  S: [[1, 0], [2, 0], [0, 1], [1, 1]],
-  Z: [[0, 0], [1, 0], [1, 1], [2, 1]],
-  L: [[0, 0], [0, 1], [1, 1], [2, 1]],
-  J: [[2, 0], [0, 1], [1, 1], [2, 1]],
+  return round.blockCount
 }
 
 function hash(str: string): number {

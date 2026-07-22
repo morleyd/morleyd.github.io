@@ -32,7 +32,13 @@ export const JUMP_VX = 0.9 // horizontal jump speed
 export const MAX_JUMP_HEIGHT = 1.9 // max apex above the launch point (climb units)
 export const MIN_JUMP_VY = 0.5
 export const MAX_JUMP_VY = Math.sqrt(2 * GRAVITY * MAX_JUMP_HEIGHT) // apex === MAX_JUMP_HEIGHT
-export const MAX_CHARGE_MS = 620 // press duration for a full-power jump
+
+// Charge power oscillates while held: a triangle wave that sweeps min → max →
+// min → max over CHARGE_PERIOD_MS, so the player must time the release to lock
+// in the power they want. Holding for exactly half a period lands on full power,
+// so MAX_CHARGE_MS (the hold that yields MAX_JUMP_VY) is that half-period.
+export const CHARGE_PERIOD_MS = 900 // one full min→max→min sweep
+export const MAX_CHARGE_MS = CHARGE_PERIOD_MS / 2 // hold time at the first power peak
 
 export const initialNinja = (): NinjaState => ({
   side: -1,
@@ -43,10 +49,17 @@ export const initialNinja = (): NinjaState => ({
   airborne: false,
 })
 
-/** Map a hold duration (ms) to jump vertical speed, clamped and eased linearly. */
+/**
+ * Map a hold duration (ms) to jump vertical speed via an oscillating triangle
+ * wave: power rises from MIN_JUMP_VY to MAX_JUMP_VY over the first half of
+ * CHARGE_PERIOD_MS, falls back to MIN over the second half, then repeats. The
+ * peak is MAX_JUMP_VY, so the jump apex is always clamped to MAX_JUMP_HEIGHT and
+ * the ninja can never leave the screen no matter how long the hold.
+ */
 export function chargeToVy(holdMs: number): number {
-  const t = Math.max(0, Math.min(1, holdMs / MAX_CHARGE_MS))
-  return MIN_JUMP_VY + t * (MAX_JUMP_VY - MIN_JUMP_VY)
+  const phase = (Math.max(0, holdMs) % CHARGE_PERIOD_MS) / CHARGE_PERIOD_MS
+  const tri = 1 - Math.abs(2 * phase - 1) // 0 at phase 0, 1 at phase 0.5, 0 at phase 1
+  return MIN_JUMP_VY + tri * (MAX_JUMP_VY - MIN_JUMP_VY)
 }
 
 /**
@@ -114,22 +127,54 @@ export interface Spike {
   side: Wall
   y: number
   half: number // half-height of the spike's danger zone (climb units)
+  present: boolean // sparse rows near the bottom leave many slots empty
 }
 
 /**
- * Deterministic, endless spikes. Spikes are spaced roughly every `SPACING`
- * climb units; each row places a spike on one wall (never both, so a jump is
- * always survivable). Density is fixed; the challenge comes from timing.
+ * Deterministic, endless spikes that get harder with height. Rows are spaced
+ * every `SPIKE_SPACING` climb units, but difficulty ramps in over height:
+ *
+ *  - A spike-free warm-up (`SPIKE_WARMUP`) at the very bottom lets the player
+ *    find their footing.
+ *  - Above it, only a fraction of rows actually hold a spike (`spikePresenceProb`),
+ *    starting sparse and rising to fully populated — so effective spacing tightens
+ *    with height.
+ *  - Spikes also grow (`spikeHalfAt`) from `SPIKE_HALF_MIN` to `SPIKE_HALF_MAX`.
+ *
+ * Each occupied row still places a spike on only one wall, so a jump is always
+ * survivable. The ramp completes over `SPIKE_DENSITY_HEIGHT` climb units.
  */
-export const SPIKE_SPACING = 1.4
-export const SPIKE_HALF = 0.32
+export const SPIKE_SPACING = 1.3
+export const SPIKE_WARMUP = 3.0 // spike-free climb units at the bottom
+export const SPIKE_DENSITY_HEIGHT = 26 // height over which difficulty ramps to max
+export const SPIKE_PRESENCE_MIN = 0.4 // fraction of rows occupied at the start
+export const SPIKE_PRESENCE_MAX = 1.0 // fraction of rows occupied at full difficulty
+export const SPIKE_HALF_MIN = 0.22 // spike half-height near the start
+export const SPIKE_HALF_MAX = 0.42 // spike half-height at full difficulty
 export const SPIKE_REACH = 0.09 // how far a spike's danger zone juts in from its wall (x units)
+
+/** Normalised difficulty (0 during warm-up, ramping to 1) at a given height. */
+export function spikeDifficulty(y: number): number {
+  return Math.max(0, Math.min(1, (y - SPIKE_WARMUP) / SPIKE_DENSITY_HEIGHT))
+}
+
+/** Probability that a given row actually holds a spike at height `y`. */
+export function spikePresenceProb(y: number): number {
+  return SPIKE_PRESENCE_MIN + spikeDifficulty(y) * (SPIKE_PRESENCE_MAX - SPIKE_PRESENCE_MIN)
+}
+
+/** Spike half-height (danger radius) at height `y` — grows with difficulty. */
+export function spikeHalfAt(y: number): number {
+  return SPIKE_HALF_MIN + spikeDifficulty(y) * (SPIKE_HALF_MAX - SPIKE_HALF_MIN)
+}
 
 export function spikeAt(seed: number, index: number): Spike {
   const rand = mulberry32((seed + index * 2654435761) >>> 0)
   const side: Wall = rand() < 0.5 ? -1 : 1
-  const jitter = (rand() - 0.5) * 0.5
-  return { side, y: (index + 1) * SPIKE_SPACING + jitter, half: SPIKE_HALF }
+  const jitter = (rand() - 0.5) * 0.4
+  const y = SPIKE_WARMUP + index * SPIKE_SPACING + jitter
+  const present = index >= 0 && rand() < spikePresenceProb(y)
+  return { side, y, half: spikeHalfAt(y), present }
 }
 
 /**
@@ -146,21 +191,40 @@ export function hitsSpike(state: NinjaState, seed: number): boolean {
   else if (state.x >= rightX - SPIKE_REACH) side = 1
   if (side === 0) return false
 
-  const nearestIndex = Math.round(state.y / SPIKE_SPACING)
+  const nearestIndex = Math.round((state.y - SPIKE_WARMUP) / SPIKE_SPACING)
   for (let i = Math.max(0, nearestIndex - 1); i <= nearestIndex + 1; i += 1) {
     const spike = spikeAt(seed, i)
-    if (spike.side === side && Math.abs(spike.y - state.y) < spike.half) return true
+    if (spike.present && spike.side === side && Math.abs(spike.y - state.y) < spike.half) return true
   }
   return false
 }
 
 // --- Rising lava --------------------------------------------------------------
 // The lava rises from below and its speed accelerates the longer the run lasts,
-// so dawdling gets punished more and more. Speed is a function of elapsed time,
-// capped so it stays outrunnable in principle.
-export const LAVA_BASE_SPEED = 0.35 // rise speed at the start (climb units / s)
-export const LAVA_ACCEL = 0.16 // extra rise speed gained per second elapsed
-export const LAVA_MAX_SPEED = 3.2 // ceiling on the rise speed (climb units / s)
+// so dawdling gets punished more and more. To keep it genuinely outrunnable, the
+// ceiling is derived from the ninja's own sustainable climb rate (below) rather
+// than picked by feel.
+
+/**
+ * The ninja's sustainable average climb speed (climb units / s), assuming a
+ * skilled player chains full-power jumps: each jump gains `heightPerJump` over
+ * the time it takes to fly across the shaft plus the hold needed to reach full
+ * charge. The lava ceiling is set safely below this so the climb is always
+ * winnable.
+ */
+export function climbSpeed(): number {
+  const gap = WALL_X['1'] - WALL_X['-1']
+  const crossS = gap / JUMP_VX // time in the air crossing to the far wall
+  const heightPerJump = MAX_JUMP_VY * crossS - 0.5 * GRAVITY * crossS * crossS
+  const cycleS = crossS + MAX_CHARGE_MS / 1000 // flight + time to charge to full
+  return heightPerJump / cycleS
+}
+
+export const LAVA_BASE_SPEED = 0.28 // rise speed at the start (climb units / s)
+export const LAVA_ACCEL = 0.045 // extra rise speed gained per second elapsed
+// Ceiling kept at ~65% of the achievable climb rate: gentle acceleration, but a
+// skilled climber can always pull away.
+export const LAVA_MAX_SPEED = 0.65 * climbSpeed() // ceiling on the rise speed (climb units / s)
 
 /** Current lava rise speed for a run that has been going `elapsedMs` ms. */
 export function lavaSpeed(elapsedMs: number): number {

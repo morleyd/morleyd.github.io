@@ -20,8 +20,11 @@ export interface Segment {
   right: number
 }
 
-export const FLAP_VX = 0.9 // horizontal speed imparted by a flap
-export const FLYER_RADIUS = 0.045 // as a fraction of width
+// Per-tap horizontal impulse. Kept small relative to the tunnel width so a tap
+// nudges the flyer (total coast ≈ FLAP_VX / decay ≈ 0.11 of width) instead of
+// lurching it across the gap — threading pinch points stays controllable.
+export const FLAP_VX = 0.38 // horizontal speed imparted by a flap
+export const FLYER_RADIUS = 0.038 // as a fraction of width (small = more slack)
 
 /**
  * Advance the flyer horizontally. Velocity decays exponentially so taps feel
@@ -93,5 +96,5 @@ export const BASE_SCROLL_SPEED = 2.6
  */
 export function scrollSpeedFor(distance: number): number {
   const d = Math.max(0, distance)
-  return BASE_SCROLL_SPEED + 3.4 * difficultyFor(d) + Math.log1p(d / 200)
+  return BASE_SCROLL_SPEED + 4.4 * difficultyFor(d) + Math.log1p(d / 160)
 }

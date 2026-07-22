@@ -136,3 +136,100 @@ const clueEquals = (a: number[], b: number[]): boolean =>
 export function lineSatisfied(line: boolean[], clue: number[]): boolean {
   return clueEquals(lineClue(line), clue)
 }
+
+/**
+ * A cell as the player has painted it: 0 = empty/unknown, 1 = filled,
+ * 2 = X-marked (deduced empty). Matches the view's `marks` encoding, so a line
+ * can be handed to these functions directly. X-marks and the line edge act as
+ * hard run terminators; an unknown-empty cell does not (a run beside it could
+ * still grow).
+ */
+export type Cell = 0 | 1 | 2
+const EMPTY = 0
+const FILLED = 1
+const CROSS = 2
+
+/**
+ * Lock clue entries from the left: walk the line matching completed filled runs
+ * to clue entries in order, stopping at the first ambiguity. A run counts as
+ * matched only when it is genuinely closed — its far side is the line edge or an
+ * X-mark (not an unknown-empty cell it could grow into) — and every gap crossed
+ * on the way is an X-mark, never an unknown-empty that could hide another run.
+ */
+function lockFromLeft(cells: Cell[], clue: number[]): boolean[] {
+  const locked = clue.map(() => false)
+  const n = cells.length
+  let pos = 0
+  for (let i = 0; i < clue.length; i += 1) {
+    while (pos < n && cells[pos] === CROSS) pos += 1 // skip known gaps
+    if (pos >= n) break
+    if (cells[pos] === EMPTY) break // unknown gap → a run could hide here; stop
+    const start = pos
+    while (pos < n && cells[pos] === FILLED) pos += 1
+    if (pos - start !== clue[i]) break // run doesn't (yet) match this clue
+    if (pos < n && cells[pos] === EMPTY) break // open on the right → could grow
+    locked[i] = true
+  }
+  return locked
+}
+
+/**
+ * Which individual clue entries are unambiguously placed by the current fills,
+ * using the both-ends technique: an entry is satisfied if it is locked scanning
+ * from the left OR from the right. Conservative — a coincidental partial fill
+ * never greys a number. A line whose filled cells already form exactly the clue
+ * marks every entry satisfied (the runs are pinned even if gaps are unmarked).
+ */
+export function satisfiedClues(cells: Cell[], clue: number[]): boolean[] {
+  // Empty-line clue: its single 0 is "done" only when nothing is filled.
+  if (clue.length === 1 && clue[0] === 0) return [!cells.some((c) => c === FILLED)]
+
+  const filled = cells.map((c) => c === FILLED)
+  if (clueEquals(lineClue(filled), clue)) return clue.map(() => true)
+
+  const left = lockFromLeft(cells, clue)
+  const rightRev = lockFromLeft([...cells].reverse(), [...clue].reverse())
+  const right = rightRev.reverse()
+  return clue.map((_, i) => left[i] || right[i])
+}
+
+/**
+ * Whether the line, as painted, can still be completed to match its clue:
+ * filled cells must be filled, X-marks must stay empty, unknown cells are free.
+ * Returns false when the current fills already contradict the clue (used by
+ * validation to flag a line red). Backtracking placement with memoization.
+ */
+export function lineConsistent(cells: Cell[], clue: number[]): boolean {
+  const runs = clue.length === 1 && clue[0] === 0 ? [] : clue
+  const n = cells.length
+  const memo = new Map<number, boolean>()
+
+  const solve = (pos: number, ci: number): boolean => {
+    if (ci === runs.length) {
+      for (let k = pos; k < n; k += 1) if (cells[k] === FILLED) return false
+      return true
+    }
+    if (pos >= n) return false
+    const key = pos * (runs.length + 1) + ci
+    const cached = memo.get(key)
+    if (cached !== undefined) return cached
+
+    let ok = false
+    const len = runs[ci]
+    // Option 1: place run ci starting at pos.
+    if (pos + len <= n) {
+      let fits = true
+      for (let k = pos; k < pos + len; k += 1) if (cells[k] === CROSS) fits = false
+      // The run must be followed by a gap (edge or a non-filled cell).
+      if (fits && pos + len < n && cells[pos + len] === FILLED) fits = false
+      if (fits && solve(pos + len + 1, ci + 1)) ok = true
+    }
+    // Option 2: leave pos empty — only if it isn't a filled cell.
+    if (!ok && cells[pos] !== FILLED && solve(pos + 1, ci)) ok = true
+
+    memo.set(key, ok)
+    return ok
+  }
+
+  return solve(0, 0)
+}

@@ -19,8 +19,12 @@ import {
   type FlyerState,
 } from '@/services/tunnel'
 
-const { el: boardEl, px: boardPx } = useSquareFit(150)
-const displayW = computed(() => Math.round(boardPx.value * 0.64))
+// Reserve less below the board so it climbs closer to the full viewport height,
+// and use a taller aspect so the tunnel fills more of the screen on desktop and
+// mobile. Physics are width-fractional, so a larger canvas only means more px
+// per unit — the feel is unchanged, just bigger and easier to read.
+const { el: boardEl, px: boardPx } = useSquareFit(96)
+const displayW = computed(() => Math.round(boardPx.value * 0.7))
 const displayH = computed(() => boardPx.value)
 
 const BEST_KEY = 'tunnel-best'
@@ -187,7 +191,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <v-container class="py-6" max-width="600">
+  <v-container class="py-6" max-width="820">
     <GameToolbar title="Vertical Tunnel">
       <template #intro>
         Steer your circle up the tunnel. Tap a side to nudge that way — the

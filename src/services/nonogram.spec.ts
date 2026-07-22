@@ -4,10 +4,13 @@ import {
   generateNonogram,
   isSolved,
   lineClue,
+  lineConsistent,
   lineSatisfied,
   nonogramFromPattern,
   patternToSolution,
   rowClues,
+  satisfiedClues,
+  type Cell,
   type Solution,
 } from './nonogram'
 import { NONOGRAM_PATTERNS, patternById, patternsForSize } from './nonogramPatterns'
@@ -136,5 +139,82 @@ describe('lineSatisfied', () => {
     expect(lineSatisfied([true, true, false, true], [2, 1])).toBe(true)
     expect(lineSatisfied([true, false, false, true], [2, 1])).toBe(false)
     expect(lineSatisfied([false, false], [0])).toBe(true)
+  })
+})
+
+// Cell codes: 0 empty/unknown · 1 filled · 2 X-marked.
+const cells = (...c: number[]): Cell[] => c as Cell[]
+
+describe('satisfiedClues', () => {
+  it('locks a run bounded by the edge and an X-mark', () => {
+    // [F F X . .] with clue [2,1]: the "2" is pinned (edge + X); "1" is unknown.
+    expect(satisfiedClues(cells(1, 1, 2, 0, 0), [2, 1])).toEqual([true, false])
+  })
+
+  it('does not lock a run that could still grow into an unknown cell', () => {
+    // [F F . . .] clue [2,1]: right of the pair is unknown, so it could grow.
+    expect(satisfiedClues(cells(1, 1, 0, 0, 0), [2, 1])).toEqual([false, false])
+  })
+
+  it('never greys on a coincidental partial fill', () => {
+    // A single filled cell floating in unknowns matches neither clue firmly.
+    expect(satisfiedClues(cells(0, 1, 0, 0, 0), [1, 1])).toEqual([false, false])
+  })
+
+  it('leaves an ambiguous middle run un-greyed while locking the ends', () => {
+    // [F X F . .] clue [1,1,1]: left "1" locked (edge+X); middle "1" is open on
+    // the right (unknown), the last "1" isn't placed at all.
+    expect(satisfiedClues(cells(1, 2, 1, 0, 0), [1, 1, 1])).toEqual([true, false, false])
+  })
+
+  it('locks from the right end too', () => {
+    // [. . X F] clue [1,1]: only the trailing "1" is pinned (X + edge).
+    expect(satisfiedClues(cells(0, 0, 2, 1), [1, 1])).toEqual([false, true])
+  })
+
+  it('greys every entry once the filled cells form exactly the clue', () => {
+    // Fully solved line, gaps left as plain unknowns (not X-marked).
+    expect(satisfiedClues(cells(1, 0, 1, 0, 1), [1, 1, 1])).toEqual([true, true, true])
+    expect(satisfiedClues(cells(1, 1, 0, 1), [2, 1])).toEqual([true, true])
+  })
+
+  it('greys the 0 of an empty line only while nothing is filled', () => {
+    expect(satisfiedClues(cells(0, 2, 2, 0), [0])).toEqual([true])
+    expect(satisfiedClues(cells(0, 1, 0, 0), [0])).toEqual([false])
+  })
+})
+
+describe('lineConsistent', () => {
+  it('accepts a fully solved line', () => {
+    expect(lineConsistent(cells(1, 1, 0, 1), [2, 1])).toBe(true)
+  })
+
+  it('accepts a partial fill that can still be completed', () => {
+    expect(lineConsistent(cells(1, 0, 0, 0, 0), [2, 1])).toBe(true)
+    expect(lineConsistent(cells(0, 0, 2, 0), [2])).toBe(true)
+  })
+
+  it('flags a run bounded too tightly by X-marks to fit', () => {
+    // clue wants a run of 3 but an X sits in the middle of the only space.
+    expect(lineConsistent(cells(1, 2, 1), [3])).toBe(false)
+  })
+
+  it('flags adjacent fills that violate a split clue', () => {
+    // [F F .] with clue [1,1] — the two singles cannot be adjacent.
+    expect(lineConsistent(cells(1, 1, 0), [1, 1])).toBe(false)
+  })
+
+  it('flags an over-filled line', () => {
+    expect(lineConsistent(cells(1, 1, 1), [2])).toBe(false)
+  })
+
+  it('flags a filled cell on a line clued empty', () => {
+    expect(lineConsistent(cells(0, 1, 0), [0])).toBe(false)
+    expect(lineConsistent(cells(0, 2, 0), [0])).toBe(true)
+  })
+
+  it('flags too many separate runs for the clue', () => {
+    // [F . F . F] clue [1,1] — three runs, only two allowed.
+    expect(lineConsistent(cells(1, 0, 1, 0, 1), [1, 1])).toBe(false)
   })
 })

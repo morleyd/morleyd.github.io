@@ -1,29 +1,62 @@
 import { describe, it, expect } from 'vitest'
 import {
+  CHARGE_PERIOD_MS,
   LAVA_MAX_SPEED,
   MAX_CHARGE_MS,
   MAX_JUMP_HEIGHT,
   MAX_JUMP_VY,
   MIN_JUMP_VY,
+  SPIKE_WARMUP,
   WALL_X,
   chargeToVy,
+  climbSpeed,
   hitsSpike,
   initialNinja,
   jump,
   lavaSpeed,
   predictTrajectory,
   spikeAt,
+  spikeDifficulty,
+  spikeHalfAt,
+  spikePresenceProb,
   stepLava,
   stepNinja,
   type NinjaState,
 } from './wallJump'
 
-describe('chargeToVy', () => {
-  it('maps hold duration to jump speed, clamped', () => {
+describe('chargeToVy oscillation', () => {
+  it('starts at min power for an instant tap', () => {
     expect(chargeToVy(0)).toBe(MIN_JUMP_VY)
-    expect(chargeToVy(MAX_CHARGE_MS)).toBe(MAX_JUMP_VY)
-    expect(chargeToVy(9999)).toBe(MAX_JUMP_VY)
+  })
+
+  it('reaches full power at the first (half-period) peak', () => {
+    expect(chargeToVy(MAX_CHARGE_MS)).toBeCloseTo(MAX_JUMP_VY)
+  })
+
+  it('sweeps min → max → min: back to min after a full period', () => {
+    expect(chargeToVy(CHARGE_PERIOD_MS)).toBeCloseTo(MIN_JUMP_VY)
     expect(chargeToVy(MAX_CHARGE_MS / 2)).toBeCloseTo((MIN_JUMP_VY + MAX_JUMP_VY) / 2)
+  })
+
+  it('is periodic in CHARGE_PERIOD_MS', () => {
+    for (const t of [50, 200, 375, 600, 830]) {
+      expect(chargeToVy(t)).toBeCloseTo(chargeToVy(t + CHARGE_PERIOD_MS))
+      expect(chargeToVy(t)).toBeCloseTo(chargeToVy(t + 3 * CHARGE_PERIOD_MS))
+    }
+  })
+
+  it('reaches both extremes and never exceeds the bounds', () => {
+    let seenMin = false
+    let seenMax = false
+    for (let t = 0; t <= 3 * CHARGE_PERIOD_MS; t += 5) {
+      const v = chargeToVy(t)
+      expect(v).toBeGreaterThanOrEqual(MIN_JUMP_VY - 1e-9)
+      expect(v).toBeLessThanOrEqual(MAX_JUMP_VY + 1e-9)
+      if (Math.abs(v - MIN_JUMP_VY) < 1e-6) seenMin = true
+      if (Math.abs(v - MAX_JUMP_VY) < 1e-6) seenMax = true
+    }
+    expect(seenMin).toBe(true)
+    expect(seenMax).toBe(true)
   })
 })
 
@@ -84,6 +117,16 @@ describe('lava', () => {
     const late = stepLava(0, 8000, 100) // 100ms, 8s into the run
     expect(late).toBeGreaterThan(early)
   })
+
+  it('is outrunnable: even its accelerated maximum stays below the climb rate', () => {
+    const climb = climbSpeed()
+    expect(climb).toBeGreaterThan(0)
+    // The fully accelerated ceiling must sit comfortably under a skilled climb.
+    expect(LAVA_MAX_SPEED).toBeLessThan(climb)
+    expect(LAVA_MAX_SPEED).toBeLessThanOrEqual(0.7 * climb)
+    // The starting speed is of course slower still.
+    expect(lavaSpeed(0)).toBeLessThan(LAVA_MAX_SPEED)
+  })
 })
 
 describe('jump', () => {
@@ -120,36 +163,71 @@ describe('stepNinja', () => {
 
 describe('spikeAt', () => {
   it('is deterministic and picks a single wall', () => {
-    const a = spikeAt(77, 3)
-    expect(spikeAt(77, 3)).toEqual(a)
+    const a = spikeAt(77, 30)
+    expect(spikeAt(77, 30)).toEqual(a)
     expect([-1, 1]).toContain(a.side)
     expect(a.y).toBeGreaterThan(0)
+  })
+  it('leaves a spike-free warm-up at the bottom', () => {
+    // Row 0 sits at the warm-up line (± small jitter); nothing appears below it.
+    expect(spikeAt(1, 0).y).toBeGreaterThan(SPIKE_WARMUP - 0.5)
+  })
+})
+
+describe('spike difficulty ramps with height', () => {
+  it('difficulty rises from 0 at the warm-up to 1 higher up, and clamps', () => {
+    expect(spikeDifficulty(0)).toBe(0)
+    expect(spikeDifficulty(SPIKE_WARMUP)).toBe(0)
+    expect(spikeDifficulty(SPIKE_WARMUP + 10)).toBeGreaterThan(0)
+    expect(spikeDifficulty(SPIKE_WARMUP + 10)).toBeLessThan(1)
+    expect(spikeDifficulty(10_000)).toBe(1)
+  })
+  it('presence probability and spike size both grow with height', () => {
+    expect(spikePresenceProb(60)).toBeGreaterThan(spikePresenceProb(SPIKE_WARMUP))
+    expect(spikeHalfAt(60)).toBeGreaterThan(spikeHalfAt(SPIKE_WARMUP))
+  })
+  it('the start is forgiving: far denser near the top than near the bottom', () => {
+    const seed = 12345
+    const countPresent = (from: number, to: number) => {
+      let n = 0
+      for (let i = from; i < to; i += 1) if (spikeAt(seed, i).present) n += 1
+      return n
+    }
+    const low = countPresent(0, 20) // roughly the first ~25 climb units
+    const high = countPresent(60, 80) // deep into the ramp
+    expect(high).toBeGreaterThan(low)
+    // And near the very top essentially every row is a spike.
+    expect(countPresent(200, 220)).toBeGreaterThan(18)
   })
 })
 
 describe('hitsSpike', () => {
+  // Use a high row (difficulty ≈ 1) so a spike is guaranteed present.
+  const presentSpike = (seed: number) => spikeAt(seed, 30)
+
   it('impales a ninja clinging at a spike on the same wall', () => {
     const seed = 5
-    const spike = spikeAt(seed, 4)
+    const spike = presentSpike(seed)
+    expect(spike.present).toBe(true)
     const s: NinjaState = { side: spike.side, x: WALL_X[spike.side], y: spike.y, vx: 0, vy: 0, airborne: false }
     expect(hitsSpike(s, seed)).toBe(true)
   })
   it('is safe on the opposite wall from the spike', () => {
     const seed = 5
-    const spike = spikeAt(seed, 4)
+    const spike = presentSpike(seed)
     const other = (spike.side * -1) as -1 | 1
     const s: NinjaState = { side: other, x: WALL_X[other], y: spike.y, vx: 0, vy: 0, airborne: false }
     expect(hitsSpike(s, seed)).toBe(false)
   })
   it('is safe airborne out in the middle of the shaft', () => {
     const seed = 5
-    const spike = spikeAt(seed, 4)
+    const spike = presentSpike(seed)
     const s: NinjaState = { side: spike.side, x: 0.5, y: spike.y, vx: 0.9, vy: 0, airborne: true }
     expect(hitsSpike(s, seed)).toBe(false)
   })
   it('kills the ninja that flies into a spike near its wall', () => {
     const seed = 5
-    const spike = spikeAt(seed, 4)
+    const spike = presentSpike(seed)
     // Airborne but pressed up against the spike's wall within its reach.
     const s: NinjaState = { side: spike.side, x: WALL_X[spike.side], y: spike.y, vx: 0.9, vy: 0, airborne: true }
     expect(hitsSpike(s, seed)).toBe(true)

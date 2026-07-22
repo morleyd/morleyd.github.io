@@ -1,24 +1,17 @@
 <script setup lang="ts">
 /**
- * Count the Blocks — a memory game. Tetromino-like shapes stream across the
- * screen for a few seconds; then you answer how many there were (or, from level
- * 3, how many of one shape). Each correct answer advances a level (more shapes,
- * faster, shorter look); one wrong answer ends the run. Round data/difficulty
- * come from services/countBlocks.
+ * Count the Blocks — a memory game. A single cohesive pattern of blocks is
+ * flashed on a grid; then you answer how many blocks it contained. What you
+ * count is exactly the correct answer (no hidden target-shape twist). Each
+ * correct answer advances a level (more blocks, bigger grid, shorter flash);
+ * one wrong answer ends the run. Round data comes from services/countBlocks.
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import GameToolbar from '@/components/GameToolbar.vue'
 import { useSquareFit } from '@/composables/useSquareFit'
-import {
-  SHAPE_CELLS,
-  asksTarget,
-  colorOf,
-  correctAnswer,
-  makeRound,
-  type Round,
-} from '@/services/countBlocks'
+import { correctAnswer, makeRound, type Round } from '@/services/countBlocks'
 
-const { el: boardEl, px: boardPx } = useSquareFit(240)
+const { el: boardEl, px: boardPx } = useSquareFit(36)
 
 const BEST_KEY = 'countblocks-best'
 
@@ -29,16 +22,15 @@ const answer = ref(0)
 const lastCorrect = ref(0)
 const wasRight = ref(false)
 const best = ref(0)
+const remaining = ref(0) // ms left in the flash, for the countdown bar
 
 let round: Round = makeRound(1, 'init')
 let seed = 'seed'
 let raf = 0
 let startTs = 0
 
-const targeted = computed(() => asksTarget(level.value))
-const targetColor = computed(() => colorOf(round.target))
-const question = computed(() =>
-  targeted.value ? 'How many of this shape?' : 'How many blocks in total?',
+const progress = computed(() =>
+  round.exposureMs ? Math.max(0, Math.min(100, (remaining.value / round.exposureMs) * 100)) : 0,
 )
 
 const stopLoop = () => {
@@ -46,53 +38,62 @@ const stopLoop = () => {
   raf = 0
 }
 
-const drawPieces = (t: number) => {
+const clearBoard = () => {
+  const ctx = canvasEl.value?.getContext('2d')
+  if (!ctx) return
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.fillStyle = '#0a0f1e'
+  ctx.fillRect(0, 0, canvasEl.value!.width, canvasEl.value!.height)
+}
+
+const drawPattern = () => {
   const canvas = canvasEl.value
   if (!canvas) return
   const ctx = canvas.getContext('2d')
   if (!ctx) return
   const dpr = window.devicePixelRatio || 1
-  const W = boardPx.value
-  const H = boardPx.value
-  if (canvas.width !== W * dpr || canvas.height !== H * dpr) {
-    canvas.width = W * dpr
-    canvas.height = H * dpr
+  const S = boardPx.value
+  if (canvas.width !== S * dpr || canvas.height !== S * dpr) {
+    canvas.width = S * dpr
+    canvas.height = S * dpr
   }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.fillStyle = '#0a0f1e'
-  ctx.fillRect(0, 0, W, H)
+  ctx.fillRect(0, 0, S, S)
 
-  const laneH = H / round.lanes
-  const cell = Math.min(laneH / 2.6, W / 18)
-  const travelDur = round.exposureMs * 0.5
-  const pieceMax = 4 * cell
+  // Center the grid within the square board.
+  const cell = Math.floor(S / Math.max(round.cols, round.rows))
+  const gap = Math.max(2, Math.round(cell * 0.08))
+  const gridW = cell * round.cols
+  const gridH = cell * round.rows
+  const ox = Math.floor((S - gridW) / 2)
+  const oy = Math.floor((S - gridH) / 2)
+  const r = Math.max(2, Math.round(cell * 0.14))
 
-  for (const p of round.pieces) {
-    const startT = p.startOffset * round.exposureMs * 0.5
-    const local = (t - startT) / travelDur
-    if (local < 0 || local > 1) continue
-    const x = local * (W + pieceMax * 2) - pieceMax
-    const y = p.lane * laneH + laneH / 2 - cell
-    ctx.fillStyle = p.color
-    for (const [cx, cy] of SHAPE_CELLS[p.shape]) {
-      ctx.fillRect(x + cx * cell, y + cy * cell, cell - 2, cell - 2)
+  for (const c of round.cells) {
+    const x = ox + c.x * cell + gap / 2
+    const y = oy + c.y * cell + gap / 2
+    const w = cell - gap
+    ctx.fillStyle = c.color
+    if (typeof ctx.roundRect === 'function') {
+      ctx.beginPath()
+      ctx.roundRect(x, y, w, w, r)
+      ctx.fill()
+    } else {
+      ctx.fillRect(x, y, w, w)
     }
   }
 }
 
 const loop = (ts: number) => {
   if (phase.value !== 'watch') return
-  const t = startTs ? ts - startTs : 0
   if (!startTs) startTs = ts
-  drawPieces(t)
+  const t = ts - startTs
+  remaining.value = round.exposureMs - t
+  drawPattern()
   if (t >= round.exposureMs) {
     stopLoop()
-    // Clear the board so the answer isn't given away.
-    const ctx = canvasEl.value?.getContext('2d')
-    if (ctx) {
-      ctx.fillStyle = '#0a0f1e'
-      ctx.fillRect(0, 0, boardPx.value, boardPx.value)
-    }
+    clearBoard() // hide the pattern so the answer isn't given away
     phase.value = 'answer'
     answer.value = 0
     return
@@ -103,6 +104,7 @@ const loop = (ts: number) => {
 const startWatch = () => {
   round = makeRound(level.value, seed)
   phase.value = 'watch'
+  remaining.value = round.exposureMs
   startTs = 0
   stopLoop()
   raf = requestAnimationFrame(loop)
@@ -119,14 +121,12 @@ const submit = () => {
   lastCorrect.value = correctAnswer(round)
   wasRight.value = answer.value === lastCorrect.value
   phase.value = 'result'
-  if (wasRight.value) {
-    if (level.value > best.value) {
-      best.value = level.value
-      try {
-        localStorage.setItem(BEST_KEY, String(best.value))
-      } catch {
-        // ignore
-      }
+  if (wasRight.value && level.value > best.value) {
+    best.value = level.value
+    try {
+      localStorage.setItem(BEST_KEY, String(best.value))
+    } catch {
+      // ignore
     }
   }
 }
@@ -141,9 +141,8 @@ const adjust = (delta: number) => {
 }
 
 watch(boardPx, () => {
-  // Redraw at the current elapsed time; before the first frame startTs is 0.
-  if (phase.value === 'watch') drawPieces(startTs ? performance.now() - startTs : 0)
-  else drawPieces(round.exposureMs) // answer/result: keep the board cleared
+  if (phase.value === 'watch') drawPattern()
+  else clearBoard()
 })
 
 onMounted(() => {
@@ -158,25 +157,24 @@ onBeforeUnmount(stopLoop)
 </script>
 
 <template>
-  <v-container class="py-6" max-width="560">
+  <v-container class="py-4" max-width="820">
     <GameToolbar title="Count the Blocks">
       <template #intro>
-        Watch the shapes slide past, then answer how many there were. From level 3 you'll be asked
-        how many of <em>one</em> shape. Get it right to level up — it gets faster and busier.
+        A pattern of blocks flashes on the grid. Memorize it, then enter how many blocks it
+        contained. Get it right to level up — more blocks, a bigger grid, and a shorter flash.
       </template>
       <template #info>
         <h3>Goal</h3>
-        <p>Keep a running count of the blocks streaming across the screen, then enter it. Each correct answer advances a level; one miss ends the run.</p>
+        <p>One cohesive pattern of colored blocks is shown for a few seconds. When it disappears, enter the total number of blocks you saw. Each correct answer advances a level; one miss ends the run.</p>
         <h3>How it works</h3>
         <ul>
-          <li>Early levels: count <em>all</em> the shapes.</li>
-          <li>Level 3+: count only the shapes matching the one shown in the question.</li>
-          <li>Higher levels add more shapes, move faster, and give you less time.</li>
+          <li>Every block counts — the answer is simply the total number of blocks in the pattern.</li>
+          <li>Higher levels add more blocks, enlarge the grid, and shorten the flash.</li>
         </ul>
         <h3>Tips</h3>
         <ul>
-          <li>Scan lane by lane rather than chasing individual shapes.</li>
-          <li>For the targeted question, lock onto the color and ignore the rest.</li>
+          <li>Count in small groups (rows, columns, or clusters of 2–3) rather than one at a time.</li>
+          <li>The blocks always form one connected shape — trace its outline to estimate fast.</li>
         </ul>
       </template>
     </GameToolbar>
@@ -190,24 +188,16 @@ onBeforeUnmount(stopLoop)
     <div ref="boardEl" class="stage" :style="{ width: boardPx + 'px', height: boardPx + 'px' }">
       <canvas ref="canvasEl" class="canvas" :style="{ width: boardPx + 'px', height: boardPx + 'px' }" />
 
-      <div v-if="phase === 'watch'" class="banner">Watch closely…</div>
+      <template v-if="phase === 'watch'">
+        <div class="banner">Memorize the pattern…</div>
+        <div class="timer">
+          <div class="timer-fill" :style="{ width: progress + '%' }" />
+        </div>
+      </template>
 
       <div v-else class="overlay">
         <template v-if="phase === 'answer'">
-          <p class="text-h6 mb-1 d-flex align-center ga-2">
-            {{ question }}
-            <svg v-if="targeted" width="34" height="24" viewBox="0 0 4 2" class="shape-icon">
-              <rect
-                v-for="([cx, cy], i) in SHAPE_CELLS[round.target]"
-                :key="i"
-                :x="cx"
-                :y="cy"
-                width="0.92"
-                height="0.92"
-                :fill="targetColor"
-              />
-            </svg>
-          </p>
+          <p class="text-h6 mb-1">How many blocks were in the pattern?</p>
           <div class="stepper my-3">
             <v-btn icon="mdi-minus" size="large" variant="tonal" @click="adjust(-1)" />
             <span class="answer-num">{{ answer }}</span>
@@ -256,6 +246,22 @@ onBeforeUnmount(stopLoop)
   text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
   pointer-events: none;
 }
+.timer {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(148, 163, 184, 0.2);
+  overflow: hidden;
+  pointer-events: none;
+}
+.timer-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #a855f7, #22d3ee);
+  border-radius: 3px;
+}
 .overlay {
   position: absolute;
   inset: 0;
@@ -278,8 +284,5 @@ onBeforeUnmount(stopLoop)
   font-weight: 800;
   min-width: 70px;
   font-variant-numeric: tabular-nums;
-}
-.shape-icon {
-  overflow: visible;
 }
 </style>

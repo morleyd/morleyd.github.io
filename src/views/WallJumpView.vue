@@ -7,11 +7,13 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import GameToolbar from '@/components/GameToolbar.vue'
-import { useSquareFit } from '@/composables/useSquareFit'
 import {
   GRAVITY,
-  MAX_CHARGE_MS,
+  MAX_JUMP_VY,
+  MIN_JUMP_VY,
   SPIKE_SPACING,
+  SPIKE_WARMUP,
+  chargeToVy,
   hitsSpike,
   initialNinja,
   jump,
@@ -22,14 +24,46 @@ import {
   type NinjaState,
 } from '@/services/wallJump'
 
-const { el: boardEl, px: boardPx } = useSquareFit(150)
-const displayW = computed(() => Math.round(boardPx.value * 0.66))
-const displayH = computed(() => boardPx.value)
+// Portrait play area sized to the largest rectangle of this aspect that fits the
+// available space — so it fills the height on desktop and the width on phones,
+// which the square-fit helper can't do for a tall shaft.
+const ASPECT = 0.64 // width / height of the shaft
+const boardEl = ref<HTMLElement | null>(null)
+const displayW = ref(300)
+const displayH = ref(480)
+
+const fit = () => {
+  const node = boardEl.value
+  if (!node) return
+  const parent = node.parentElement
+  if (!parent) return
+  const cs = getComputedStyle(parent)
+  const availW = parent.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
+  const top = node.getBoundingClientRect().top
+  // Smallest of every viewport-height signal is safest across mobile browsers.
+  const viewportH = Math.min(
+    window.visualViewport?.height ?? Infinity,
+    window.innerHeight || Infinity,
+    document.documentElement.clientHeight || Infinity,
+  )
+  const availH = Math.max(360, viewportH - top - 24)
+  let w = Math.min(availW, availH * ASPECT)
+  let h = w / ASPECT
+  if (h > availH) {
+    h = availH
+    w = h * ASPECT
+  }
+  displayW.value = Math.max(240, Math.floor(w))
+  displayH.value = Math.max(360, Math.floor(h))
+}
 
 const BEST_KEY = 'walljump-best'
 const WALL_THICK = 0.1 // fraction of width
 const UNITS_VISIBLE = 6 // climb units shown vertically
 const NINJA_SCREEN = 0.62 // ninja's vertical screen position
+// Start the lava surface just below the ninja so its glow is visible from the
+// outset (near the bottom of the view) — it's telegraphed, never a surprise.
+const LAVA_START_Y = -2.0
 
 const canvasEl = ref<HTMLCanvasElement | null>(null)
 const state = ref<'idle' | 'running' | 'over'>('idle')
@@ -39,7 +73,7 @@ const chargeMs = ref(0)
 let ninja: NinjaState = initialNinja()
 let seed = 1
 let maxY = 0
-let dangerY = -4
+let dangerY = LAVA_START_Y
 let elapsedMs = 0 // run time, drives lava acceleration
 let cameraY = 0 // lags ninja.y so the jump arc is visible on screen
 let charging = false
@@ -56,7 +90,7 @@ const reset = () => {
   ninja = initialNinja()
   seed = (Math.floor(Math.random() * 0xffffffff) || 1) >>> 0
   maxY = 0
-  dangerY = -4
+  dangerY = LAVA_START_Y
   elapsedMs = 0
   cameraY = 0
   charging = false
@@ -114,11 +148,22 @@ const drawNinja = (
   ctx.beginPath()
   ctx.arc(0, headY, headR, 0, Math.PI * 2)
   ctx.fill()
-  // Headband tail streaming away from the wall it faces
+  // Ninja mask: a dark horizontal band across the eyes with a glowing eye-slit,
+  // clipped to the head so it reads instantly as a masked ninja. The slit looks
+  // toward the wall being jumped to (away from the clung wall).
+  ctx.save()
+  ctx.shadowBlur = 0
   ctx.beginPath()
-  ctx.moveTo(-f * headR * 0.6, headY - headR * 0.2)
-  ctx.lineTo(-f * headR * 1.9, headY - headR * 0.6)
-  ctx.stroke()
+  ctx.arc(0, headY, headR, 0, Math.PI * 2)
+  ctx.clip()
+  const bandH = headR * 0.66
+  ctx.fillStyle = '#0b1020'
+  ctx.fillRect(-headR, headY - bandH / 2, headR * 2, bandH)
+  // Glowing eye slit, offset toward the jump direction.
+  ctx.fillStyle = '#38bdf8'
+  const eyeCx = -f * headR * 0.28
+  ctx.fillRect(eyeCx - headR * 0.3, headY - headR * 0.11, headR * 0.6, headR * 0.22)
+  ctx.restore()
   // Body
   const hipY = s * 0.55
   ctx.beginPath()
@@ -169,12 +214,13 @@ const draw = () => {
   ctx.fillRect(0, 0, wt, H)
   ctx.fillRect(W - wt, 0, wt, H)
 
-  // Spikes near the camera
-  const lo = Math.floor((cameraY - 2.5) / SPIKE_SPACING) - 1
-  const hi = Math.ceil((cameraY + 4) / SPIKE_SPACING) + 1
+  // Spikes near the camera (index maps to height above the warm-up line)
+  const lo = Math.floor((cameraY - 2.5 - SPIKE_WARMUP) / SPIKE_SPACING) - 1
+  const hi = Math.ceil((cameraY + 4 - SPIKE_WARMUP) / SPIKE_SPACING) + 1
   ctx.fillStyle = '#94a3b8'
   for (let i = Math.max(0, lo); i <= hi; i += 1) {
     const spike = spikeAt(seed, i)
+    if (!spike.present) continue
     const sy = yToScreen(spike.y, cameraY, H, unit)
     if (sy < -20 || sy > H + 20) continue
     const halfPx = spike.half * unit
@@ -195,14 +241,44 @@ const draw = () => {
     }
   }
 
-  // Rising lava
+  // Rising lava — always telegraphed with a glowing molten surface so the player
+  // sees it coming rather than it appearing from nowhere.
   const lavaScreen = yToScreen(dangerY, cameraY, H, unit)
+  const tSec = elapsedMs / 1000
   if (lavaScreen < H) {
-    const grad = ctx.createLinearGradient(0, lavaScreen, 0, H)
-    grad.addColorStop(0, 'rgba(239, 68, 68, 0.55)')
-    grad.addColorStop(1, 'rgba(127, 29, 29, 0.95)')
+    const top = Math.max(0, lavaScreen)
+    const grad = ctx.createLinearGradient(0, top, 0, H)
+    grad.addColorStop(0, 'rgba(251, 146, 60, 0.9)') // bright molten top
+    grad.addColorStop(0.18, 'rgba(239, 68, 68, 0.9)')
+    grad.addColorStop(1, 'rgba(120, 20, 20, 0.98)')
     ctx.fillStyle = grad
-    ctx.fillRect(0, Math.max(0, lavaScreen), W, H - Math.max(0, lavaScreen))
+    ctx.fillRect(0, top, W, H - top)
+    // Glowing, gently wobbling surface line (only when the surface is on-screen).
+    if (lavaScreen >= -4) {
+      ctx.save()
+      ctx.strokeStyle = 'rgba(255, 224, 170, 0.95)'
+      ctx.lineWidth = 3
+      ctx.shadowColor = 'rgba(255, 140, 40, 0.9)'
+      ctx.shadowBlur = 18
+      ctx.beginPath()
+      for (let x = 0; x <= W; x += 8) {
+        const wob = Math.sin(x * 0.05 + tSec * 3) * 3 + Math.sin(x * 0.13 - tSec * 2) * 2
+        if (x === 0) ctx.moveTo(x, lavaScreen + wob)
+        else ctx.lineTo(x, lavaScreen + wob)
+      }
+      ctx.stroke()
+      ctx.restore()
+    }
+  } else {
+    // Surface still below the view: pulse a warning glow at the bottom edge so
+    // the approaching lava is always visible before it arrives.
+    const pulse = 0.28 + 0.2 * Math.sin(elapsedMs / 180)
+    const bandH = 0.16 * H
+    const warn = ctx.createLinearGradient(0, H - bandH, 0, H)
+    warn.addColorStop(0, 'rgba(239, 68, 68, 0)')
+    warn.addColorStop(1, `rgba(248, 113, 60, ${pulse})`)
+    ctx.fillStyle = warn
+    ctx.fillRect(0, H - bandH, W, bandH)
   }
 
   const nx = ninja.x * W
@@ -238,12 +314,18 @@ const draw = () => {
   // Ninja figure, oriented to the wall it clings to (or last leaned toward).
   drawNinja(ctx, nx, ny, 0.05 * W, ninja.side, ninja.airborne || dying)
 
-  // Charge meter (while holding, grounded)
+  // Charge meter (while holding, grounded): reflects the OSCILLATING power, so
+  // the player watches it swing up and down and releases to lock in the level.
   if (charging && !ninja.airborne) {
-    const t = Math.min(1, chargeMs.value / MAX_CHARGE_MS)
-    const barH = 0.18 * H * t
+    const t = (chargeToVy(chargeMs.value) - MIN_JUMP_VY) / (MAX_JUMP_VY - MIN_JUMP_VY)
+    const maxBarH = 0.18 * H
+    const barH = maxBarH * t
+    const baseY = ny - 0.11 * W - 6
+    // Track outline so the swinging fill is easy to read.
+    ctx.fillStyle = 'rgba(148, 163, 184, 0.3)'
+    ctx.fillRect(nx - 4, baseY - maxBarH, 8, maxBarH)
     ctx.fillStyle = '#22d3ee'
-    ctx.fillRect(nx - 4, ny - 0.11 * W - barH - 6, 8, barH)
+    ctx.fillRect(nx - 4, baseY - barH, 8, barH)
   }
 }
 
@@ -348,6 +430,10 @@ watch([displayW, displayH], () => {
   if (state.value !== 'running') draw()
 })
 
+const onResize = () => fit()
+const onOrient = () => setTimeout(fit, 300)
+const vv = window.visualViewport
+
 onMounted(() => {
   try {
     best.value = Number(localStorage.getItem(BEST_KEY)) || 0
@@ -355,19 +441,34 @@ onMounted(() => {
     best.value = 0
   }
   reset()
+  fit()
+  // Re-measure after layout/fonts settle and the mobile address bar animates.
+  requestAnimationFrame(fit)
+  setTimeout(fit, 150)
+  setTimeout(fit, 500)
   draw()
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
+  window.addEventListener('resize', onResize)
+  window.addEventListener('orientationchange', onResize)
+  window.addEventListener('orientationchange', onOrient)
+  vv?.addEventListener('resize', onResize)
+  vv?.addEventListener('scroll', onResize)
 })
 onBeforeUnmount(() => {
   cancelAnimationFrame(raf)
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
+  window.removeEventListener('resize', onResize)
+  window.removeEventListener('orientationchange', onResize)
+  window.removeEventListener('orientationchange', onOrient)
+  vv?.removeEventListener('resize', onResize)
+  vv?.removeEventListener('scroll', onResize)
 })
 </script>
 
 <template>
-  <v-container class="py-6" max-width="600">
+  <v-container class="py-6" max-width="900">
     <GameToolbar title="Ninja Climb">
       <template #intro>
         Cling to a wall, <strong>hold</strong> to charge, and release to leap to the other wall —

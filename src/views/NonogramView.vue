@@ -14,8 +14,10 @@ import { useSquareFit } from '@/composables/useSquareFit'
 import {
   generateNonogram,
   isSolved,
-  lineSatisfied,
+  lineConsistent,
   nonogramFromPattern,
+  satisfiedClues,
+  type Cell,
   type Nonogram,
 } from '@/services/nonogram'
 import { patternById, patternsForSize } from '@/services/nonogramPatterns'
@@ -78,13 +80,41 @@ const gridStyle = computed(() => ({
 const asBool = computed(() => marks.value.map((m) => m === 1))
 const solved = computed(() => marks.value.length > 0 && isSolved(asBool.value, puzzle.value))
 
-// Clue "done" ticks: dim a row/column clue once that line matches.
-const rowDone = (r: number) =>
-  lineSatisfied(asBool.value.slice(r * cols.value, (r + 1) * cols.value), puzzle.value.rowClues[r])
-const colDone = (c: number) => {
-  const line: boolean[] = []
-  for (let r = 0; r < rows.value; r += 1) line.push(asBool.value[idx(r, c)])
-  return lineSatisfied(line, puzzle.value.colClues[c])
+// Extract a row / column of the player's marks as service `Cell`s.
+const rowCells = (r: number): Cell[] =>
+  marks.value.slice(r * cols.value, (r + 1) * cols.value) as Cell[]
+const colCells = (c: number): Cell[] => {
+  const line: Cell[] = []
+  for (let r = 0; r < rows.value; r += 1) line.push(marks.value[idx(r, c)] as Cell)
+  return line
+}
+
+// Per-number greying: which individual clue entries are unambiguously placed.
+const rowSatisfied = computed(() =>
+  puzzle.value.rowClues.map((clue, r) => satisfiedClues(rowCells(r), clue)),
+)
+const colSatisfied = computed(() =>
+  puzzle.value.colClues.map((clue, c) => satisfiedClues(colCells(c), clue)),
+)
+
+// Validation: lines flagged RED because their fills can no longer match the
+// clues. Set by the Check button, cleared per-line as soon as a square changes.
+const rowBad = ref<boolean[]>([])
+const colBad = ref<boolean[]>([])
+const validate = () => {
+  rowBad.value = puzzle.value.rowClues.map((clue, r) => !lineConsistent(rowCells(r), clue))
+  colBad.value = puzzle.value.colClues.map((clue, c) => !lineConsistent(colCells(c), clue))
+}
+const clearValidation = () => {
+  rowBad.value = []
+  colBad.value = []
+}
+// A square at index i sits on one row and one column — clear only their flags.
+const clearLineValidation = (i: number) => {
+  const r = Math.floor(i / cols.value)
+  const c = i % cols.value
+  if (rowBad.value.length) rowBad.value[r] = false
+  if (colBad.value.length) colBad.value[c] = false
 }
 
 const build = () => {
@@ -93,12 +123,14 @@ const build = () => {
     if (p) {
       puzzle.value = nonogramFromPattern(p)
       marks.value = new Array(size.value * size.value).fill(0)
+      clearValidation()
       return
     }
     pattern.value = 'random' // no such picture at this size — fall back
   }
   puzzle.value = generateNonogram(size.value, size.value, code.value)
   marks.value = new Array(size.value * size.value).fill(0)
+  clearValidation()
 }
 
 // A named picture shares as `@id`; a random puzzle shares its seed code.
@@ -138,6 +170,7 @@ const applyPaint = (i: number) => {
   } else if (cur === 2) {
     marks.value[i] = 0
   }
+  if (marks.value[i] !== cur) clearLineValidation(i)
 }
 
 const startPaint = (i: number, e: PointerEvent) => {
@@ -166,6 +199,7 @@ const endPaint = () => {
 const toggleX = (i: number) => {
   if (solved.value) return
   marks.value[i] = marks.value[i] === 2 ? 0 : 2
+  clearLineValidation(i)
 }
 
 const share = async () => {
@@ -240,7 +274,8 @@ onBeforeUnmount(() => {
         <ul>
           <li>Tap or drag across cells to fill (or erase) them.</li>
           <li><span class="k">X</span> mode (or right-click) marks a cell you've deduced is empty — just an aid, it doesn't affect solving.</li>
-          <li>A clue dims once its line is satisfied.</li>
+          <li>Each clue number dims once its run is pinned in place.</li>
+          <li><span class="k">Check</span> turns a line's clues red when your fills can no longer match it; the red clears the moment you edit that line.</li>
         </ul>
         <h3>Tips</h3>
         <ul>
@@ -256,6 +291,15 @@ onBeforeUnmount(() => {
         <v-btn value="fill" size="small" prepend-icon="mdi-square"> Fill </v-btn>
         <v-btn value="mark" size="small" prepend-icon="mdi-close"> Mark </v-btn>
       </v-btn-toggle>
+      <v-btn
+        variant="outlined"
+        color="error"
+        size="small"
+        prepend-icon="mdi-check-decagram"
+        :disabled="solved"
+        @click="validate"
+        >Check</v-btn
+      >
       <v-spacer />
       <v-btn variant="tonal" color="primary" prepend-icon="mdi-refresh" @click="newGame">New</v-btn>
     </div>
@@ -265,13 +309,18 @@ onBeforeUnmount(() => {
         <!-- Corner -->
         <div class="corner" />
         <!-- Column clues -->
-        <div v-for="(clue, c) in puzzle.colClues" :key="'c' + c" class="cclue" :class="{ 'clue--done': colDone(c) }">
-          <span v-for="(n, k) in clue" :key="k">{{ n }}</span>
+        <div v-for="(clue, c) in puzzle.colClues" :key="'c' + c" class="cclue" :class="{ 'clue--bad': colBad[c] }">
+          <span v-for="(n, k) in clue" :key="k" :class="{ 'num--done': colSatisfied[c][k] }">{{ n }}</span>
         </div>
         <!-- Rows: row clue + cells -->
         <template v-for="r in rows" :key="'r' + r">
-          <div class="rclue" :class="{ 'clue--done': rowDone(r - 1) }">
-            <span v-for="(n, k) in puzzle.rowClues[r - 1]" :key="k">{{ n }}</span>
+          <div class="rclue" :class="{ 'clue--bad': rowBad[r - 1] }">
+            <span
+              v-for="(n, k) in puzzle.rowClues[r - 1]"
+              :key="k"
+              :class="{ 'num--done': rowSatisfied[r - 1][k] }"
+              >{{ n }}</span
+            >
           </div>
           <div
             v-for="c in cols"
@@ -346,8 +395,15 @@ onBeforeUnmount(() => {
   gap: 4px;
   border-top: 1px solid rgba(148, 163, 184, 0.12);
 }
-.clue--done {
-  color: rgba(100, 116, 139, 0.55);
+/* Per-number greying: an individual clue entry dims once its run is pinned. */
+.num--done {
+  color: rgba(100, 116, 139, 0.5);
+}
+/* Validation: a line whose fills can no longer match its clue turns red until
+   the player edits a square on that line. Overrides the dimmed state. */
+.clue--bad span,
+.clue--bad span.num--done {
+  color: #f87171;
 }
 
 .ncell {

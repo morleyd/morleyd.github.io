@@ -40,6 +40,15 @@ describe('stepFlyer', () => {
     for (let i = 0; i < 150; i += 1) s = stepFlyer(s, 16)
     expect(Math.abs(s.vx)).toBeLessThan(0.01)
   })
+  it('a single flap nudges rather than lurches across the tunnel', () => {
+    // One flap, then coast to rest. The total travel must be a small nudge
+    // (well under the width of a typical gap), not a lurch across it.
+    let s = flap({ x: 0.5, vx: 0 }, 1)
+    for (let i = 0; i < 120; i += 1) s = stepFlyer(s, 16) // ~1.9s of coasting
+    const travel = s.x - 0.5
+    expect(travel).toBeGreaterThan(0.08)
+    expect(travel).toBeLessThan(0.16)
+  })
 })
 
 describe('collides', () => {
@@ -119,5 +128,9 @@ describe('scrollSpeedFor', () => {
   })
   it('is meaningfully faster deep into a run than at the start', () => {
     expect(scrollSpeedFor(2000)).toBeGreaterThan(scrollSpeedFor(0) * 1.5)
+  })
+  it('ramps up briskly by mid-run (tuned faster acceleration)', () => {
+    // Halfway to the difficulty cap the pace should already be well above base.
+    expect(scrollSpeedFor(300)).toBeGreaterThan(5.5)
   })
 })
