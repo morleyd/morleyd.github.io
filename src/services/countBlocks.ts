@@ -49,9 +49,25 @@ export const PALETTE = [
   '#ec4899',
 ] as const
 
-/** How many blocks appear at a given level (ramps up, then caps). */
+/** The TREND of how many blocks appear at a given level (ramps up, then caps). */
 export function countForLevel(level: number): number {
   return Math.min(30, 3 + level * 2)
+}
+
+/** How far a round's actual count may stray from the level trend. */
+export const COUNT_WOBBLE = 2
+
+/**
+ * The actual block count for a round: the level trend plus a seeded wobble of
+ * up to ±COUNT_WOBBLE, so counts trend upward without being monotonic — you
+ * can't bank on "one more than last time". Early levels stay exact so the game
+ * eases in predictably.
+ */
+export function countForRound(level: number, rand: () => number): number {
+  const base = countForLevel(level)
+  if (level <= 2) return base
+  const wobble = Math.floor(rand() * (2 * COUNT_WOBBLE + 1)) - COUNT_WOBBLE
+  return Math.max(3, Math.min(32, base + wobble))
 }
 
 /** Square grid side length for a given block count (with breathing room). */
@@ -63,9 +79,14 @@ export function gridSizeForCount(count: number): number {
  * How long the pattern is shown (ms): eases down as the level rises. Hard mode
  * lasts longer because the group has to slide the whole way across the screen —
  * that traversal time is what makes the blocks countable as they stream past.
+ * `count` is the round's ACTUAL block count (which wobbles around the level
+ * trend), so a +2-wobble round gets its extra per-block time.
  */
-export function exposureForLevel(level: number, mode: CountMode = 'normal'): number {
-  const count = countForLevel(level)
+export function exposureForLevel(
+  level: number,
+  mode: CountMode = 'normal',
+  count: number = countForLevel(level),
+): number {
   const base = Math.max(900, Math.round(2000 + count * 40 - level * 150))
   return mode === 'hard' ? Math.round(base * 1.6) : base
 }
@@ -85,7 +106,7 @@ const neighbors = (x: number, y: number): Array<[number, number]> => [
  */
 export function makeRound(level: number, seed: string, mode: CountMode = 'normal'): Round {
   const rng = mulberry32((strToSeed(seed) + level * 2654435761) >>> 0)
-  const count = countForLevel(level)
+  const count = countForRound(level, rng)
   const size = gridSizeForCount(count)
   const cols = size
   const rows = size
@@ -126,7 +147,7 @@ export function makeRound(level: number, seed: string, mode: CountMode = 'normal
     cells,
     cols,
     rows,
-    exposureMs: exposureForLevel(level, mode),
+    exposureMs: exposureForLevel(level, mode, count),
     blockCount: cells.length,
   }
 }

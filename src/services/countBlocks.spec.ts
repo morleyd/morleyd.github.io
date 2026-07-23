@@ -1,18 +1,52 @@
 import { describe, it, expect } from 'vitest'
 import {
+  COUNT_WOBBLE,
   PALETTE,
   correctAnswer,
   countForLevel,
+  countForRound,
   exposureForLevel,
   gridSizeForCount,
   makeRound,
 } from './countBlocks'
+import { mulberry32 } from './seed'
 
 describe('countForLevel', () => {
   it('grows with level and caps', () => {
     expect(countForLevel(1)).toBe(5)
     expect(countForLevel(2)).toBe(7)
     expect(countForLevel(100)).toBe(30)
+  })
+})
+
+describe('countForRound (trend up, but not monotonic)', () => {
+  it('stays exact for the first two levels and within the wobble after', () => {
+    const rng = mulberry32(7)
+    expect(countForRound(1, rng)).toBe(countForLevel(1))
+    expect(countForRound(2, rng)).toBe(countForLevel(2))
+    for (let level = 3; level <= 30; level += 1) {
+      const c = countForRound(level, mulberry32(level * 31))
+      expect(Math.abs(c - countForLevel(level))).toBeLessThanOrEqual(COUNT_WOBBLE)
+      expect(c).toBeGreaterThanOrEqual(3)
+    }
+  })
+  it('is not monotonically increasing across levels (you cannot just add one)', () => {
+    // With the wobble, some level sequence must dip somewhere.
+    let dips = 0
+    for (let seed = 1; seed <= 5; seed += 1) {
+      let prev = -1
+      for (let level = 1; level <= 15; level += 1) {
+        const c = makeRound(level, `s${seed}`).blockCount
+        if (c < prev) dips += 1
+        prev = c
+      }
+    }
+    expect(dips).toBeGreaterThan(0)
+  })
+  it('still trends upward overall', () => {
+    const late = makeRound(12, 'trend').blockCount
+    const early = makeRound(1, 'trend').blockCount
+    expect(late).toBeGreaterThan(early)
   })
 })
 
@@ -48,9 +82,9 @@ describe('makeRound', () => {
     expect(makeRound(4, 'abc')).toEqual(makeRound(4, 'abc'))
   })
 
-  it('produces exactly the level count of blocks, each in-bounds', () => {
+  it('produces a block count near the level trend, each block in-bounds', () => {
     const r = makeRound(5, 'seed')
-    expect(r.cells).toHaveLength(countForLevel(5))
+    expect(Math.abs(r.cells.length - countForLevel(5))).toBeLessThanOrEqual(COUNT_WOBBLE)
     for (const c of r.cells) {
       expect(c.x).toBeGreaterThanOrEqual(0)
       expect(c.x).toBeLessThan(r.cols)

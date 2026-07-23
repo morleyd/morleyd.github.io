@@ -30,6 +30,9 @@ export interface NonogramPattern {
   name: string
   size: number
   rows: string[]
+  /** Retired from the picker/random pool but still loadable by id, so shared
+   *  URLs from before the library rework keep resolving to the same picture. */
+  legacy?: boolean
 }
 
 /** Run-lengths of consecutive `true`s in a line. An empty line clues to [0]. */

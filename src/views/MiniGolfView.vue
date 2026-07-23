@@ -11,6 +11,7 @@ import { useRoute, useRouter } from 'vue-router'
 import GameToolbar from '@/components/GameToolbar.vue'
 import { copyToClipboard } from '@/services/share'
 import { randomSeed } from '@/services/seed'
+import { burstConfetti } from '@/services/confetti'
 import { useSquareFit } from '@/composables/useSquareFit'
 import {
   BALL_RADIUS,
@@ -44,7 +45,7 @@ const holeIndex = ref(0)
 const strokes = ref(0)
 const totalStrokes = ref(0)
 const totalPar = ref(0)
-const phase = ref<'aim' | 'rolling' | 'holed' | 'done'>('aim')
+const phase = ref<'aim' | 'rolling' | 'sinking' | 'holed' | 'done'>('aim')
 const snackbar = ref(false)
 const holeMsg = ref<Result | null>(null)
 const courseMsg = ref<Result | null>(null)
@@ -186,9 +187,13 @@ const draw = () => {
     }
   }
 
-  // Ball
+  // Ball. While sinking it shrinks and slides into the cup for a satisfying drop.
+  const sink = phase.value === 'sinking' ? Math.min(1, sinkT) : 0
+  const bpx = (ball.p.x + (hole.cup.x - ball.p.x) * sink) * S
+  const bpy = (ball.p.y + (hole.cup.y - ball.p.y) * sink) * S
+  const br = BALL_RADIUS * S * (1 - 0.85 * sink)
   ctx.beginPath()
-  ctx.arc(ball.p.x * S, ball.p.y * S, BALL_RADIUS * S, 0, Math.PI * 2)
+  ctx.arc(bpx, bpy, Math.max(0.5, br), 0, Math.PI * 2)
   ctx.fillStyle = '#f8fafc'
   ctx.shadowColor = 'rgba(0,0,0,0.4)'
   ctx.shadowBlur = 6
@@ -196,14 +201,26 @@ const draw = () => {
   ctx.shadowBlur = 0
 }
 
-const holed = () => {
-  phase.value = 'holed'
+let sinkT = 0 // 0..1 progress of the ball-drop animation
+
+// The ball found the cup: play the short drop animation, then score the hole.
+const beginSink = () => {
+  phase.value = 'sinking'
+  sinkT = 0
   aiming = false
   detachDrag()
+}
+
+const holed = () => {
+  phase.value = 'holed'
   stopLoop()
   totalStrokes.value += strokes.value
   totalPar.value += hole.par
   holeMsg.value = holeResult(strokes.value, hole.par)
+  // Celebrate the great ones: an ace gets the works, an eagle a burst.
+  const diff = strokes.value - hole.par
+  if (strokes.value === 1) burstConfetti({ count: 160, power: 1.2 })
+  else if (diff <= -2) burstConfetti({ count: 90 })
   draw()
 }
 
@@ -231,25 +248,32 @@ const loop = (ts: number) => {
   if (phase.value === 'rolling') {
     acc += dt
     while (acc >= STEP_MS) {
-      ball = step(ball, effectiveWalls(hole, simMs), STEP_MS)
+      ball = step(ball, effectiveWalls(hole, simMs), STEP_MS, hole)
       acc -= STEP_MS
       if (inHazard(ball, hole)) {
         resetToTee()
         break
       }
       if (inCup(ball, hole)) {
-        holed()
-        return
+        beginSink()
+        break
       }
     }
     if (phase.value === 'rolling' && atRest(ball)) {
       ball.v = { x: 0, y: 0 }
       phase.value = 'aim'
     }
+  } else if (phase.value === 'sinking') {
+    sinkT += dt / 300
+    if (sinkT >= 1) {
+      holed()
+      return
+    }
   }
 
   draw()
-  if (phase.value === 'aim' || phase.value === 'rolling') raf = requestAnimationFrame(loop)
+  if (phase.value === 'aim' || phase.value === 'rolling' || phase.value === 'sinking')
+    raf = requestAnimationFrame(loop)
 }
 
 const startLoop = () => {
@@ -328,6 +352,7 @@ const nextHole = () => {
     courseMsg.value = courseResult(totalStrokes.value, totalPar.value)
     phase.value = 'done'
     stopLoop()
+    if (totalStrokes.value <= totalPar.value) burstConfetti({ count: 140, power: 1.1 })
     return
   }
   holeIndex.value += 1
@@ -383,7 +408,7 @@ onBeforeUnmount(() => {
             <li>Press and drag <em>away</em> from the direction you want to putt — a longer drag means more power.</li>
             <li>Release to shoot. A tiny drag cancels.</li>
             <li>You can swing again while the ball is still rolling — grab it to redirect a moving ball (it still counts as a stroke).</li>
-            <li>The ball must be slow enough over the cup to drop — blast it and it'll lip out.</li>
+            <li>The cup grabs at the ball: rolling over it bleeds off speed and a slow ball gets pulled in — but a full-power blast will still skate across.</li>
           </ul>
           <h3>Hazards</h3>
           <ul>

@@ -125,6 +125,33 @@
   border: 2px solid #c084fc;
 }
 
+/* Game pages: no double-tap zoom (touch-action: manipulation kills the 300ms
+   double-tap gesture on everything, including HUD counters and steppers) and no
+   long-press text selection / iOS callout — touch-and-hold is a game input
+   (steering, charging a jump), not a request to select the board like text.
+   The .game-page class is toggled on <body> by App.vue so this also covers
+   Vuetify's teleported overlays (settings menus, info dialogs). Canvases keep
+   their own stricter `touch-action: none` via per-view CSS. */
+.game-page,
+.game-page * {
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.game-page canvas {
+  touch-action: none;
+}
+/* Text inputs on game pages (Wordle custom words, seeds) stay editable —
+   including the iOS long-press callout, or you couldn't paste a seed. */
+.game-page input,
+.game-page textarea {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
 @media (max-width: 600px) {
   .page-title {
     font-size: 1.5rem;

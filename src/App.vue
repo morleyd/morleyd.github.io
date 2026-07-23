@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useDisplay } from 'vuetify'
 import AppBar from '@/components/AppBar.vue'
@@ -7,6 +7,14 @@ import AppBar from '@/components/AppBar.vue'
 const route = useRoute()
 const router = useRouter()
 const { mobile } = useDisplay()
+
+// Game pages suppress double-tap zoom and long-press selection (see .game-page
+// in app.css). The class goes on <body>, not <v-main>, because Vuetify
+// teleports menu/dialog content (settings steppers, info dialogs) into an
+// overlay container on <body> — a class inside the app tree would miss them.
+watchEffect(() => {
+  document.body.classList.toggle('game-page', Boolean(route.meta.gamePage))
+})
 
 // Hide the top bar when a route opts out entirely (Wordle) or, for game pages,
 // on mobile only — where vertical space is tight (desktop keeps the nav).

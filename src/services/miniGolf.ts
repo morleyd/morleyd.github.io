@@ -64,9 +64,17 @@ export const BALL_RADIUS = 0.022
 export const FRICTION = 1.2 // velocity halving-ish drag per second (see step)
 export const STOP_SPEED = 0.02 // below this the ball is considered at rest
 export const MAX_POWER = 1.6 // max launch speed from a full-strength stroke
-export const CAPTURE_SPEED = 0.9 // ball must be slower than this to drop in the cup
+export const CAPTURE_SPEED = 1.0 // ball must be slower than this to drop in the cup
 export const CANCEL_POWER = 0.06 // drags weaker than this cancel (no stroke)
 export const COURSE_HOLES = 9
+
+// The cup grabs at the ball like a real one: rolling across its rim bleeds off
+// speed (RIM_DRAG, applied within RIM_REACH of the cup) and a slow-enough ball
+// nearby gets pulled toward the center (RIM_PULL). Together these stop a
+// well-aimed putt from skating straight over the hole at speed.
+export const RIM_REACH = 1.8 // in cup radii
+export const RIM_DRAG = 2.6 // extra exponential drag per second over the rim
+export const RIM_PULL = 0.5 // pull acceleration toward the cup when slow
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
 const clamp01 = (v: number, r: number) => Math.max(r, Math.min(1 - r, v))
@@ -134,15 +142,31 @@ export function collide(state: BallState, walls: Rect[]): BallState {
   return { p: { x: px, y: py }, v: { x: vx, y: vy } }
 }
 
-/** Advance the ball one fixed step: integrate, apply friction, then collide. */
-export function step(state: BallState, walls: Rect[], dtMs: number): BallState {
+/**
+ * Advance the ball one fixed step: integrate, apply friction (plus the cup's
+ * rim drag/pull when a hole is provided), then collide.
+ */
+export function step(state: BallState, walls: Rect[], dtMs: number, hole?: Hole): BallState {
   const dt = dtMs / 1000
   const moved: BallState = {
     p: { x: state.p.x + state.v.x * dt, y: state.p.y + state.v.y * dt },
     v: { x: state.v.x, y: state.v.y },
   }
   // Exponential friction.
-  const decay = Math.exp(-FRICTION * dt)
+  let decay = Math.exp(-FRICTION * dt)
+  if (hole) {
+    const d = dist(moved.p, hole.cup)
+    if (d < hole.cupRadius * RIM_REACH) {
+      // Rolling over the cup: the rim scrubs speed off...
+      decay *= Math.exp(-RIM_DRAG * dt)
+      // ...and pulls a slow ball toward the center so it drops instead of lipping.
+      if (speed(moved.v) < CAPTURE_SPEED * 1.4 && d > 1e-6) {
+        const pull = (RIM_PULL * dt) / d
+        moved.v.x += (hole.cup.x - moved.p.x) * pull
+        moved.v.y += (hole.cup.y - moved.p.y) * pull
+      }
+    }
+  }
   moved.v.x *= decay
   moved.v.y *= decay
   return collide(moved, walls)
@@ -343,14 +367,15 @@ export function solveHole(hole: Hole): Solution | null {
 export const isWinnable = (hole: Hole): boolean => solveHole(hole) !== null
 
 /**
- * Par from the hole's real difficulty: base on the shortest route type, then add
- * for a long green and for the presence of hazards / moving walls. Bounded 2..5.
+ * Par from the hole's real difficulty: base on the shortest route type (a clear
+ * direct line is a two-putt; a forced bank is three), plus at most ONE bump for
+ * a green that is both long and busy. Bounded 2..4 — an honest target rather
+ * than free strokes.
  */
 export function derivePar(hole: Hole, sol: Solution): number {
   let par = sol.pathType === 'direct' ? 2 : 3
-  if (dist(hole.start, hole.cup) >= 0.7) par += 1
-  if (hole.hazards.length + hole.movers.length > 0) par += 1
-  return clamp(par, 2, 5)
+  if (dist(hole.start, hole.cup) >= 0.72 && hole.hazards.length + hole.movers.length > 0) par += 1
+  return clamp(par, 2, 4)
 }
 
 // ---------------------------------------------------------------------------
@@ -368,18 +393,42 @@ function buildCandidate(index: number, seed: string, salt: number): Hole {
   const cup: Vec = { x: clamp01(0.5 + (rng() - 0.5) * 0.7, 0.06), y: cupY }
   const span = start.y - cup.y
 
-  // More, longer walls on later holes.
-  const wallCount = Math.min(6, 1 + Math.round(t * 3) + Math.floor(rng() * 2))
+  // Walls. From the third hole on, the first wall is a deliberate BLOCKER laid
+  // across the direct tee→cup line, so the straight ace stops being free and the
+  // hole has to be played off the rails (solvability still guarantees a bank
+  // route). The rest are decoration/bank targets, and never stack: a wall that
+  // overlaps an already-placed one is skipped rather than piled on top.
   const walls: Rect[] = []
+  const overlapsExisting = (r: Rect): boolean =>
+    walls.some(
+      (w) =>
+        r.x < w.x + w.w + 0.02 &&
+        r.x + r.w > w.x - 0.02 &&
+        r.y < w.y + w.h + 0.02 &&
+        r.y + r.h > w.y - 0.02,
+    )
+  if (index >= 2) {
+    // A horizontal bar centered on the midpoint of the tee→cup segment.
+    const midT = 0.4 + rng() * 0.25
+    const mx = start.x + (cup.x - start.x) * midT
+    const my = start.y + (cup.y - start.y) * midT
+    const w = 0.3 + rng() * (0.2 + t * 0.25)
+    walls.push({ x: clamp(mx - w / 2, 0.02, 0.98 - w), y: my - 0.0175, w, h: 0.035 })
+  }
+  const wallCount = Math.min(6, 1 + Math.round(t * 3) + Math.floor(rng() * 2))
   for (let i = 0; i < wallCount; i += 1) {
     const bandY = cup.y + 0.14 + ((i + 0.5) / wallCount) * (span - 0.28) + (rng() - 0.5) * 0.05
+    // NOTE: the rng() call order here is the determinism contract for shared
+    // seeds — reordering these draws reshapes every existing course.
+    let cand: Rect
     if (rng() < 0.6) {
       const w = 0.24 + rng() * (0.22 + t * 0.22)
-      walls.push({ x: clamp01(rng() * (1 - w), 0), y: bandY, w, h: 0.035 })
+      cand = { x: clamp01(rng() * (1 - w), 0), y: bandY, w, h: 0.035 }
     } else {
       const h = 0.13 + rng() * (0.14 + t * 0.12)
-      walls.push({ x: clamp(0.18 + rng() * 0.6, 0.05, 0.92), y: bandY - h / 2, w: 0.035, h })
+      cand = { x: clamp(0.18 + rng() * 0.6, 0.05, 0.92), y: bandY - h / 2, w: 0.035, h }
     }
+    if (!overlapsExisting(cand)) walls.push(cand)
   }
 
   // Pit hazards start appearing mid-course and grow more likely toward the end.
@@ -390,7 +439,10 @@ function buildCandidate(index: number, seed: string, salt: number): Hole {
       x: clamp(0.18 + rng() * 0.64, 0.12, 0.88),
       y: cup.y + 0.16 + rng() * Math.max(0.05, span - 0.32),
     }
-    if (dist(p, start) > r + 0.1 && dist(p, cup) > r + cup.y + 0.02) hazards.push({ p, r })
+    // Keep-away margins: past the tee, and past the cup's RADIUS (0.05) plus a
+    // putting lane — this previously used cup.y (the cup's coordinate) by
+    // mistake, which silently rejected most hazards on early holes.
+    if (dist(p, start) > r + 0.1 && dist(p, cup) > r + 0.05 + 0.02) hazards.push({ p, r })
   }
   if (index >= 3 && rng() < 0.35 + t * 0.55) addHazard()
   if (index >= 6 && rng() < 0.5) addHazard()
@@ -434,14 +486,25 @@ function clearBlockers(hole: Hole): void {
  * the actual route + hazards, so it tracks real difficulty.
  */
 export function makeHole(index: number, seed: string): Hole {
+  // From the third hole on, prefer a layout whose best route is a BANK — the
+  // blocker wall did its job and the hole actually asks for a shot. Fall back to
+  // any solvable layout, then to clearing blockers.
+  let fallback: { hole: Hole; sol: Solution } | null = null
   for (let salt = 0; salt < 24; salt += 1) {
     const hole = buildCandidate(index, seed, salt)
     const sol = solveHole(hole)
-    if (sol) {
+    if (!sol) continue
+    if (index < 2 || sol.pathType === 'bank') {
       hole.par = derivePar(hole, sol)
       hole.winnable = true
       return hole
     }
+    if (!fallback) fallback = { hole, sol }
+  }
+  if (fallback) {
+    fallback.hole.par = derivePar(fallback.hole, fallback.sol)
+    fallback.hole.winnable = true
+    return fallback.hole
   }
   const hole = buildCandidate(index, seed, 0)
   clearBlockers(hole)

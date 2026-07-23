@@ -11,6 +11,8 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import GameToolbar from '@/components/GameToolbar.vue'
 import { useSquareFit } from '@/composables/useSquareFit'
+import { burstConfetti } from '@/services/confetti'
+import { mulberry32 } from '@/services/seed'
 import {
   FLYER_RADIUS,
   cameraBottomFor,
@@ -52,6 +54,29 @@ const canvasEl = ref<HTMLCanvasElement | null>(null)
 const state = ref<'idle' | 'running' | 'over'>('idle')
 const distance = ref(0)
 const best = ref(0)
+const isNewBest = ref(false) // tying the old best is NOT a new best
+
+// Star layout is deterministic per (seed, row); cache it so the 60fps draw
+// loop doesn't rebuild an RNG per row per frame. Cleared with the seed.
+interface Star {
+  x: number
+  a: number
+  s: number
+  dy: number
+}
+const starCache = new Map<number, Star[]>()
+const starsForRow = (k: number): Star[] => {
+  let stars = starCache.get(k)
+  if (!stars) {
+    const rand = mulberry32((seed ^ (k * 0x9e3779b9)) >>> 0)
+    stars = []
+    for (let s = 0; s < 2; s += 1) {
+      if (rand() < 0.55) stars.push({ x: rand(), a: 0.12 + rand() * 0.25, s: 0.7 + rand() * 1.1, dy: rand() })
+    }
+    starCache.set(k, stars)
+  }
+  return stars
+}
 
 let flyer: FlyerState = { x: 0.5, vx: 0, y: 0, vy: 0 }
 let seed = 1
@@ -69,6 +94,8 @@ const reset = () => {
   distance.value = 0
   camBottom = cameraBottomFor(Number.NEGATIVE_INFINITY, flyer.y, viewRowsNow())
   seed = (Math.floor(Math.random() * 0xffffffff) || 1) >>> 0
+  starCache.clear()
+  isNewBest.value = false
 }
 
 const gameOver = () => {
@@ -77,6 +104,8 @@ const gameOver = () => {
   raf = 0
   if (score.value > best.value) {
     best.value = score.value
+    isNewBest.value = true
+    if (score.value > 25) burstConfetti({ count: 90 })
     try {
       localStorage.setItem(BEST_KEY, String(best.value))
     } catch {
@@ -111,14 +140,23 @@ const draw = () => {
   const kMax = Math.ceil(camBottom + H / rowPx) + 1
   for (let k = kMin; k <= kMax; k += 1) {
     if (k < 0) continue
-    const seg = segmentAt(seed, k, difficultyFor(k))
+    const d = difficultyFor(k)
+    const seg = segmentAt(seed, k, d)
     const y = H - (k - camBottom) * rowPx
     const h = rowPx + 1.5
+
+    // Starfield drifting past in the open corridor — deterministic per row.
+    for (const s of starsForRow(k)) {
+      ctx.fillStyle = `rgba(226, 232, 240, ${s.a})`
+      ctx.fillRect(s.x * W, y - s.dy * h, s.s, s.s)
+    }
+
     ctx.fillStyle = '#1e293b'
     ctx.fillRect(0, y - h, seg.left * W, h)
     ctx.fillRect(seg.right * W, y - h, W - seg.right * W, h)
-    // Edge glow
-    ctx.fillStyle = 'rgba(56, 189, 248, 0.5)'
+    // Edge glow, shifting hue with depth (cyan → violet → pink as you climb),
+    // so progress is felt in the walls themselves.
+    ctx.fillStyle = `hsla(${199 + d * 150}, 90%, 62%, 0.55)`
     ctx.fillRect(seg.left * W - 2, y - h, 2, h)
     ctx.fillRect(seg.right * W, y - h, 2, h)
   }
@@ -294,7 +332,7 @@ onBeforeUnmount(() => {
         <template v-else>
           <p class="text-h5 mb-1">Crashed</p>
           <p class="text-body-2 mb-3">
-            Height {{ score }}<span v-if="score === best && score > 0"> — new best!</span>
+            Height {{ score }}<span v-if="isNewBest && score > 0"> — new best!</span>
           </p>
           <v-btn color="primary" variant="flat" prepend-icon="mdi-restart" @click="start">Try again</v-btn>
         </template>

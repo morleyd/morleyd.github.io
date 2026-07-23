@@ -114,7 +114,7 @@ describe('makeHole', () => {
       expect(makeHole(i, 'course-1')).toEqual(h)
       expect(h.start.y).toBeGreaterThan(h.cup.y) // start below the cup (portrait)
       expect(h.par).toBeGreaterThanOrEqual(2)
-      expect(h.par).toBeLessThanOrEqual(5)
+      expect(h.par).toBeLessThanOrEqual(4)
       for (const w of h.walls) {
         expect(w.x).toBeGreaterThanOrEqual(0)
         expect(w.x + w.w).toBeLessThanOrEqual(1.0001)
@@ -177,7 +177,7 @@ describe('par derivation', () => {
     expect(derivePar(h, solveHole(h)!)).toBe(2)
   })
 
-  it('adds strokes for a long green and for hazards, capped at 5', () => {
+  it('adds one stroke when a green is both long AND busy — never stacks bumps', () => {
     const long: Hole = {
       index: 0,
       start: { x: 0.5, y: 0.9 },
@@ -190,14 +190,74 @@ describe('par derivation', () => {
       seed: 's',
       winnable: true,
     }
-    // direct(2) + long(1) + hazard(1) = 4
-    expect(derivePar(long, solveHole(long)!)).toBe(4)
+    // direct(2) + long-and-busy(1) = 3; the old stacking (+1 long, +1 hazard)
+    // inflated pars until every hole felt like free strokes.
+    expect(derivePar(long, solveHole(long)!)).toBe(3)
+    // Long but empty, or busy but short, stays at the base par.
+    expect(derivePar({ ...long, hazards: [] }, solveHole({ ...long, hazards: [] })!)).toBe(2)
   })
 
   it('course par trends upward as holes get harder', () => {
     const early = makeHole(0, 'course-1').par + makeHole(1, 'course-1').par + makeHole(2, 'course-1').par
     const late = makeHole(6, 'course-1').par + makeHole(7, 'course-1').par + makeHole(8, 'course-1').par
     expect(late).toBeGreaterThan(early)
+  })
+
+  it('mid/late holes mostly force a bank — the blocker wall closes the straight ace', () => {
+    let banks = 0
+    let total = 0
+    for (const seed of ['course-1', 'abc', 'z9', 'seed42', 'hello-world']) {
+      for (let i = 2; i < COURSE_HOLES; i += 1) {
+        total += 1
+        if (solveHole(makeHole(i, seed))!.pathType === 'bank') banks += 1
+      }
+    }
+    expect(banks / total).toBeGreaterThan(0.7)
+  })
+})
+
+describe('cup rim physics (no more skating over the hole)', () => {
+  const hole: Hole = {
+    index: 0,
+    start: { x: 0.5, y: 0.9 },
+    cup: { x: 0.5, y: 0.5 },
+    cupRadius: 0.05,
+    walls: [],
+    hazards: [],
+    movers: [],
+    par: 2,
+    seed: 's',
+    winnable: true,
+  }
+  it('scrubs extra speed off a ball rolling over the cup', () => {
+    const rolling: BallState = { p: { x: 0.5, y: 0.56 }, v: { x: 0, y: -1.2 } }
+    const plain = step(rolling, [], 8)
+    const overCup = step(rolling, [], 8, hole)
+    expect(speed(overCup.v)).toBeLessThan(speed(plain.v))
+  })
+  it('pulls a slow near ball toward the cup center', () => {
+    const slow: BallState = { p: { x: 0.44, y: 0.5 }, v: { x: 0, y: 0 } }
+    const next = step(slow, [], 8, hole)
+    expect(next.v.x).toBeGreaterThan(0) // tugged toward x=0.5
+  })
+  it('a straight medium-power putt over the cup gets captured instead of skating past', () => {
+    // Roll the ball straight at the cup fast enough that, without rim physics,
+    // it would cross above CAPTURE_SPEED. With the rim drag it must sink.
+    let ball: BallState = { p: { x: 0.5, y: 0.9 }, v: { x: 0, y: -1.45 } }
+    let sank = false
+    for (let i = 0; i < 2000; i += 1) {
+      ball = step(ball, [], 8, hole)
+      if (inCup(ball, hole)) {
+        sank = true
+        break
+      }
+      if (atRest(ball)) break
+    }
+    expect(sank).toBe(true)
+  })
+  it('leaves physics untouched away from the cup', () => {
+    const far: BallState = { p: { x: 0.2, y: 0.9 }, v: { x: 0.4, y: 0 } }
+    expect(step(far, [], 8, hole)).toEqual(step(far, [], 8))
   })
 })
 

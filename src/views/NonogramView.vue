@@ -10,6 +10,7 @@ import { useRoute, useRouter } from 'vue-router'
 import GameToolbar from '@/components/GameToolbar.vue'
 import { copyToClipboard } from '@/services/share'
 import { randomSeed } from '@/services/seed'
+import { burstConfetti } from '@/services/confetti'
 import { useSquareFit } from '@/composables/useSquareFit'
 import {
   generateNonogram,
@@ -44,6 +45,7 @@ const size = ref(10)
 const code = ref('')
 const pattern = ref('random') // 'random' picks a random picture; else a pattern id
 const theme = ref<string>('gold')
+const pictureName = ref('') // revealed on solve ("It's a Duck!")
 const puzzle = ref<Nonogram>(nonogramFromPattern(patternsForSize(10)[0]))
 const marks = ref<number[]>([]) // 0 empty · 1 filled · 2 X-marked
 const mode = ref<'fill' | 'mark'>('fill')
@@ -112,9 +114,19 @@ const onVisibility = () => {
   if (document.hidden) stopTimer()
   else startTimer()
 }
-// Stop the clock the instant the board is solved.
+// Stop the clock (and celebrate) the instant the board is solved.
 watch(solved, (v) => {
-  if (v) stopTimer()
+  if (v) {
+    stopTimer()
+    burstConfetti({ count: 110 })
+  }
+})
+
+// The solve banner names the picture — with a wink for the heart.
+const solvedTitle = computed(() => {
+  if (!pictureName.value) return 'Solved! 🎉'
+  if (pictureName.value === 'Heart') return 'It’s a Heart — made with love ❤️'
+  return `It’s a ${pictureName.value}! 🎉`
 })
 
 // Extract a row / column of the player's marks as service `Cell`s.
@@ -183,11 +195,13 @@ const build = () => {
       : patternById(pattern.value, size.value)
   if (p) {
     puzzle.value = nonogramFromPattern(p)
+    pictureName.value = p.name
     reset()
     return
   }
   if (pattern.value !== 'random') pattern.value = 'random' // no such picture at this size
   puzzle.value = generateNonogram(size.value, size.value, code.value)
+  pictureName.value = ''
   reset()
 }
 
@@ -346,15 +360,15 @@ onBeforeUnmount(() => {
       </template>
     </GameToolbar>
 
-    <!-- Mode toggle -->
+    <!-- Mode toggle: the active button takes the picked fill color, so what
+         you're painting with is always visible right on the control. -->
     <div class="d-flex align-center ga-2 mb-3">
-      <v-btn-toggle v-model="mode" mandatory density="comfortable" variant="outlined" divided>
+      <v-btn-toggle v-model="mode" mandatory density="comfortable" variant="outlined" divided :color="themeFill">
         <v-btn value="fill" size="small" prepend-icon="mdi-square"> Fill </v-btn>
         <v-btn value="mark" size="small" prepend-icon="mdi-close"> Mark </v-btn>
       </v-btn-toggle>
       <v-btn
         variant="outlined"
-        color="error"
         size="small"
         prepend-icon="mdi-check-decagram"
         :disabled="solved"
@@ -417,7 +431,7 @@ onBeforeUnmount(() => {
          player can admire the image rather than have it covered up. -->
     <v-expand-transition>
       <div v-if="solved" class="solved-banner mt-4">
-        <div class="solved-title">Solved! 🎉</div>
+        <div class="solved-title">{{ solvedTitle }}</div>
         <div class="text-body-2 text-medium-emphasis">{{ size }}×{{ size }} picture complete · {{ timeLabel }}</div>
         <v-btn class="mt-2" color="primary" variant="flat" prepend-icon="mdi-refresh" @click="newGame">
           New puzzle

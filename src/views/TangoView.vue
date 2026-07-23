@@ -5,10 +5,11 @@
  * honor the "=" (equal) and "×" (opposite) badges between neighbors. Seeded and
  * shareable. Generation/checking live in services/tango.
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import GameToolbar from '@/components/GameToolbar.vue'
 import { copyToClipboard } from '@/services/share'
+import { burstConfetti } from '@/services/confetti'
 import { randomSeed } from '@/services/seed'
 import { useSquareFit } from '@/composables/useSquareFit'
 import {
@@ -68,8 +69,24 @@ const hintMessage = computed(() => {
   return ''
 })
 
-const conflicts = computed(() => findConflicts(cells.value, constraints.value))
 const solved = computed(() => cells.value.length > 0 && isSolved(cells.value, constraints.value))
+
+// Validation is ON DEMAND (the Check button), not live — a red flash on every
+// experimental tap punished trying things out. Flags clear on the next edit.
+const flagged = ref<Set<number>>(new Set())
+const checkMessage = ref('')
+const check = () => {
+  if (solved.value) return
+  flagged.value = findConflicts(cells.value, constraints.value)
+  const filled = cells.value.filter((v) => v !== EMPTY).length
+  if (flagged.value.size > 0) checkMessage.value = 'Some placements break a rule — they’re marked in red.'
+  else if (filled < CELLS) checkMessage.value = 'No rules broken so far — keep going!'
+  clearHint()
+}
+const clearCheck = () => {
+  if (flagged.value.size) flagged.value = new Set()
+  checkMessage.value = ''
+}
 
 // Badge positions between constrained neighbors, in board pixels.
 const badges = computed(() =>
@@ -89,6 +106,7 @@ const build = () => {
   solution.value = puzzle.solution.slice()
   constraints.value = puzzle.constraints
   clearHint()
+  clearCheck()
 }
 
 const syncUrl = () => router.replace({ name: 'tango', params: { seed: code.value } })
@@ -104,6 +122,7 @@ const cycle = (i: number) => {
   next[i] = next[i] === EMPTY ? SUN : next[i] === SUN ? MOON : EMPTY
   cells.value = next
   clearHint() // the board changed — any pending hint is stale
+  clearCheck() // ...and so are the last Check's flags
 }
 
 // Step the hint through its reveal levels: compute on first press, then
@@ -126,6 +145,7 @@ const nextHint = () => {
       const next = cells.value.slice()
       next[hint.value.cell] = hint.value.value
       cells.value = next // fill applied without clearHint so the reveal message stays
+      clearCheck() // ...but the board changed, so any Check flags are stale
     }
     return
   }
@@ -140,6 +160,10 @@ const share = async () => {
   snackbar.value = true
 }
 
+watch(solved, (v) => {
+  if (v) burstConfetti({ count: 110 })
+})
+
 onMounted(() => {
   const p = typeof route.params.seed === 'string' ? route.params.seed : ''
   if (p) {
@@ -152,7 +176,7 @@ onMounted(() => {
 
 const cellClass = (i: number) => ({
   'tcell--given': given.value[i],
-  'tcell--conflict': conflicts.value.has(i),
+  'tcell--conflict': flagged.value.has(i),
   'tcell--hint-region': hintRegion.value.has(i) && hintCell.value !== i,
   'tcell--hint-cell': hintCell.value === i,
 })
@@ -178,6 +202,11 @@ const cellClass = (i: number) => ({
           <li>No three of the same symbol are next to each other, across or down.</li>
           <li><strong>=</strong> between two cells: they must match. <strong>×</strong>: they must differ.</li>
         </ul>
+        <h3>Checking</h3>
+        <ul>
+          <li>Mistakes are never flagged automatically — experiment freely.</li>
+          <li>Press <span class="k">Check</span> any time to mark placements that break a rule in red; the marks clear as soon as you edit.</li>
+        </ul>
         <h3>Tips</h3>
         <ul>
           <li>Every puzzle is solvable by logic alone — no guessing needed.</li>
@@ -188,6 +217,7 @@ const cellClass = (i: number) => ({
 
     <div class="controls d-flex align-center ga-2 mb-4">
       <v-spacer />
+      <v-btn variant="tonal" prepend-icon="mdi-check-circle-outline" :disabled="solved" @click="check">Check</v-btn>
       <v-btn variant="tonal" prepend-icon="mdi-lightbulb-on-outline" :disabled="solved" @click="nextHint">Hint</v-btn>
       <v-btn variant="tonal" color="primary" prepend-icon="mdi-refresh" @click="newGame">New</v-btn>
     </div>
@@ -236,6 +266,15 @@ const cellClass = (i: number) => ({
       :color="noHint ? 'warning' : 'info'"
       icon="mdi-lightbulb-on-outline"
     >{{ hintMessage }}</v-alert>
+
+    <v-alert
+      v-else-if="checkMessage"
+      class="mt-4"
+      density="comfortable"
+      variant="tonal"
+      :color="flagged.size ? 'error' : 'success'"
+      :icon="flagged.size ? 'mdi-alert-circle-outline' : 'mdi-check-circle-outline'"
+    >{{ checkMessage }}</v-alert>
 
     <v-snackbar v-model="snackbar" :timeout="2600" color="secondary">Puzzle link copied — share it!</v-snackbar>
   </v-container>

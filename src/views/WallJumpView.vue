@@ -8,6 +8,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import GameToolbar from '@/components/GameToolbar.vue'
 import { useViewportFit } from '@/composables/useViewportFit'
+import { burstConfetti } from '@/services/confetti'
 import {
   GRAVITY,
   MAX_JUMP_VY,
@@ -43,6 +44,7 @@ const LAVA_START_Y = -2.0
 const canvasEl = ref<HTMLCanvasElement | null>(null)
 const state = ref<'idle' | 'running' | 'over'>('idle')
 const best = ref(0)
+const isNewBest = ref(false) // tying the old best is NOT a new best
 const chargeMs = ref(0)
 
 let ninja: NinjaState = initialNinja()
@@ -75,6 +77,7 @@ const reset = () => {
   dying = false
   deathMs = 0
   deathVy = 0
+  isNewBest.value = false
 }
 
 const gameOver = () => {
@@ -84,6 +87,8 @@ const gameOver = () => {
   charging = false
   if (score.value > best.value) {
     best.value = score.value
+    isNewBest.value = true
+    if (score.value > 25) burstConfetti({ count: 90 })
     try {
       localStorage.setItem(BEST_KEY, String(best.value))
     } catch {
@@ -489,7 +494,7 @@ onBeforeUnmount(() => {
         <template v-else>
           <p class="text-h5 mb-1">Caught!</p>
           <p class="text-body-2 mb-3">
-            Height {{ score }}<span v-if="score === best && score > 0"> — new best!</span>
+            Height {{ score }}<span v-if="isNewBest && score > 0"> — new best!</span>
           </p>
           <v-btn color="primary" variant="flat" prepend-icon="mdi-restart" @click="start">Climb again</v-btn>
         </template>

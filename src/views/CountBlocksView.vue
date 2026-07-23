@@ -13,6 +13,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import GameToolbar from '@/components/GameToolbar.vue'
 import { useSquareFit } from '@/composables/useSquareFit'
+import { burstConfetti } from '@/services/confetti'
 import { correctAnswer, makeRound, type CountMode, type Round } from '@/services/countBlocks'
 
 const { el: boardEl, px: boardPx } = useSquareFit(36)
@@ -136,6 +137,15 @@ const newGame = () => {
   startWatch()
 }
 
+// Escalating reactions as a run gets deep — the streak feels increasingly unreal.
+const cheer = computed(() => {
+  const l = level.value
+  if (l >= 12) return 'Correct! 🤯'
+  if (l >= 8) return 'Correct! 🔥'
+  if (l >= 5) return 'Correct! 👏'
+  return 'Correct! 🎉'
+})
+
 const submit = () => {
   if (phase.value !== 'answer') return
   lastCorrect.value = correctAnswer(round)
@@ -143,6 +153,7 @@ const submit = () => {
   phase.value = 'result'
   if (wasRight.value && level.value > best.value) {
     best.value = level.value
+    if (level.value >= 3) burstConfetti({ count: 70 })
     try {
       localStorage.setItem(BEST_KEY, String(best.value))
     } catch {
@@ -217,7 +228,7 @@ onBeforeUnmount(stopLoop)
         <h3>How it works</h3>
         <ul>
           <li>Every block counts — the answer is simply the total number of blocks in the pattern.</li>
-          <li>Higher levels add more blocks, enlarge the grid, and shorten the reveal.</li>
+          <li>Higher levels add more blocks (roughly — the count wobbles a little, so don't just add one to last round), enlarge the grid, and shorten the reveal.</li>
         </ul>
         <h3>Tips</h3>
         <ul>
@@ -252,7 +263,7 @@ onBeforeUnmount(stopLoop)
         </template>
 
         <template v-else>
-          <p class="text-h4 mb-1">{{ wasRight ? 'Correct! 🎉' : 'Wrong' }}</p>
+          <p class="text-h4 mb-1">{{ wasRight ? cheer : 'Wrong' }}</p>
           <p class="text-body-1 mb-4">
             It was <strong>{{ lastCorrect }}</strong><span v-if="!wasRight"> — you said {{ answer }}</span>.
           </p>

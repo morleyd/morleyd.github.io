@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { burstConfetti } from '@/services/confetti'
+
 interface Tile {
   letter: string
   status: 'correct' | 'present' | 'absent'
@@ -237,13 +240,41 @@ const games: GameCard[] = [
     gradient: 'linear-gradient(135deg, rgba(142, 36, 170, 0.42), rgba(59, 130, 246, 0.22))',
   },
 ]
+
+// Easter egg: the Konami code (↑↑↓↓←→←→BA) rains confetti on the arcade.
+const KONAMI = [
+  'ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown',
+  'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight',
+  'b', 'a',
+]
+const konamiFound = ref(false)
+let konamiPos = 0
+const onKonamiKey = (e: KeyboardEvent) => {
+  // Letters compare case-insensitively (Shift/CapsLock 'B'/'A' still count).
+  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key
+  if (key === KONAMI[konamiPos]) konamiPos += 1
+  // On a mismatching ArrowUp, fall back to the longest matching prefix (↑↑
+  // stays ↑↑ — an extra wind-up press shouldn't scrap the attempt).
+  else if (key === KONAMI[0]) konamiPos = konamiPos === 2 ? 2 : 1
+  else konamiPos = 0
+  if (konamiPos === KONAMI.length) {
+    konamiPos = 0
+    konamiFound.value = true
+    burstConfetti({ count: 200, power: 1.3 })
+  }
+}
+onMounted(() => window.addEventListener('keydown', onKonamiKey))
+onBeforeUnmount(() => window.removeEventListener('keydown', onKonamiKey))
 </script>
 
 <template>
   <v-container class="py-6" max-width="1100">
     <div class="mb-6">
       <h1 class="page-title">Games</h1>
-      <p class="text-body-1 text-medium-emphasis">A small collection of games and tools. More on the way.</p>
+      <p class="text-body-1 text-medium-emphasis">
+        A small collection of games and tools. More on the way.
+        <span v-if="konamiFound"> 🎮 Cheat code accepted — you found the arcade’s secret.</span>
+      </p>
     </div>
 
     <v-row dense>
