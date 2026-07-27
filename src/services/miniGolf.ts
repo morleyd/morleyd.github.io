@@ -421,10 +421,14 @@ function holeObstacles(hole: Hole): Obstacles {
   }
 }
 
-/** Is the straight path a→b clear of every obstacle (ball radius accounted)? */
+/** Is the straight path a→b clear of every obstacle? Planning uses a wider
+ *  margin than the bare ball radius so guaranteed routes keep human-playable
+ *  clearance from water and rails — a waypoint should never sit one
+ *  ball-width from a splash. */
+const PLAN_MARGIN = BALL_RADIUS * 1.8
 function clearPath(a: Vec, b: Vec, obs: Obstacles): boolean {
-  for (const r of obs.rects) if (segHitsRect(a, b, r, BALL_RADIUS)) return false
-  for (const c of obs.circles) if (segHitsCircle(a, b, c.p, c.r + BALL_RADIUS)) return false
+  for (const r of obs.rects) if (segHitsRect(a, b, r, PLAN_MARGIN)) return false
+  for (const c of obs.circles) if (segHitsCircle(a, b, c.p, c.r + PLAN_MARGIN)) return false
   return true
 }
 
@@ -493,7 +497,123 @@ export function solveHole(hole: Hole): Solution | null {
   return null
 }
 
-export const isWinnable = (hole: Hole): boolean => solveHole(hole) !== null
+// ---------------------------------------------------------------------------
+// Waypoint routing: grid pathfinding through free space. One-bank mirror
+// geometry can't validate a serpentine or a donut — so winnability, par and
+// the spec's playtest bot all run on this instead: a coarse occupancy grid,
+// BFS from ball to cup, then string-pulling down to the few straight legs a
+// player would actually putt.
+// ---------------------------------------------------------------------------
+
+const NAV_N = 30
+
+/** Straight putting legs from `from` to the cup through free space (the cup is
+ *  the last entry), or null when no route exists at all. */
+export function routeWaypoints(from: Vec, hole: Hole): Vec[] | null {
+  const obs = holeObstacles(hole)
+  const blockedAt = (x: number, y: number): boolean => {
+    if (x < BALL_RADIUS || x > 1 - BALL_RADIUS || y < BALL_RADIUS || y > 1 - BALL_RADIUS) return true
+    for (const r of obs.rects) {
+      if (
+        x > r.x - PLAN_MARGIN &&
+        x < r.x + r.w + PLAN_MARGIN &&
+        y > r.y - PLAN_MARGIN &&
+        y < r.y + r.h + PLAN_MARGIN
+      )
+        return true
+    }
+    for (const c of obs.circles) {
+      if (Math.hypot(x - c.p.x, y - c.p.y) < c.r + PLAN_MARGIN) return true
+    }
+    return false
+  }
+
+  const cx = (i: number) => i / (NAV_N - 1)
+  const blocked = new Uint8Array(NAV_N * NAV_N)
+  for (let j = 0; j < NAV_N; j += 1) {
+    for (let i = 0; i < NAV_N; i += 1) blocked[j * NAV_N + i] = blockedAt(cx(i), cx(j)) ? 1 : 0
+  }
+
+  // Snap an arbitrary point to the nearest free cell (spiralling outward).
+  const cellFor = (p: Vec): number => {
+    const i0 = Math.round(p.x * (NAV_N - 1))
+    const j0 = Math.round(p.y * (NAV_N - 1))
+    for (let ring = 0; ring < NAV_N; ring += 1) {
+      for (let dj = -ring; dj <= ring; dj += 1) {
+        for (let di = -ring; di <= ring; di += 1) {
+          if (Math.max(Math.abs(di), Math.abs(dj)) !== ring) continue
+          const i = i0 + di
+          const j = j0 + dj
+          if (i < 0 || i >= NAV_N || j < 0 || j >= NAV_N) continue
+          if (!blocked[j * NAV_N + i]) return j * NAV_N + i
+        }
+      }
+    }
+    return -1
+  }
+
+  const startCell = cellFor(from)
+  const goalCell = cellFor(hole.cup)
+  if (startCell < 0 || goalCell < 0) return null
+
+  // 4-connected BFS (no diagonal corner-squeezes).
+  const prev = new Int32Array(NAV_N * NAV_N).fill(-1)
+  prev[startCell] = startCell
+  const queue = [startCell]
+  let found = startCell === goalCell
+  for (let qi = 0; qi < queue.length && !found; qi += 1) {
+    const cur = queue[qi]
+    const ci = cur % NAV_N
+    const cj = (cur - ci) / NAV_N
+    for (const [di, dj] of [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ]) {
+      const ni = ci + di
+      const nj = cj + dj
+      if (ni < 0 || ni >= NAV_N || nj < 0 || nj >= NAV_N) continue
+      const n = nj * NAV_N + ni
+      if (blocked[n] || prev[n] >= 0) continue
+      prev[n] = cur
+      if (n === goalCell) {
+        found = true
+        break
+      }
+      queue.push(n)
+    }
+  }
+  if (!found) return null
+
+  // Cell path goal→start, then re-ordered start→goal as points.
+  const pts: Vec[] = [{ ...hole.cup }]
+  for (let c = goalCell; c !== startCell; c = prev[c]) {
+    pts.push({ x: cx(c % NAV_N), y: cx(Math.floor(c / NAV_N)) })
+  }
+  pts.push({ ...from })
+  pts.reverse()
+  pts[pts.length - 1] = { ...hole.cup } // end exactly at the cup
+
+  // String-pull: from each point, jump to the furthest point still in clear
+  // line of sight, leaving only the real putting legs.
+  const out: Vec[] = []
+  let at = 0
+  while (at < pts.length - 1) {
+    let far = at + 1
+    for (let j = pts.length - 1; j > at; j -= 1) {
+      if (clearPath(pts[at], pts[j], obs)) {
+        far = j
+        break
+      }
+    }
+    out.push(pts[far])
+    at = far
+  }
+  return out
+}
+
+export const isWinnable = (hole: Hole): boolean => routeWaypoints(hole.start, hole) !== null
 
 /**
  * The next aim point from an arbitrary ball position: the cup when the direct
@@ -515,16 +635,25 @@ export function routeTarget(p: Vec, hole: Hole): Vec | null {
 }
 
 /**
- * Par from the hole's real difficulty: a clear direct line is a two-putt, a
- * forced bank is three (perfect play holes a bank route in two — lag putt +
- * finish — so three is an earned target, not free strokes); +1 only for
- * kitchen-sink holes (4+ hazards/movers/voids). Bounded 2..5.
+ * Par from the hole's real difficulty. The waypoint route's length says how
+ * many strokes perfect play needs (a full-power putt rolls 1.0 and the last
+ * ~0.5 must arrive at holing pace); a blocked straight line adds one stroke of
+ * human slack, and kitchen-sink holes (4+ hazards/movers/voids) one more.
+ * Bounded 2..6.
  */
-export function derivePar(hole: Hole, sol: Solution): number {
-  let par = sol.pathType === 'direct' ? 2 : 3
+export function derivePar(hole: Hole, sol: Solution | null): number {
+  const wps = routeWaypoints(hole.start, hole) ?? [{ ...hole.cup }]
+  let len = 0
+  let prev = hole.start
+  for (const w of wps) {
+    len += dist(prev, w)
+    prev = w
+  }
+  const minStrokes = 1 + Math.ceil(Math.max(0, len - 0.5))
+  let par = minStrokes + (sol?.pathType === 'direct' ? 0 : 1)
   const features = hole.hazards.length + hole.movers.length + hole.voids.length
   if (features >= 4) par += 1
-  return clamp(par, 2, 5)
+  return clamp(par, 2, 6)
 }
 
 // ---------------------------------------------------------------------------
@@ -540,15 +669,134 @@ const rectsOverlap = (a: Rect, b: Rect, pad = 0.02): boolean =>
  * second mover/void/water/sand. Used by makeHole's retry ladder so the busiest
  * holes stay bank-only instead of degrading to a free straight shot.
  */
-function buildCandidate(index: number, seed: string, salt: number, sparse = 0): Hole {
+/** A piece of the course OUTLINE: `rail` pieces are solid (timber-fenced, the
+ *  ball banks off them), `chasm` pieces are missing green (roll in and fall). */
+interface ShapePiece {
+  rect: Rect
+  kind: 'rail' | 'chasm'
+}
+
+/**
+ * The course silhouette, picked before anything else. Early holes are plain;
+ * later ones are mostly DRAMATIC: giant corner Ls, donuts around an island,
+ * figure-eights weaving two islands, serpents and Ws snaking between huge
+ * side slabs, and amoebas of mixed pieces. Each piece is independently railed
+ * or treacherous.
+ */
+function shapePieces(index: number, t: number, rng: () => number): ShapePiece[] {
+  const kindRoll = (): ShapePiece['kind'] => (rng() < 0.3 + 0.2 * t ? 'chasm' : 'rail')
+  let pick = 'full'
+  if (index >= 2) {
+    const pool = index >= 5 ? ['L', 'donut', 'serpent', 'eight', 'W', 'amoeba'] : ['L', 'donut', 'serpent']
+    if (rng() < (index >= 5 ? 0.85 : 0.7)) pick = pool[Math.floor(rng() * pool.length)]
+  }
+  switch (pick) {
+    case 'L': {
+      // A giant corner block — nearly a quarter of the board gone.
+      const left = rng() < 0.5
+      const top = rng() < 0.5
+      const w = 0.42 + rng() * 0.13
+      const h = 0.36 + rng() * 0.12
+      return [{ rect: { x: left ? 0 : 1 - w, y: top ? 0 : 1 - h, w, h }, kind: kindRoll() }]
+    }
+    case 'donut': {
+      // A central island: play around either side (the O).
+      const w = 0.26 + rng() * 0.1
+      const h = 0.22 + rng() * 0.1
+      return [
+        {
+          rect: { x: 0.5 - w / 2 + (rng() - 0.5) * 0.12, y: 0.46 - h / 2 + (rng() - 0.5) * 0.1, w, h },
+          kind: kindRoll(),
+        },
+      ]
+    }
+    case 'eight': {
+      // Two stacked islands: weave between them (the 8).
+      const w1 = 0.2 + rng() * 0.06
+      const w2 = 0.2 + rng() * 0.06
+      return [
+        { rect: { x: 0.5 - w1 / 2 + (rng() - 0.5) * 0.1, y: 0.25, w: w1, h: 0.14 }, kind: kindRoll() },
+        { rect: { x: 0.5 - w2 / 2 + (rng() - 0.5) * 0.1, y: 0.56, w: w2, h: 0.14 }, kind: kindRoll() },
+      ]
+    }
+    case 'serpent': {
+      // Two opposing slabs: an S-corridor snaking across the whole board.
+      const th = 0.14 + rng() * 0.04
+      const reach = 0.56 + rng() * 0.1
+      const leftFirst = rng() < 0.5
+      const y1 = 0.26 + rng() * 0.04
+      const y2 = y1 + th + 0.15 + rng() * 0.04
+      return [
+        { rect: { x: leftFirst ? 0 : 1 - reach, y: y1, w: reach, h: th }, kind: kindRoll() },
+        { rect: { x: leftFirst ? 1 - reach : 0, y: y2, w: reach, h: th }, kind: kindRoll() },
+      ]
+    }
+    case 'W': {
+      // Three alternating slabs: a full zigzag.
+      const th = 0.11 + rng() * 0.02
+      const reach = 0.52 + rng() * 0.08
+      const leftFirst = rng() < 0.5
+      const gap = 0.12 + rng() * 0.02
+      const y1 = 0.16 + rng() * 0.03
+      const y2 = y1 + th + gap
+      const y3 = y2 + th + gap
+      return [
+        { rect: { x: leftFirst ? 0 : 1 - reach, y: y1, w: reach, h: th }, kind: kindRoll() },
+        { rect: { x: leftFirst ? 1 - reach : 0, y: y2, w: reach, h: th }, kind: kindRoll() },
+        { rect: { x: leftFirst ? 0 : 1 - reach, y: y3, w: reach, h: th }, kind: kindRoll() },
+      ]
+    }
+    case 'amoeba': {
+      // An irregular organism: a big corner blob, a side pseudopod, an island.
+      const pieces: ShapePiece[] = []
+      const cLeft = rng() < 0.5
+      const cTop = rng() < 0.5
+      const cw = 0.3 + rng() * 0.12
+      const ch = 0.24 + rng() * 0.1
+      pieces.push({ rect: { x: cLeft ? 0 : 1 - cw, y: cTop ? 0 : 1 - ch, w: cw, h: ch }, kind: kindRoll() })
+      const nw = 0.14 + rng() * 0.06
+      const nh = 0.24 + rng() * 0.12
+      const notch: Rect = { x: cLeft ? 1 - nw : 0, y: 0.3 + rng() * 0.25, w: nw, h: nh }
+      if (!pieces.some((p) => rectsOverlap(notch, p.rect, 0.12))) pieces.push({ rect: notch, kind: kindRoll() })
+      const iw = 0.15 + rng() * 0.06
+      const island: Rect = { x: 0.36 + rng() * 0.2, y: 0.32 + rng() * 0.2, w: iw, h: iw * (0.8 + rng() * 0.4) }
+      if (!pieces.some((p) => rectsOverlap(island, p.rect, 0.12))) pieces.push({ rect: island, kind: kindRoll() })
+      return pieces
+    }
+    default:
+      return []
+  }
+}
+
+function buildCandidate(index: number, seed: string, salt: number, sparse = 0): Hole | null {
   const rng = rngFromSeed(`golf:${seed}:${index}:${salt}:${sparse}`)
   const t = index / (COURSE_HOLES - 1) // 0 (first) .. 1 (last): difficulty ramp
 
-  // Longer greens and smaller cups on later holes.
+  // --- Course silhouette first: everything else fits around it. ---------------
+  // sparse >= 2 falls back to a plain board so the retry ladder always ends
+  // somewhere placeable.
+  const pieces = sparse >= 2 ? [] : shapePieces(index, t, rng)
+  const shapeCuts = pieces.filter((p) => p.kind === 'rail').map((p) => p.rect)
+  const shapeVoids = pieces.filter((p) => p.kind === 'chasm').map((p) => p.rect)
+  const shapeRects = pieces.map((p) => p.rect)
+
+  // Tee and cup live in the silhouette's free space (sampled, with margin).
   const startY = 0.8 + t * 0.1
   const cupY = 0.28 - t * 0.16
-  const start: Vec = { x: clamp01(0.5 + (rng() - 0.5) * 0.6, BALL_RADIUS * 2), y: startY }
-  const cup: Vec = { x: clamp01(0.5 + (rng() - 0.5) * 0.8, 0.07), y: cupY }
+  const clearOfShape = (p: Vec, margin: number): boolean =>
+    !shapeRects.some((r) =>
+      pointInRect(p, { x: r.x - margin, y: r.y - margin, w: r.w + 2 * margin, h: r.h + 2 * margin }),
+    )
+  const samplePoint = (y: number, spread: number, edge: number): Vec | null => {
+    for (let attempt = 0; attempt < 14; attempt += 1) {
+      const p: Vec = { x: clamp01(0.5 + (rng() - 0.5) * spread, edge), y }
+      if (clearOfShape(p, 0.09)) return p
+    }
+    return null
+  }
+  const start = samplePoint(startY, 0.7, BALL_RADIUS * 2)
+  const cup = samplePoint(cupY, 0.85, 0.07)
+  if (!start || !cup) return null // silhouette left no room — next salt
   // The cup is barely bigger than the ball (BALL_RADIUS 0.022) and tightens
   // further over the course — sinking is an aimed act, not a splash zone.
   const cupRadius = 0.03 - 0.003 * t
@@ -564,41 +812,7 @@ function buildCandidate(index: number, seed: string, salt: number, sparse = 0): 
     return { x: lx + (-dy / len) * off, y: ly + (dx / len) * off }
   }
 
-  // --- Shape cuts: the course outline itself -----------------------------------
-  // Solid regions outside the course, fenced by rails the ball banks off. From
-  // the second hole on, the board is often not a square: corner bites and side
-  // notches make Ls, doglegs and waisted greens.
-  const cuts: Rect[] = []
-  const cutOk = (c: Rect): boolean => {
-    const grown = { x: c.x - 0.13, y: c.y - 0.13, w: c.w + 0.26, h: c.h + 0.26 }
-    if (pointInRect(start, grown) || pointInRect(cup, grown)) return false
-    return !cuts.some((o) => rectsOverlap(c, o, 0.08))
-  }
-  const addCut = (): void => {
-    for (let attempt = 0; attempt < 6; attempt += 1) {
-      let c: Rect
-      if (rng() < 0.6) {
-        // Corner bite → L-shaped course.
-        const left = rng() < 0.5
-        const top = rng() < 0.5
-        const w = 0.24 + rng() * 0.2
-        const h = 0.2 + rng() * 0.18
-        c = { x: left ? 0 : 1 - w, y: top ? 0 : 1 - h, w, h }
-      } else {
-        // Side notch → waisted/dogleg course.
-        const left = rng() < 0.5
-        const w = 0.12 + rng() * 0.08
-        const h = 0.28 + rng() * 0.2
-        c = { x: left ? 0 : 1 - w, y: 0.15 + rng() * Math.max(0.05, 0.7 - h), w, h }
-      }
-      if (cutOk(c)) {
-        cuts.push(c)
-        return
-      }
-    }
-  }
-  if (index >= 1 && rng() < 0.45 + 0.35 * t) addCut()
-  if (index >= 4 && sparse < 2 && rng() < 0.4) addCut()
+  const cuts: Rect[] = [...shapeCuts]
 
   // --- Walls -----------------------------------------------------------------
   // From hole 2 on, BLOCKER bars are laid across the direct tee→cup line so the
@@ -620,8 +834,8 @@ function buildCandidate(index: number, seed: string, salt: number, sparse = 0): 
     const cand: Rect = { x: bx, y: my - 0.0175, w, h: 0.035 }
     // The clamp near an edge can slide the bar off the line — recenter if so.
     if (!segHitsRect(start, cup, cand, BALL_RADIUS)) cand.x = clamp(mx - w / 2, 0, 1 - w)
-    // A bar swallowed by a shape cut is dead weight — the cut already blocks.
-    if (!overlapsExisting(cand) && !cuts.some((c) => rectsOverlap(cand, c, 0))) walls.push(cand)
+    // A bar swallowed by the silhouette is dead weight — the shape already blocks.
+    if (!overlapsExisting(cand) && !shapeRects.some((c) => rectsOverlap(cand, c, 0))) walls.push(cand)
   }
 
   // --- Moving walls -------------------------------------------------------------
@@ -645,7 +859,7 @@ function buildCandidate(index: number, seed: string, salt: number, sparse = 0): 
       const env = moverEnvelope(m)
       if (
         !walls.some((w) => rectsOverlap(env, w)) &&
-        !cuts.some((c) => rectsOverlap(env, c)) &&
+        !shapeRects.some((c) => rectsOverlap(env, c)) &&
         !movers.some((o) => rectsOverlap(env, moverEnvelope(o)))
       ) {
         movers.push(m)
@@ -670,7 +884,7 @@ function buildCandidate(index: number, seed: string, salt: number, sparse = 0): 
     }
     if (
       !overlapsExisting(cand) &&
-      !cuts.some((c) => rectsOverlap(cand, c)) &&
+      !shapeRects.some((c) => rectsOverlap(cand, c)) &&
       !movers.some((m) => rectsOverlap(cand, moverEnvelope(m)))
     )
       walls.push(cand)
@@ -696,19 +910,26 @@ function buildCandidate(index: number, seed: string, salt: number, sparse = 0): 
       )
     )
       return false
-    // Fully on the course: nowhere near off the outline's shape cuts.
-    if (cuts.some((c) => pointInRect(p, { x: c.x - r, y: c.y - r, w: c.w + 2 * r, h: c.h + 2 * r })))
+    // Fully on the course: clear of the silhouette (rails AND chasms).
+    if (
+      shapeRects.some((c) =>
+        pointInRect(p, { x: c.x - r, y: c.y - r, w: c.w + 2 * r, h: c.h + 2 * r }),
+      )
+    )
       return false
     const bounds = { x: p.x - r, y: p.y - r, w: r * 2, h: r * 2 }
     if (movers.some((m) => rectsOverlap(moverEnvelope(m), bounds, 0))) return false
     return true
   }
   const addHazard = (kind: Hazard['kind'], maxOff: number): void => {
-    for (let attempt = 0; attempt < 16; attempt += 1) {
+    for (let attempt = 0; attempt < 28; attempt += 1) {
       const r = kind === 'water' ? 0.055 + rng() * 0.03 : 0.07 + rng() * 0.04
-      const u = 0.2 + rng() * 0.6
-      const off = (rng() < 0.5 ? -1 : 1) * (kind === 'sand' ? rng() * maxOff : 0.08 + rng() * maxOff)
-      const p = lanePoint(u, off)
+      // Prefer spots near the putting lane; on tightly-shaped boards fall back
+      // to anywhere free so the trap still lands somewhere that matters.
+      const p =
+        attempt < 14
+          ? lanePoint(0.2 + rng() * 0.6, (rng() < 0.5 ? -1 : 1) * (kind === 'sand' ? rng() * maxOff : 0.08 + rng() * maxOff))
+          : { x: 0.1 + rng() * 0.8, y: cup.y + 0.12 + rng() * Math.max(0.1, span - 0.2) }
       if (hazardFits(p, r)) {
         hazards.push({ p: { x: clamp01(p.x, r * 0.9), y: clamp01(p.y, r * 0.9) }, r, kind })
         return
@@ -722,7 +943,8 @@ function buildCandidate(index: number, seed: string, salt: number, sparse = 0): 
   if (index >= 6 && sparse < 2 && rng() < 0.5) addHazard('sand', 0.24)
 
   // --- Voids (the green just ends) ---------------------------------------------
-  const voids: Rect[] = []
+  // The silhouette's chasm pieces are voids; plain boards may add small extras.
+  const voids: Rect[] = [...shapeVoids]
   const voidOk = (v: Rect): boolean => {
     const grown = { x: v.x - 0.1, y: v.y - 0.1, w: v.w + 0.2, h: v.h + 0.2 }
     if (pointInRect(start, grown) || pointInRect(cup, grown)) return false
@@ -756,8 +978,8 @@ function buildCandidate(index: number, seed: string, salt: number, sparse = 0): 
       }
     }
   }
-  if (index >= 5) addVoid()
-  if (index >= 7 && sparse < 2 && rng() < 0.6) addVoid()
+  if (index >= 5 && pieces.length === 0) addVoid()
+  if (index >= 7 && pieces.length === 0 && sparse < 2 && rng() < 0.6) addVoid()
 
   // --- Jump ramps -----------------------------------------------------------------
   // A kicker plate near (not on) the tee line, early in the shot. It launches
@@ -831,15 +1053,18 @@ function clearBlockers(hole: Hole): void {
  * direct shot always exists. Par is then derived from the actual route.
  */
 export function makeHole(index: number, seed: string): Hole {
-  let fallback: { hole: Hole; sol: Solution } | null = null
+  let fallback: { hole: Hole; sol: Solution | null } | null = null
   // Retry ladder: full layouts first, then progressively sparser ones — a busy
   // finale hole should shed its clutter before it ever concedes a straight ace.
+  // A hole is playable when the waypoint router finds ANY multi-leg route; from
+  // hole 2 on we additionally demand the straight tee→cup ace be blocked.
   for (let sparse = 0; sparse <= 2; sparse += 1) {
     for (let salt = 0; salt < 64; salt += 1) {
       const hole = buildCandidate(index, seed, salt, sparse)
+      if (!hole) continue // silhouette left no room for tee/cup
+      if (!routeWaypoints(hole.start, hole)) continue // not connected
       const sol = solveHole(hole)
-      if (!sol) continue
-      if (index === 0 || sol.pathType === 'bank') {
+      if (index === 0 || sol?.pathType !== 'direct') {
         hole.par = derivePar(hole, sol)
         hole.winnable = true
         return hole
@@ -852,10 +1077,10 @@ export function makeHole(index: number, seed: string): Hole {
     fallback.hole.winnable = true
     return fallback.hole
   }
-  // Last resort (no candidate was solvable at all): peel obstacles off one
+  // Last resort (no candidate was playable at all): peel obstacles off one
   // layer at a time until a route opens, so even a degenerate seed keeps most
   // of its hole — never a naked green with a free straight shot.
-  const hole = buildCandidate(index, seed, 0)
+  const hole = buildCandidate(index, seed, 0) ?? buildCandidate(index, seed, 0, 2)!
   const peels: Array<() => void> = [
     () => (hole.voids = hole.voids.slice(0, 1)),
     () => (hole.voids = []),
@@ -866,17 +1091,14 @@ export function makeHole(index: number, seed: string): Hole {
     () => (hole.walls = hole.walls.slice(0, Math.max(1, hole.walls.length - 1))),
     () => (hole.walls = hole.walls.slice(0, 1)),
   ]
-  let sol = solveHole(hole)
+  let ok = isWinnable(hole)
   for (const peel of peels) {
-    if (sol) break
+    if (ok) break
     peel()
-    sol = solveHole(hole)
+    ok = isWinnable(hole)
   }
-  if (!sol) {
-    clearBlockers(hole)
-    sol = solveHole(hole) ?? { pathType: 'direct' as PathType, strokes: 1 }
-  }
-  hole.par = derivePar(hole, sol)
+  if (!ok) clearBlockers(hole)
+  hole.par = derivePar(hole, solveHole(hole))
   hole.winnable = true
   return hole
 }

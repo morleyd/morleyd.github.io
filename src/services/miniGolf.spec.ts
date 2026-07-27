@@ -26,6 +26,7 @@ import {
   moverRectAt,
   planPutt,
   routeTarget,
+  routeWaypoints,
   solveHole,
   speed,
   step,
@@ -254,7 +255,7 @@ describe('makeHole (generation)', () => {
         expect(makeHole(i, seed)).toEqual(h)
         expect(h.start.y).toBeGreaterThan(h.cup.y)
         expect(h.par).toBeGreaterThanOrEqual(2)
-        expect(h.par).toBeLessThanOrEqual(5)
+        expect(h.par).toBeLessThanOrEqual(6)
         for (const w of h.walls) {
           expect(w.x).toBeGreaterThanOrEqual(0)
           expect(w.x + w.w).toBeLessThanOrEqual(1.0001)
@@ -287,25 +288,47 @@ describe('makeHole (generation)', () => {
     expect(late).toBeGreaterThan(0.65)
     expect(late).toBeGreaterThan(early)
   })
-  it('the board is often not a square: shape cuts appear, clear of tee and cup, and are solid', () => {
-    let found = 0
+  it('the board is often DRAMATICALLY not a square, with both railed and treacherous outlines', () => {
+    const area = (r: { w: number; h: number }) => r.w * r.h
+    let cutPieces = 0
+    let dramatic = 0
+    let islands = 0
+    let bigChasms = 0
     for (const seed of [...SEEDS, 'r1', 'r2', 'r3', 'r4', 'r5']) {
       for (let i = 0; i < COURSE_HOLES; i += 1) {
         const h = makeHole(i, seed)
+        const shapeArea = [...h.cuts, ...h.voids].reduce((a, r) => a + area(r), 0)
+        if (shapeArea >= 0.15) dramatic += 1
         for (const c of h.cuts) {
-          found += 1
-          // Tee and cup are never inside (or hugging) a cut.
+          cutPieces += 1
+          // Tee and cup are never inside a solid piece.
           expect(c.x <= h.start.x && h.start.x <= c.x + c.w && c.y <= h.start.y && h.start.y <= c.y + c.h).toBe(false)
           expect(c.x <= h.cup.x && h.cup.x <= c.x + c.w && c.y <= h.cup.y && h.cup.y <= c.y + c.h).toBe(false)
-          // Anchored to the board edge (it's the outline, not an island).
-          const onEdge = c.x <= 0.001 || c.x + c.w >= 0.999 || c.y <= 0.001 || c.y + c.h >= 0.999
-          expect(onEdge).toBe(true)
+          // Cuts are solid: they participate in the physics wall set.
+          expect(effectiveWalls(h, 0)).toContainEqual(c)
         }
-        // Cuts are solid: they participate in the physics wall set.
-        for (const c of h.cuts) expect(effectiveWalls(h, 0)).toContainEqual(c)
+        // Interior islands (donut/eight/amoeba cores) — not edge-anchored.
+        for (const r of [...h.cuts, ...h.voids]) {
+          if (r.x > 0.01 && r.x + r.w < 0.99 && r.y > 0.01 && r.y + r.h < 0.99) islands += 1
+          else if (area(r) >= 0.06 && h.voids.includes(r)) bigChasms += 1
+        }
       }
     }
-    expect(found).toBeGreaterThan(10)
+    expect(cutPieces).toBeGreaterThan(10)
+    expect(dramatic).toBeGreaterThan(15) // Ls, serpents, Ws — not nibbles
+    expect(islands).toBeGreaterThan(3) // donuts and eights exist
+    expect(bigChasms).toBeGreaterThan(3) // some outlines are treacherous, not railed
+  })
+  it('every waypoint route is made of genuinely puttable straight legs', () => {
+    for (const seed of SEEDS) {
+      for (let i = 0; i < COURSE_HOLES; i += 1) {
+        const h = makeHole(i, seed)
+        const wps = routeWaypoints(h.start, h)
+        expect(wps, `seed ${seed} hole ${i + 1}`).not.toBeNull()
+        const last = wps![wps!.length - 1]
+        expect(Math.hypot(last.x - h.cup.x, last.y - h.cup.y)).toBeLessThan(0.001)
+      }
+    }
   })
   it('a ball rolled at a shape cut banks off its rail instead of entering', () => {
     const h = bareHole({ cuts: [{ x: 0, y: 0.3, w: 0.2, h: 0.3 }] })
@@ -401,31 +424,37 @@ describe('winnability + no free straight shots', () => {
       for (let i = 0; i < COURSE_HOLES; i += 1) {
         const h = makeHole(i, seed)
         expect(h.winnable).toBe(true)
+        // The waypoint router is the winnability authority; the one-bank
+        // solver may legitimately fail on serpentine/donut boards.
         expect(isWinnable(h)).toBe(true)
-        expect(solveHole(h)).not.toBeNull()
       }
     }
   })
-  it('no hole past the first is ever a naked green (walls or shape cuts present)', () => {
+  it('no hole past the first is ever a naked green (some structure always present)', () => {
     for (const seed of [...SEEDS, 'r1', 'r2', 'r3', 'r4', 'r5', 'qqqq', '01234']) {
       for (let i = 1; i < COURSE_HOLES; i += 1) {
         const h = makeHole(i, seed)
-        // A cut counts as structure: an L-course dogleg blocks the line even
-        // with no bars on the green.
-        expect(h.walls.length + h.cuts.length, `seed ${seed} hole ${i + 1}`).toBeGreaterThan(0)
+        // Structure = bars, railed outline pieces, or chasm outline pieces — a
+        // serpent made entirely of drop-offs blocks the line without a bar.
+        expect(
+          h.walls.length + h.cuts.length + h.voids.length,
+          `seed ${seed} hole ${i + 1}`,
+        ).toBeGreaterThan(0)
       }
     }
   })
   it('from hole 2 on, the direct tee→cup line is (almost) always blocked', () => {
-    let banks = 0
+    let blocked = 0
     let total = 0
     for (const seed of SEEDS) {
       for (let i = 1; i < COURSE_HOLES; i += 1) {
         total += 1
-        if (solveHole(makeHole(i, seed))!.pathType === 'bank') banks += 1
+        // solveHole returns 'direct' only when the straight ace is open; a
+        // 'bank' or null (multi-leg board) both mean the line is blocked.
+        if (solveHole(makeHole(i, seed))?.pathType !== 'direct') blocked += 1
       }
     }
-    expect(banks / total).toBeGreaterThan(0.9)
+    expect(blocked / total).toBeGreaterThan(0.9)
   })
   it('reports a hole with the cup walled off as unsolvable', () => {
     const boxed = bareHole({
@@ -502,17 +531,17 @@ describe('simulated player completes every course', () => {
     let ball: BallState = { p: { ...hole.start }, v: { x: 0, y: 0 }, air: 0 }
     let simMs = 0
     for (let stroke = 1; stroke <= 14; stroke += 1) {
-      // Plan from here; if boxed in (no single-bank route), play a
-      // repositioning shot back toward the tee's guaranteed route — what a
-      // human does — before resorting to firing blind at the cup.
-      const target = routeTarget(ball.p, hole) ?? routeTarget(hole.start, hole) ?? { ...hole.cup }
-      const viaBank = target.x !== hole.cup.x || target.y !== hole.cup.y
+      // Follow the waypoint route from here; if boxed in, re-plan from the tee
+      // route — what a human does — before firing blind at the cup.
+      const wps = routeWaypoints(ball.p, hole) ?? routeWaypoints(hole.start, hole) ?? [{ ...hole.cup }]
+      const target = { ...wps[0] }
+      const lastLeg = wps.length === 1
       // A struggling human varies the line a touch instead of repeating the
       // exact shot — mirror that so one bad interaction can't loop forever.
       if (stroke > 4) target.x += ((stroke % 3) - 1) * 0.02
-      const carry = viaBank
-        ? FRICTION * Math.hypot(hole.cup.x - target.x, hole.cup.y - target.y) + 0.1
-        : 0.12
+      // Intermediate waypoints hug obstacle corners — arrive nearly stopped so
+      // overshoot can't carry past the corner into the hazard behind it.
+      const carry = lastLeg ? 0.12 : 0.04
       ball = shoot(ball.p, target, carry)
       // Simulate until the ball rests, sinks, or is lost.
       for (let i = 0; i < 4000; i += 1) {
