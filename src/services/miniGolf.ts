@@ -57,9 +57,12 @@ export interface Hazard {
   kind: 'water' | 'sand'
 }
 
-/** A jump plate: cross it faster than RAMP_MIN_SPEED and the ball launches. */
+/** A jump plate: cross it faster than RAMP_MIN_SPEED and the ball launches —
+ *  along the RAMP's facing (`dir`, a unit vector, drawn as its chevrons), not
+ *  along whatever line you rolled in on. Reading the kicker is the skill. */
 export interface Ramp {
   rect: Rect
+  dir: Vec
 }
 
 /** A wall that oscillates back and forth along one axis (harder-hole variety). */
@@ -239,14 +242,16 @@ export function step(state: BallState, walls: Rect[], dtMs: number, hole?: Hole)
 
   const out = collide(moved, walls)
 
-  // Jump ramps: entering a plate at speed launches the ball on its current
-  // heading. Flight time (≈ jump distance) scales with entry speed.
+  // Jump ramps: entering a plate at speed launches the ball along the RAMP's
+  // facing — entry speed only sets how far it flies. Rolling in at an angle
+  // still kicks you where the chevrons point.
   if (hole) {
     const spd = speed(out.v)
     if (spd >= RAMP_MIN_SPEED) {
       for (const ramp of hole.ramps) {
         if (!pointInRect(before, ramp.rect) && pointInRect(out.p, ramp.rect)) {
           out.air = Math.min(RAMP_AIR_MAX, RAMP_AIR_PER_SPEED * spd)
+          out.v = { x: ramp.dir.x * spd, y: ramp.dir.y * spd }
           break
         }
       }
@@ -532,7 +537,9 @@ function buildCandidate(index: number, seed: string, salt: number, sparse = 0): 
   const cupY = 0.28 - t * 0.16
   const start: Vec = { x: clamp01(0.5 + (rng() - 0.5) * 0.6, BALL_RADIUS * 2), y: startY }
   const cup: Vec = { x: clamp01(0.5 + (rng() - 0.5) * 0.8, 0.07), y: cupY }
-  const cupRadius = 0.05 - 0.014 * t
+  // The cup is barely bigger than the ball (BALL_RADIUS 0.022) and tightens
+  // further over the course — sinking is an aimed act, not a splash zone.
+  const cupRadius = 0.03 - 0.003 * t
   const span = start.y - cup.y
 
   // A point on the direct tee→cup line, offset sideways by `off` (perpendicular).
@@ -558,7 +565,9 @@ function buildCandidate(index: number, seed: string, salt: number, sparse = 0): 
   for (const u of blockerUs.slice(0, blockerCount)) {
     const mx = start.x + (cup.x - start.x) * u
     const my = start.y + (cup.y - start.y) * u
-    const w = 0.34 + rng() * 0.18 + t * 0.14
+    // A pair of bars stays slimmer than a lone one — two wide bars (plus voids)
+    // can seal every bank route and force the degenerate fallback.
+    const w = (blockerCount === 2 ? 0.28 + rng() * 0.12 : 0.34 + rng() * 0.18) + t * 0.1
     const bx = clamp(mx - w / 2, 0.02, 0.98 - w)
     const cand: Rect = { x: bx, y: my - 0.0175, w, h: 0.035 }
     // The clamp near an edge can slide the bar off the line — recenter if so.
@@ -623,16 +632,23 @@ function buildCandidate(index: number, seed: string, salt: number, sparse = 0): 
     if (dist(p, start) < r + 0.12) return false
     if (dist(p, cup) < r + cupRadius + 0.09) return false
     if (hazards.some((h) => dist(p, h.p) < r + h.r + 0.04)) return false
-    // Not buried under a wall or a sweeping wall's envelope.
+    // Not centered under a wall (a blob lapping a timber edge reads fine) and
+    // never under a sweeping wall's whole travel band.
+    const grown = r * 0.4
+    if (
+      walls.some((w) =>
+        pointInRect(p, { x: w.x - grown, y: w.y - grown, w: w.w + 2 * grown, h: w.h + 2 * grown }),
+      )
+    )
+      return false
     const bounds = { x: p.x - r, y: p.y - r, w: r * 2, h: r * 2 }
-    if (walls.some((w) => rectsOverlap(w, bounds, 0))) return false
     if (movers.some((m) => rectsOverlap(moverEnvelope(m), bounds, 0))) return false
     return true
   }
   const addHazard = (kind: Hazard['kind'], maxOff: number): void => {
-    for (let attempt = 0; attempt < 8; attempt += 1) {
+    for (let attempt = 0; attempt < 16; attempt += 1) {
       const r = kind === 'water' ? 0.055 + rng() * 0.03 : 0.07 + rng() * 0.04
-      const u = 0.25 + rng() * 0.5
+      const u = 0.2 + rng() * 0.6
       const off = (rng() < 0.5 ? -1 : 1) * (kind === 'sand' ? rng() * maxOff : 0.08 + rng() * maxOff)
       const p = lanePoint(u, off)
       if (hazardFits(p, r)) {
@@ -643,8 +659,9 @@ function buildCandidate(index: number, seed: string, salt: number, sparse = 0): 
   }
   if (index >= 2) addHazard('water', 0.22)
   if (index >= 4 && sparse < 2 && rng() < 0.7) addHazard('water', 0.26)
-  if (index >= 3) addHazard('sand', 0.14)
-  if (index >= 6 && sparse < 2 && rng() < 0.6) addHazard('sand', 0.18)
+  // Sand grows steadily more likely each round, reaching ~90% on the finale.
+  if (rng() < 0.15 + 0.75 * t) addHazard('sand', 0.2)
+  if (index >= 6 && sparse < 2 && rng() < 0.5) addHazard('sand', 0.24)
 
   // --- Voids (the green just ends) ---------------------------------------------
   const voids: Rect[] = []
@@ -684,19 +701,28 @@ function buildCandidate(index: number, seed: string, salt: number, sparse = 0): 
   if (index >= 7 && sparse < 2 && rng() < 0.6) addVoid()
 
   // --- Jump ramps -----------------------------------------------------------------
-  // A plate on the (blocked) direct line, early in the shot: hammer a straight
-  // putt through it and the ball flies the blocker — the risky ace line.
+  // A kicker plate near (not on) the tee line, early in the shot. It launches
+  // along its OWN facing — usually skewed well off the cup, sometimes lined up
+  // for the dream ace. Reading where the chevrons actually point is the skill.
   const ramps: Ramp[] = []
   if (index >= 6) {
-    const u = 0.16 + rng() * 0.1
-    const p = lanePoint(u, 0)
+    const u = 0.16 + rng() * 0.12
+    const off = (rng() < 0.5 ? -1 : 1) * (0.04 + rng() * 0.12)
+    const p = lanePoint(u, off)
     const rect: Rect = { x: clamp(p.x - 0.05, 0.02, 0.88), y: clamp(p.y - 0.035, 0.02, 0.91), w: 0.1, h: 0.07 }
+    const center = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 }
+    // Facing: toward the cup, then rotated by a healthy random skew (±15°–49°,
+    // with a rare ~1-in-6 true liner at only a few degrees off).
+    const toCup = Math.atan2(cup.y - center.y, cup.x - center.x)
+    const skew = rng() < 0.17 ? (rng() - 0.5) * 0.12 : (rng() < 0.5 ? -1 : 1) * (0.26 + rng() * 0.6)
+    const ang = toCup + skew
+    const dir: Vec = { x: Math.cos(ang), y: Math.sin(ang) }
     const clearOfEverything =
       !walls.some((w) => rectsOverlap(rect, w)) &&
       !movers.some((m) => rectsOverlap(rect, moverEnvelope(m))) &&
       !voids.some((v) => rectsOverlap(rect, v)) &&
-      !hazards.some((h) => dist({ x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 }, h.p) < h.r + 0.09)
-    if (clearOfEverything) ramps.push({ rect })
+      !hazards.some((h) => dist(center, h.p) < h.r + 0.09)
+    if (clearOfEverything) ramps.push({ rect, dir })
   }
 
   return {
@@ -756,9 +782,28 @@ export function makeHole(index: number, seed: string): Hole {
     fallback.hole.winnable = true
     return fallback.hole
   }
+  // Last resort (no candidate was solvable at all): peel obstacles off one
+  // layer at a time until a route opens, so even a degenerate seed keeps most
+  // of its hole — never a naked green with a free straight shot.
   const hole = buildCandidate(index, seed, 0)
-  clearBlockers(hole)
-  const sol = solveHole(hole) ?? { pathType: 'direct' as PathType, strokes: 1 }
+  const peels: Array<() => void> = [
+    () => (hole.voids = hole.voids.slice(0, 1)),
+    () => (hole.voids = []),
+    () => (hole.movers = hole.movers.slice(0, 1)),
+    () => (hole.movers = []),
+    () => (hole.walls = hole.walls.slice(0, Math.max(1, hole.walls.length - 1))),
+    () => (hole.walls = hole.walls.slice(0, 1)),
+  ]
+  let sol = solveHole(hole)
+  for (const peel of peels) {
+    if (sol) break
+    peel()
+    sol = solveHole(hole)
+  }
+  if (!sol) {
+    clearBlockers(hole)
+    sol = solveHole(hole) ?? { pathType: 'direct' as PathType, strokes: 1 }
+  }
   hole.par = derivePar(hole, sol)
   hole.winnable = true
   return hole

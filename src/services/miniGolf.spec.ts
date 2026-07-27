@@ -176,7 +176,7 @@ describe('voids (drop-offs)', () => {
 
 describe('jump ramps', () => {
   const hole = bareHole({
-    ramps: [{ rect: { x: 0.45, y: 0.6, w: 0.1, h: 0.07 } }],
+    ramps: [{ rect: { x: 0.45, y: 0.6, w: 0.1, h: 0.07 }, dir: { x: 0, y: -1 } }],
     walls: [{ x: 0.2, y: 0.45, w: 0.6, h: 0.035 }], // a wall right after the ramp
   })
   it('launches a fast ball airborne on entry', () => {
@@ -207,6 +207,19 @@ describe('jump ramps', () => {
     // The wall spans y=0.45..0.485; a grounded ball could never cross it going
     // up. The jump carried it past.
     expect(ball.p.y).toBeLessThan(0.45)
+  })
+  it('launches along the RAMP’s facing, not the entry heading', () => {
+    const kicker = bareHole({
+      ramps: [{ rect: { x: 0.45, y: 0.6, w: 0.1, h: 0.07 }, dir: { x: 1, y: 0 } }],
+    })
+    let ball: BallState = { p: { x: 0.5, y: 0.75 }, v: { x: 0, y: -1.2 } } // rolling straight up
+    for (let i = 0; i < 200; i += 1) {
+      ball = step(ball, [], 8, kicker)
+      if (airborne(ball)) break
+    }
+    expect(airborne(ball)).toBe(true)
+    expect(ball.v.x).toBeGreaterThan(1) // kicked sideways, where the chevrons point
+    expect(Math.abs(ball.v.y)).toBeLessThan(0.01)
   })
 })
 
@@ -241,6 +254,51 @@ describe('makeHole (generation)', () => {
       }
       expect(makeHole(COURSE_HOLES - 1, seed).cupRadius).toBeLessThan(makeHole(0, seed).cupRadius)
     }
+  })
+  it('the cup is only barely bigger than the ball', () => {
+    for (const seed of SEEDS) {
+      for (let i = 0; i < COURSE_HOLES; i += 1) {
+        const h = makeHole(i, seed)
+        expect(h.cupRadius).toBeGreaterThan(BALL_RADIUS)
+        expect(h.cupRadius).toBeLessThanOrEqual(BALL_RADIUS * 1.45)
+      }
+    }
+  })
+  it('sand grows more likely each round, hitting ~90% by the finale', () => {
+    const manySeeds = Array.from({ length: 24 }, (_, i) => `sand-stat-${i}`)
+    const sandRate = (index: number): number => {
+      let holesWithSand = 0
+      for (const seed of manySeeds) {
+        if (makeHole(index, seed).hazards.some((h) => h.kind === 'sand')) holesWithSand += 1
+      }
+      return holesWithSand / manySeeds.length
+    }
+    const early = sandRate(0)
+    const late = sandRate(COURSE_HOLES - 1)
+    expect(early).toBeLessThan(0.5)
+    expect(late).toBeGreaterThan(0.65)
+    expect(late).toBeGreaterThan(early)
+  })
+  it('ramps usually do NOT point at the flag (and dir is a unit vector)', () => {
+    let skewed = 0
+    const ramps: Array<{ ang: number }> = []
+    for (const seed of [...SEEDS, 'r1', 'r2', 'r3', 'r4', 'r5']) {
+      for (let i = 6; i < COURSE_HOLES; i += 1) {
+        const h = makeHole(i, seed)
+        for (const r of h.ramps) {
+          expect(Math.hypot(r.dir.x, r.dir.y)).toBeCloseTo(1, 3)
+          const c = { x: r.rect.x + r.rect.w / 2, y: r.rect.y + r.rect.h / 2 }
+          const toCup = Math.atan2(h.cup.y - c.y, h.cup.x - c.x)
+          const rampAng = Math.atan2(r.dir.y, r.dir.x)
+          let d = Math.abs(rampAng - toCup)
+          if (d > Math.PI) d = 2 * Math.PI - d
+          ramps.push({ ang: d })
+          if (d > 0.2) skewed += 1
+        }
+      }
+    }
+    expect(ramps.length).toBeGreaterThan(5)
+    expect(skewed / ramps.length).toBeGreaterThan(0.6)
   })
   it('hazards never stack: pairwise clear of each other, the tee and the cup', () => {
     for (const seed of SEEDS) {
@@ -306,6 +364,13 @@ describe('winnability + no free straight shots', () => {
         expect(h.winnable).toBe(true)
         expect(isWinnable(h)).toBe(true)
         expect(solveHole(h)).not.toBeNull()
+      }
+    }
+  })
+  it('no hole past the first is ever a naked green (walls always present)', () => {
+    for (const seed of [...SEEDS, 'r1', 'r2', 'r3', 'r4', 'r5', 'qqqq', '01234']) {
+      for (let i = 1; i < COURSE_HOLES; i += 1) {
+        expect(makeHole(i, seed).walls.length, `seed ${seed} hole ${i + 1}`).toBeGreaterThan(0)
       }
     }
   })

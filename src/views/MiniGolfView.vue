@@ -11,7 +11,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import GameToolbar from '@/components/GameToolbar.vue'
 import { copyToClipboard } from '@/services/share'
-import { randomSeed } from '@/services/seed'
+import { mulberry32, randomSeed, strToSeed } from '@/services/seed'
 import { burstConfetti } from '@/services/confetti'
 import { useSquareFit } from '@/composables/useSquareFit'
 import {
@@ -95,6 +95,61 @@ const loadHole = () => {
   startLoop()
 }
 
+// A wobbly, hand-drawn-feeling closed blob: a circle whose radius breathes
+// with a couple of seeded sine harmonics. Collision stays the true circle; the
+// wobble is kept small so the visual edge never lies by more than ~8%.
+const blobPath = (
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  r: number,
+  wobbleSeed: number,
+  amp = 0.08,
+) => {
+  const rand = mulberry32(wobbleSeed >>> 0)
+  const p1 = rand() * Math.PI * 2
+  const p2 = rand() * Math.PI * 2
+  const a1 = amp * (0.6 + rand() * 0.4)
+  const a2 = amp * 0.6 * (0.5 + rand() * 0.5)
+  ctx.beginPath()
+  const N = 28
+  for (let i = 0; i <= N; i += 1) {
+    const th = (i / N) * Math.PI * 2
+    const rr = r * (1 + a1 * Math.sin(3 * th + p1) + a2 * Math.sin(5 * th + p2))
+    const x = cx + Math.cos(th) * rr
+    const y = cy + Math.sin(th) * rr
+    if (i === 0) ctx.moveTo(x, y)
+    else ctx.lineTo(x, y)
+  }
+  ctx.closePath()
+}
+
+const wobbleSeedFor = (x: number, y: number) =>
+  (Math.round(x * 8191) * 127 + Math.round(y * 8191)) >>> 0
+
+// A jagged straight edge from (x1,y1) to (x2,y2): little seeded perpendicular
+// offsets every few pixels, like torn turf.
+const jaggedLine = (
+  ctx: CanvasRenderingContext2D,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  rand: () => number,
+  amp = 3,
+) => {
+  const len = Math.hypot(x2 - x1, y2 - y1)
+  const steps = Math.max(2, Math.round(len / 9))
+  const nx = -(y2 - y1) / (len || 1)
+  const ny = (x2 - x1) / (len || 1)
+  ctx.moveTo(x1, y1)
+  for (let i = 1; i <= steps; i += 1) {
+    const t = i / steps
+    const off = i === steps ? 0 : (rand() - 0.5) * 2 * amp
+    ctx.lineTo(x1 + (x2 - x1) * t + nx * off, y1 + (y2 - y1) * t + ny * off)
+  }
+}
+
 const draw = () => {
   const canvas = canvasEl.value
   if (!canvas) return
@@ -108,127 +163,199 @@ const draw = () => {
   }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-  // Green
+  // Turf: base green with seeded organic mottling instead of ruled stripes —
+  // soft light/dark patches like real (imperfectly mowed) grass.
   ctx.fillStyle = '#166534'
   ctx.fillRect(0, 0, S, S)
-  ctx.fillStyle = 'rgba(255,255,255,0.03)'
-  for (let i = 0; i < S; i += 16) ctx.fillRect(0, i, S, 8) // subtle mow stripes
+  const turf = mulberry32((strToSeed(hole.seed) + hole.index * 7919) >>> 0)
+  for (let i = 0; i < 16; i += 1) {
+    const bx = turf() * S
+    const by = turf() * S
+    const br = (0.06 + turf() * 0.12) * S
+    ctx.fillStyle = i % 2 === 0 ? 'rgba(255,255,255,0.025)' : 'rgba(0,0,0,0.05)'
+    ctx.beginPath()
+    ctx.ellipse(bx, by, br * (0.8 + turf() * 0.6), br, turf() * Math.PI, 0, Math.PI * 2)
+    ctx.fill()
+  }
 
-  // Voids — the green simply isn't there. A dark drop with a bright broken edge
-  // so it reads as "you will fall", not as decoration.
+  // Voids — the green simply isn't there: a dark drop behind a torn-turf edge,
+  // with a few cracks running off into the grass.
   for (const v of hole.voids) {
     const vx = v.x * S
     const vy = v.y * S
     const vw = v.w * S
     const vh = v.h * S
+    const rand = mulberry32(wobbleSeedFor(v.x + v.w, v.y + v.h))
     ctx.fillStyle = '#050810'
     ctx.fillRect(vx, vy, vw, vh)
-    // Inner falloff shading
     const grad = ctx.createLinearGradient(vx, vy, vx, vy + Math.min(18, vh))
     grad.addColorStop(0, 'rgba(2, 6, 23, 0.0)')
     grad.addColorStop(1, 'rgba(2, 6, 23, 0.55)')
     ctx.fillStyle = grad
     ctx.fillRect(vx, vy, vw, Math.min(18, vh))
-    // Jagged bright rim on the sides that border grass
-    ctx.strokeStyle = 'rgba(74, 222, 128, 0.5)'
+    // Torn edge along the whole rim
+    ctx.strokeStyle = 'rgba(74, 222, 128, 0.55)'
     ctx.lineWidth = 2
-    ctx.setLineDash([7, 5])
-    ctx.strokeRect(vx + 1, vy + 1, vw - 2, vh - 2)
-    ctx.setLineDash([])
+    ctx.lineJoin = 'round'
+    ctx.beginPath()
+    jaggedLine(ctx, vx, vy, vx + vw, vy, rand)
+    jaggedLine(ctx, vx + vw, vy, vx + vw, vy + vh, rand)
+    jaggedLine(ctx, vx + vw, vy + vh, vx, vy + vh, rand)
+    jaggedLine(ctx, vx, vy + vh, vx, vy, rand)
+    ctx.stroke()
+    // Cracks creeping into the turf
+    ctx.strokeStyle = 'rgba(5, 8, 16, 0.5)'
+    ctx.lineWidth = 1.5
+    for (let c = 0; c < 3; c += 1) {
+      const along = rand()
+      const side = rand() < 0.5
+      const sx = side ? vx + vw * along : vx + (rand() < 0.5 ? 0 : vw)
+      const sy = side ? vy + (rand() < 0.5 ? 0 : vh) : vy + vh * along
+      const dx = (rand() - 0.5) * 22
+      const dy = (rand() - 0.5) * 22
+      ctx.beginPath()
+      ctx.moveTo(sx, sy)
+      ctx.lineTo(sx + dx, sy + dy)
+      ctx.lineTo(sx + dx * 1.6 + (rand() - 0.5) * 8, sy + dy * 1.6 + (rand() - 0.5) * 8)
+      ctx.stroke()
+    }
   }
 
-  // Sand — pale patches with speckles.
+  // Sand — pale organic blobs with speckles and a soft inner shadow.
   for (const hz of hole.hazards) {
     if (hz.kind !== 'sand') continue
     const hx = hz.p.x * S
     const hy = hz.p.y * S
     const hr = hz.r * S
-    ctx.beginPath()
-    ctx.arc(hx, hy, hr, 0, Math.PI * 2)
+    const wseed = wobbleSeedFor(hz.p.x, hz.p.y)
+    blobPath(ctx, hx, hy, hr, wseed)
     ctx.fillStyle = '#d6b98c'
     ctx.fill()
-    ctx.beginPath()
-    ctx.arc(hx, hy, hr * 0.82, 0, Math.PI * 2)
-    ctx.strokeStyle = 'rgba(120, 90, 40, 0.35)'
+    blobPath(ctx, hx + hr * 0.06, hy + hr * 0.08, hr * 0.8, wseed + 1, 0.1)
+    ctx.strokeStyle = 'rgba(120, 90, 40, 0.3)'
     ctx.lineWidth = 1.5
     ctx.stroke()
+    const rand = mulberry32(wseed + 2)
     ctx.fillStyle = 'rgba(120, 90, 40, 0.45)'
-    for (let k = 0; k < 7; k += 1) {
-      const a = (k / 7) * Math.PI * 2 + hz.p.x * 40
-      const rr = hr * (0.25 + 0.5 * ((k * 37) % 10) / 10)
+    for (let k = 0; k < 8; k += 1) {
+      const a = rand() * Math.PI * 2
+      const rr = hr * (0.15 + rand() * 0.6)
       ctx.fillRect(hx + Math.cos(a) * rr, hy + Math.sin(a) * rr, 2, 2)
     }
   }
 
-  // Water pools — drawn under the walls/ball.
+  // Water pools — layered organic blobs, darker shore ring, light ripple.
   for (const hz of hole.hazards) {
     if (hz.kind !== 'water') continue
     const hx = hz.p.x * S
     const hy = hz.p.y * S
     const hr = hz.r * S
-    ctx.beginPath()
-    ctx.arc(hx, hy, hr, 0, Math.PI * 2)
+    const wseed = wobbleSeedFor(hz.p.x, hz.p.y)
+    blobPath(ctx, hx, hy, hr, wseed)
     ctx.fillStyle = '#0c4a6e'
     ctx.fill()
-    ctx.beginPath()
-    ctx.arc(hx, hy, hr * 0.7, 0, Math.PI * 2)
+    ctx.lineWidth = 2.5
+    ctx.strokeStyle = 'rgba(8, 47, 73, 0.9)'
+    ctx.stroke()
+    blobPath(ctx, hx - hr * 0.05, hy - hr * 0.05, hr * 0.68, wseed + 3, 0.12)
     ctx.fillStyle = '#075985'
     ctx.fill()
-    ctx.lineWidth = 2
-    ctx.strokeStyle = 'rgba(8, 47, 73, 0.9)'
-    ctx.beginPath()
-    ctx.arc(hx, hy, hr, 0, Math.PI * 2)
-    ctx.stroke()
+    // A couple of ripple glints
+    const rand = mulberry32(wseed + 4)
+    ctx.strokeStyle = 'rgba(186, 230, 253, 0.35)'
+    ctx.lineWidth = 1.2
+    for (let k = 0; k < 2; k += 1) {
+      const a = rand() * Math.PI * 2
+      const rr = hr * (0.25 + rand() * 0.35)
+      ctx.beginPath()
+      ctx.arc(hx, hy, rr, a, a + 0.9 + rand())
+      ctx.stroke()
+    }
   }
 
-  // Jump ramps — a bright plate with up-chevrons: "hit me fast".
+  // Jump ramps — an amber pad whose chevrons point where the KICKER fires
+  // (not necessarily at the flag — read it before you trust it).
   for (const ramp of hole.ramps) {
     const rx = ramp.rect.x * S
     const ry = ramp.rect.y * S
     const rw = ramp.rect.w * S
     const rh = ramp.rect.h * S
-    ctx.fillStyle = '#b45309'
-    ctx.fillRect(rx, ry, rw, rh)
-    ctx.fillStyle = '#f59e0b'
-    ctx.fillRect(rx + 2, ry + 2, rw - 4, rh - 4)
-    ctx.strokeStyle = '#fffbeb'
-    ctx.lineWidth = 2
-    ctx.lineCap = 'round'
     const cx = rx + rw / 2
+    const cy = ry + rh / 2
+    blobPath(ctx, cx, cy, Math.min(rw, rh) * 0.72, wobbleSeedFor(ramp.rect.x, ramp.rect.y), 0.06)
+    ctx.fillStyle = '#b45309'
+    ctx.fill()
+    blobPath(ctx, cx, cy, Math.min(rw, rh) * 0.6, wobbleSeedFor(ramp.rect.x, ramp.rect.y) + 1, 0.06)
+    ctx.fillStyle = '#f59e0b'
+    ctx.fill()
+    // Chevrons rotated to the launch direction.
+    ctx.save()
+    ctx.translate(cx, cy)
+    ctx.rotate(Math.atan2(ramp.dir.y, ramp.dir.x) + Math.PI / 2)
+    ctx.strokeStyle = '#fffbeb'
+    ctx.lineWidth = 2.5
+    ctx.lineCap = 'round'
+    const cw = Math.min(rw, rh) * 0.34
     for (let k = 0; k < 2; k += 1) {
-      const cy = ry + rh * (0.72 - k * 0.34)
+      const oy = rh * (0.2 - k * 0.28)
       ctx.beginPath()
-      ctx.moveTo(cx - rw * 0.2, cy)
-      ctx.lineTo(cx, cy - rh * 0.22)
-      ctx.lineTo(cx + rw * 0.2, cy)
+      ctx.moveTo(-cw, oy)
+      ctx.lineTo(0, oy - rh * 0.22)
+      ctx.lineTo(cw, oy)
       ctx.stroke()
     }
+    ctx.restore()
   }
 
-  // Static walls
-  ctx.fillStyle = '#5b3a1e'
-  for (const w of hole.walls) ctx.fillRect(w.x * S, w.y * S, w.w * S, w.h * S)
-
-  // Moving walls (current position) — a lighter timber so they read as "live"
-  ctx.fillStyle = '#a16207'
-  for (const m of hole.movers) {
-    const r = moverRectAt(m, simMs)
-    ctx.fillRect(r.x * S, r.y * S, r.w * S, r.h * S)
+  // Timber walls: rounded ends, per-wall shade variation, a grain line — reads
+  // as laid lumber rather than plotted rectangles. (Physics is still the AABB;
+  // the rounding is within a pixel or two.)
+  const timber = (r: { x: number; y: number; w: number; h: number }, i: number, live: boolean) => {
+    const wx = r.x * S
+    const wy = r.y * S
+    const ww = r.w * S
+    const wh = r.h * S
+    const shades = live ? ['#a16207', '#b45309'] : ['#5b3a1e', '#6b4423', '#52351c']
+    ctx.fillStyle = shades[i % shades.length]
+    if (typeof ctx.roundRect === 'function') {
+      ctx.beginPath()
+      ctx.roundRect(wx, wy, ww, wh, Math.min(4, wh / 2, ww / 2))
+      ctx.fill()
+    } else {
+      ctx.fillRect(wx, wy, ww, wh)
+    }
+    ctx.strokeStyle = 'rgba(0,0,0,0.25)'
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    if (ww >= wh) {
+      ctx.moveTo(wx + 4, wy + wh * 0.62)
+      ctx.lineTo(wx + ww - 4, wy + wh * 0.58)
+    } else {
+      ctx.moveTo(wx + ww * 0.62, wy + 4)
+      ctx.lineTo(wx + ww * 0.58, wy + wh - 4)
+    }
+    ctx.stroke()
   }
+  hole.walls.forEach((w, i) => timber(w, i, false))
+  hole.movers.forEach((m, i) => timber(moverRectAt(m, simMs), i, true))
 
   // Cup + flag. The black circle is the REAL capture zone — what you see is
-  // what sinks.
+  // what sinks. Barely bigger than the ball.
   const cx = hole.cup.x * S
   const cy = hole.cup.y * S
   const cr = hole.cupRadius * S
+  ctx.beginPath()
+  ctx.arc(cx + 1, cy + 1.5, cr * 1.08, 0, Math.PI * 2)
+  ctx.fillStyle = 'rgba(0,0,0,0.25)' // soft lip shadow
+  ctx.fill()
   ctx.beginPath()
   ctx.arc(cx, cy, cr, 0, Math.PI * 2)
   ctx.fillStyle = '#0b1020'
   ctx.fill()
   ctx.beginPath()
-  ctx.arc(cx, cy, cr, 0, Math.PI * 2)
-  ctx.strokeStyle = 'rgba(226, 232, 240, 0.55)'
-  ctx.lineWidth = 1.5
+  ctx.arc(cx, cy, cr, -2.4, 0.6) // crescent highlight on the rim
+  ctx.strokeStyle = 'rgba(226, 232, 240, 0.6)'
+  ctx.lineWidth = 1.4
   ctx.stroke()
   ctx.strokeStyle = '#e2e8f0'
   ctx.lineWidth = 2
@@ -524,12 +651,12 @@ onBeforeUnmount(() => {
             <li><strong>Sand</strong> (tan) drags hard — momentum goes there to die.</li>
             <li><strong>Sweeping timber</strong> slides across the green; time your shot.</li>
             <li><strong>Drop-offs</strong> (dark, dashed edge) are missing green — roll in and you fall off, back to the tee. You can't bank off a rail that's fallen away.</li>
-            <li><strong>Jump ramps</strong> (amber chevrons): cross one fast and the ball flies — over walls, water, everything — until it lands. A slow roll just trundles across.</li>
-            <li>The cup shrinks as the course goes on. The black circle is the real capture zone: the ball must be over it, and slow, to drop.</li>
+            <li><strong>Jump ramps</strong> (amber pads): cross one fast and the ball launches <em>where the chevrons point</em> — over walls, water, everything — until it lands. They rarely point at the flag; read the kicker before you trust it. A slow roll just trundles across.</li>
+            <li>The cup is barely bigger than the ball, and tightens as the course goes on. The black circle is the real capture zone: the ball must be over it, and slow, to drop.</li>
           </ul>
           <h3>Tips</h3>
           <ul>
-            <li>Full power off a ramp on the tee line is the risky ace route on late holes.</li>
+            <li>A ramp whose chevrons line up with the flag is the risky ace route — most don't, but they can still fly you past trouble.</li>
             <li>Ease off near the hole — a hot ball skates across the cup.</li>
             <li>Sand isn't always the enemy: it can catch a ball that would otherwise roll into water.</li>
           </ul>
