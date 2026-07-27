@@ -67,7 +67,91 @@ const fmtMs = (ms: number) => {
   const s = Math.floor(ms / 1000)
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
-const timing = () => totalStrokes.value > 0 || strokes.value > 0 || holeIndex.value > 0
+const timing = () => totalStrokes.value > 0 || strokes.value > 0
+
+// --- Per-hole records + practice mode ------------------------------------
+// Each hole's best (fastest, with its stroke count) is kept per course seed,
+// recorded on every sink — course play or practice. The holes menu jumps
+// straight into any hole to chase a time; Back to course restores the round
+// exactly where it was left.
+interface HoleBest {
+  ms: number
+  strokes: number
+}
+const holeBests = ref<Array<HoleBest | null>>(new Array(COURSE_HOLES).fill(null))
+const coursePars = ref<number[]>([])
+let holeStartMs = 0 // elapsedMs when the current hole started
+
+const holesKey = () => `golf-holes:${seedCode.value}`
+const loadHoleBests = () => {
+  try {
+    const raw = JSON.parse(localStorage.getItem(holesKey()) ?? 'null') as Array<HoleBest | null> | null
+    holeBests.value =
+      Array.isArray(raw) && raw.length === COURSE_HOLES ? raw : new Array(COURSE_HOLES).fill(null)
+  } catch {
+    holeBests.value = new Array(COURSE_HOLES).fill(null)
+  }
+}
+const recordHoleBest = (ms: number, strokeCount: number): { prev: HoleBest | null; improved: boolean } => {
+  const prev = holeBests.value[holeIndex.value]
+  const improved = !prev || ms < prev.ms
+  if (improved) {
+    holeBests.value[holeIndex.value] = { ms, strokes: strokeCount }
+    try {
+      localStorage.setItem(holesKey(), JSON.stringify(holeBests.value))
+    } catch {
+      // ignore
+    }
+  }
+  return { prev, improved }
+}
+
+const practice = ref(false)
+const practiceResult = ref<{ ms: number; strokes: number; prev: HoleBest | null; improved: boolean } | null>(null)
+let courseSnapshot: {
+  holeIndex: number
+  totalStrokes: number
+  totalPar: number
+  elapsedMs: number
+  done: boolean
+  courseMsg: Result | null
+} | null = null
+
+const practiceHole = (i: number) => {
+  if (!practice.value) {
+    courseSnapshot = {
+      holeIndex: holeIndex.value,
+      totalStrokes: totalStrokes.value,
+      totalPar: totalPar.value,
+      elapsedMs: elapsedMs.value,
+      done: phase.value === 'done',
+      courseMsg: courseMsg.value,
+    }
+  }
+  practice.value = true
+  practiceResult.value = null
+  holeIndex.value = i
+  elapsedMs.value = 0
+  loadHole()
+}
+const retryPractice = () => practiceHole(holeIndex.value)
+const backToCourse = () => {
+  const s = courseSnapshot
+  practice.value = false
+  practiceResult.value = null
+  courseSnapshot = null
+  if (!s) return
+  holeIndex.value = s.holeIndex
+  totalStrokes.value = s.totalStrokes
+  totalPar.value = s.totalPar
+  courseMsg.value = s.courseMsg
+  loadHole()
+  elapsedMs.value = s.elapsedMs
+  if (s.done) {
+    phase.value = 'done'
+    stopLoop()
+  }
+}
 
 let hole: Hole = makeHole(0, 'init')
 let ball: BallState = { p: { ...hole.start }, v: { x: 0, y: 0 }, air: 0 }
@@ -107,6 +191,7 @@ const loadHole = () => {
   holeMsg.value = null
   simMs = 0
   airTotal = 0
+  holeStartMs = elapsedMs.value
   startLoop()
 }
 
@@ -482,6 +567,15 @@ const beginSink = () => {
 const holed = () => {
   phase.value = 'holed'
   stopLoop()
+  const holeMs = elapsedMs.value - holeStartMs
+  const best = recordHoleBest(holeMs, strokes.value)
+  if (practice.value) {
+    // Practice sinks don't touch the course card — they chase the hole record.
+    practiceResult.value = { ms: holeMs, strokes: strokes.value, ...best }
+    if (best.improved && best.prev) burstConfetti({ count: 90 })
+    draw()
+    return
+  }
   totalStrokes.value += strokes.value
   totalPar.value += hole.par
   holeMsg.value = holeResult(strokes.value, hole.par)
@@ -654,9 +748,11 @@ const nextHole = () => {
   loadHole()
 }
 
-const newCourse = () => {
-  seedCode.value = randomSeed()
-  router.replace({ name: 'mini-golf', params: { seed: seedCode.value } })
+// Fresh attempt at the SAME course — chase the record.
+const replayCourse = () => {
+  practice.value = false
+  practiceResult.value = null
+  courseSnapshot = null
   holeIndex.value = 0
   totalStrokes.value = 0
   totalPar.value = 0
@@ -664,6 +760,26 @@ const newCourse = () => {
   isNewRecord.value = false
   bestLabel.value = ''
   loadHole()
+}
+
+// Pars for the holes menu — computed once per course, off the critical path.
+const loadCourseMeta = () => {
+  coursePars.value = []
+  const seed = seedCode.value
+  setTimeout(() => {
+    if (seed !== seedCode.value) return // course changed meanwhile
+    const pars: number[] = []
+    for (let i = 0; i < COURSE_HOLES; i += 1) pars.push(makeHole(i, seed).par)
+    coursePars.value = pars
+  }, 60)
+}
+
+const newCourse = () => {
+  seedCode.value = randomSeed()
+  router.replace({ name: 'mini-golf', params: { seed: seedCode.value } })
+  loadHoleBests()
+  loadCourseMeta()
+  replayCourse()
 }
 
 const share = async () => {
@@ -678,13 +794,22 @@ onMounted(() => {
   const p = typeof route.params.seed === 'string' ? route.params.seed : ''
   seedCode.value = p || randomSeed()
   if (!p) router.replace({ name: 'mini-golf', params: { seed: seedCode.value } })
+  loadHoleBests()
+  loadCourseMeta()
   loadHole()
   if (import.meta.env.DEV) {
-    // Playtest hook (dev builds only): jump straight to a hole.
-    ;(window as unknown as Record<string, unknown>).__golfSkip = (i: number) => {
+    // Playtest hooks (dev builds only): jump straight to a hole; read live state.
+    const w = window as unknown as Record<string, unknown>
+    w.__golfSkip = (i: number) => {
       holeIndex.value = Math.max(0, Math.min(COURSE_HOLES - 1, i))
       loadHole()
     }
+    w.__golfState = () => ({
+      ball: { ...ball.p },
+      holeIndex: holeIndex.value,
+      phase: phase.value,
+      strokes: strokes.value,
+    })
   }
 })
 onBeforeUnmount(() => {
@@ -704,7 +829,10 @@ onBeforeUnmount(() => {
           as few strokes as you can, across nine holes.
         </template>
         <template #settings>
-          <v-btn variant="tonal" color="primary" prepend-icon="mdi-refresh" @click="newCourse">New course</v-btn>
+          <div class="d-flex flex-column ga-2">
+            <v-btn variant="tonal" color="primary" prepend-icon="mdi-timer-refresh-outline" @click="replayCourse">Replay course</v-btn>
+            <v-btn variant="tonal" prepend-icon="mdi-refresh" @click="newCourse">New course</v-btn>
+          </div>
         </template>
         <template #info>
           <h3>Goal</h3>
@@ -718,6 +846,8 @@ onBeforeUnmount(() => {
           <h3>Speed run</h3>
           <ul>
             <li>The clock starts on your first putt and runs while you play (it pauses on the scorecards). Fastest time for a course is saved as its record — strokes are only half the game.</li>
+            <li><span class="k">Replay course</span> restarts the same nine to chase the record; <span class="k">New course</span> deals a fresh one.</li>
+            <li>The <span class="k">Holes</span> menu shows your best time, strokes and par for each hole — tap one to jump in and practice it, then hop back to the round exactly where you left it (an unfinished hole restarts).</li>
           </ul>
           <h3>The course</h3>
           <ul>
@@ -740,13 +870,39 @@ onBeforeUnmount(() => {
       </GameToolbar>
 
       <!-- HUD -->
-      <div class="d-flex align-center ga-3 mb-3">
+      <div class="d-flex align-center ga-3 mb-3 flex-wrap">
         <div class="text-h6">Hole {{ holeIndex + 1 }}<span class="text-medium-emphasis text-body-2">/{{ COURSE_HOLES }}</span></div>
         <v-chip size="small" variant="tonal">Par {{ par }}</v-chip>
+        <v-chip v-if="practice" size="small" color="secondary" variant="flat">Practice</v-chip>
         <div class="text-body-2">Strokes: <span class="font-weight-bold">{{ strokes }}</span></div>
         <v-spacer />
         <div class="text-body-2 font-weight-bold tabular"><v-icon icon="mdi-timer-outline" size="small" /> {{ timeLabel }}</div>
-        <div class="text-body-2 text-medium-emphasis">Total {{ totalStrokes }} ({{ toPar }})</div>
+        <div v-if="!practice" class="text-body-2 text-medium-emphasis">Total {{ totalStrokes }} ({{ toPar }})</div>
+        <v-btn v-else size="small" variant="tonal" prepend-icon="mdi-arrow-left" @click="backToCourse">Course</v-btn>
+        <!-- Per-hole records: jump into any hole to chase its time. -->
+        <v-menu location="bottom end">
+          <template #activator="{ props: menuProps }">
+            <v-btn v-bind="menuProps" size="small" variant="tonal" prepend-icon="mdi-flag-checkered">Holes</v-btn>
+          </template>
+          <v-list density="compact" min-width="250">
+            <v-list-subheader>Best per hole — tap to practice</v-list-subheader>
+            <v-list-item
+              v-for="(b, i) in holeBests"
+              :key="i"
+              :active="i === holeIndex"
+              @click="practiceHole(i)"
+            >
+              <v-list-item-title>
+                Hole {{ i + 1 }}
+                <span v-if="coursePars[i]" class="text-medium-emphasis">· Par {{ coursePars[i] }}</span>
+              </v-list-item-title>
+              <v-list-item-subtitle>
+                <template v-if="b">⏱ {{ fmtMs(b.ms) }} · {{ b.strokes }} {{ b.strokes === 1 ? 'stroke' : 'strokes' }}</template>
+                <template v-else>not sunk yet</template>
+              </v-list-item-subtitle>
+            </v-list-item>
+          </v-list>
+        </v-menu>
       </div>
     </div>
 
@@ -762,7 +918,27 @@ onBeforeUnmount(() => {
         <div v-if="flashMsg" class="hazard-flash">{{ flashMsg }}</div>
       </transition>
 
-      <div v-if="phase === 'holed'" class="overlay">
+      <!-- Practice sink: the new time next to the old one, then retry or return. -->
+      <div v-if="phase === 'holed' && practice" class="overlay">
+        <p class="text-h4 mb-1">⏱ {{ fmtMs(practiceResult?.ms ?? 0) }}</p>
+        <p class="text-body-1 mb-1">
+          Hole {{ holeIndex + 1 }} in {{ practiceResult?.strokes }}
+          {{ practiceResult?.strokes === 1 ? 'stroke' : 'strokes' }} — par {{ par }}
+        </p>
+        <p v-if="practiceResult?.improved && practiceResult?.prev" class="text-body-1 text-amber mb-1">
+          ⚡ Faster! Previous best {{ fmtMs(practiceResult.prev.ms) }} · {{ practiceResult.prev.strokes }}
+        </p>
+        <p v-else-if="practiceResult?.prev" class="text-body-2 text-medium-emphasis mb-1">
+          Best stays {{ fmtMs(practiceResult.prev.ms) }} · {{ practiceResult.prev.strokes }}
+        </p>
+        <p v-else class="text-body-2 text-medium-emphasis mb-1">First time sinking this hole — record set.</p>
+        <div class="d-flex ga-2 mt-3">
+          <v-btn color="primary" variant="flat" prepend-icon="mdi-restart" @click="retryPractice">Retry hole</v-btn>
+          <v-btn variant="tonal" prepend-icon="mdi-arrow-left" @click="backToCourse">Back to course</v-btn>
+        </div>
+      </div>
+
+      <div v-else-if="phase === 'holed'" class="overlay">
         <p class="text-h4 mb-1">{{ holeMsg?.term ?? `Holed in ${strokes}` }}</p>
         <p class="text-body-1 mb-1">{{ holeMsg?.blurb }}</p>
         <p class="text-body-2 text-medium-emphasis mb-4">Holed in {{ strokes }} — par {{ par }}</p>
@@ -779,7 +955,10 @@ onBeforeUnmount(() => {
         <p v-else-if="bestLabel" class="text-body-2 text-medium-emphasis mb-1">Course record: {{ bestLabel }}</p>
         <p class="text-body-2 text-medium-emphasis mb-1">{{ totalStrokes }} strokes</p>
         <p class="text-h6 mb-4">{{ toPar === 'even' ? 'Even par' : `${toPar} to par` }}</p>
-        <v-btn color="primary" variant="flat" prepend-icon="mdi-refresh" @click="newCourse">New course</v-btn>
+        <div class="d-flex ga-2">
+          <v-btn color="primary" variant="flat" prepend-icon="mdi-timer-refresh-outline" @click="replayCourse">Replay course</v-btn>
+          <v-btn variant="tonal" prepend-icon="mdi-refresh" @click="newCourse">New course</v-btn>
+        </div>
       </div>
     </div>
 
