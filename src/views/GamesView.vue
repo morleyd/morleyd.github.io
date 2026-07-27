@@ -72,7 +72,7 @@ const games: GameCard[] = [
     key: 'mini-golf',
     title: 'Mini Golf',
     description:
-      'Nine seeded holes. Pull back to aim and set power, then putt — bank off the walls and sink it in as few strokes as you can.',
+      'Nine seeded holes where the straight shot is never free: bank the walls, dodge water, sand and drop-offs — or hit the jump ramp and fly.',
     icon: 'mdi-golf',
     to: '/mini-golf',
     gradient: 'linear-gradient(135deg, rgba(22, 101, 52, 0.5), rgba(52, 211, 153, 0.3))',

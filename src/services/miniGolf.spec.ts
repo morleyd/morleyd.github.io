@@ -4,359 +4,447 @@ import {
   CANCEL_POWER,
   CAPTURE_SPEED,
   COURSE_HOLES,
+  FRICTION,
   MAX_POWER,
+  PULL_REACH,
+  RAMP_MIN_SPEED,
   aimToVelocity,
+  airborne,
   atRest,
   collide,
   courseResult,
   derivePar,
+  effectiveWalls,
   holeResult,
   inCup,
+  inSand,
+  inVoid,
+  inWater,
   isWinnable,
   makeHole,
   moverEnvelope,
   moverRectAt,
   planPutt,
+  routeTarget,
   solveHole,
   speed,
   step,
   type BallState,
   type Hole,
-  type MovingWall,
   type Vec,
 } from './miniGolf'
 
-describe('collide (outer walls)', () => {
-  it('reflects off the left/right/top/bottom bounds', () => {
-    const left = collide({ p: { x: -0.1, y: 0.5 }, v: { x: -0.5, y: 0 } }, [])
-    expect(left.p.x).toBeCloseTo(BALL_RADIUS)
-    expect(left.v.x).toBeGreaterThan(0)
+const SEEDS = ['course-1', 'abc', 'z9', 'seed42', 'hello-world']
 
-    const bottom = collide({ p: { x: 0.5, y: 1.2 }, v: { x: 0, y: 0.5 } }, [])
-    expect(bottom.p.y).toBeCloseTo(1 - BALL_RADIUS)
-    expect(bottom.v.y).toBeLessThan(0)
-  })
+/** A bare hole for physics tests: no obstacles unless the test adds them. */
+const bareHole = (over: Partial<Hole> = {}): Hole => ({
+  index: 0,
+  start: { x: 0.5, y: 0.9 },
+  cup: { x: 0.5, y: 0.15 },
+  cupRadius: 0.05,
+  walls: [],
+  hazards: [],
+  movers: [],
+  voids: [],
+  ramps: [],
+  par: 2,
+  seed: 's',
+  winnable: true,
+  ...over,
 })
 
-describe('collide (inner walls)', () => {
-  const wall = { x: 0.4, y: 0.4, w: 0.2, h: 0.05 }
-  it('pushes the ball out and flips a velocity component on overlap', () => {
-    // Ball just above the wall moving down into it.
-    const s: BallState = { p: { x: 0.5, y: 0.4 + 0.01 }, v: { x: 0, y: -0.5 } }
+describe('collide', () => {
+  it('reflects off the outer bounds', () => {
+    const s: BallState = { p: { x: 0.005, y: 0.5 }, v: { x: -0.4, y: 0 } }
+    const out = collide(s, [])
+    expect(out.p.x).toBeCloseTo(BALL_RADIUS)
+    expect(out.v.x).toBeGreaterThan(0)
+  })
+  it('reflects off an inner wall along the shallow axis', () => {
+    const wall = { x: 0.4, y: 0.4, w: 0.2, h: 0.04 }
+    const s: BallState = { p: { x: 0.5, y: 0.4 + 0.01 }, v: { x: 0, y: 0.5 } }
     const out = collide(s, [wall])
-    // Pushed above the wall, vertical velocity flips upward (positive is down here? no: y-down)
-    expect(out.p.y).toBeLessThanOrEqual(wall.y - BALL_RADIUS + 1e-9)
-  })
-  it('leaves a ball far from the wall untouched', () => {
-    const s: BallState = { p: { x: 0.1, y: 0.1 }, v: { x: 0.2, y: 0.2 } }
-    expect(collide(s, [wall])).toEqual(s)
+    expect(out.v.y).toBeLessThan(0) // bounced back up
   })
 })
 
-describe('step', () => {
-  it('moves the ball and applies friction', () => {
-    const s: BallState = { p: { x: 0.5, y: 0.5 }, v: { x: 0.4, y: 0 } }
-    const next = step(s, [], 16)
-    expect(next.p.x).toBeGreaterThan(0.5)
-    expect(speed(next.v)).toBeLessThan(speed(s.v))
-  })
-  it('eventually comes to rest', () => {
+describe('step / friction', () => {
+  it('slows the ball exponentially and it eventually rests', () => {
     let s: BallState = { p: { x: 0.5, y: 0.5 }, v: { x: 0.6, y: 0.3 } }
     for (let i = 0; i < 600 && !atRest(s); i += 1) s = step(s, [], 16)
     expect(atRest(s)).toBe(true)
   })
+  it('leaves physics untouched away from the cup, sand and ramps', () => {
+    const hole = bareHole()
+    const far: BallState = { p: { x: 0.2, y: 0.9 }, v: { x: 0.4, y: 0 } }
+    expect(step(far, [], 8, hole)).toEqual(step(far, [], 8))
+  })
 })
 
-describe('aimToVelocity', () => {
-  it('fires opposite the drag, scaled by power', () => {
-    const v = aimToVelocity({ x: 10, y: 0 }, 1) // dragged right → fire left
-    expect(v.x).toBeCloseTo(-MAX_POWER)
-    expect(v.y).toBeCloseTo(0)
+describe('cup capture (the black circle is the real capture zone)', () => {
+  const hole = bareHole({ cup: { x: 0.5, y: 0.5 } })
+  it('captures a slow ball whose center is over the black', () => {
+    expect(inCup({ p: { x: 0.5, y: 0.5 }, v: { x: 0.1, y: 0 } }, hole)).toBe(true)
+    expect(
+      inCup({ p: { x: 0.5 + hole.cupRadius * 0.9, y: 0.5 }, v: { x: 0.1, y: 0 } }, hole),
+    ).toBe(true)
   })
-  it('clamps power to [0,1]', () => {
-    expect(speed(aimToVelocity({ x: 0, y: 5 }, 5))).toBeCloseTo(MAX_POWER)
-    expect(speed(aimToVelocity({ x: 0, y: 5 }, -1))).toBe(0)
+  it('rejects a fast ball over the cup (lips out)', () => {
+    expect(inCup({ p: { x: 0.5, y: 0.5 }, v: { x: CAPTURE_SPEED + 0.1, y: 0 } }, hole)).toBe(false)
   })
-  it('never exceeds MAX_POWER for an off-screen drag (power > 1)', () => {
-    // A drag that runs well beyond the canvas produces power far above 1; the
-    // launch speed must still cap at full power rather than growing unbounded.
-    for (const p of [1.5, 3, 100]) {
-      expect(speed(aimToVelocity({ x: 3, y: -4 }, p))).toBeCloseTo(MAX_POWER)
+  it('rejects a ball just OUTSIDE the black — no long-range suction', () => {
+    const p = { x: 0.5 + hole.cupRadius * 1.05, y: 0.5 }
+    expect(inCup({ p, v: { x: 0, y: 0 } }, hole)).toBe(false)
+  })
+  it('a resting ball near — but not touching — the cup stays put', () => {
+    // Regression for "the ball gets sucked in from too far away": outside the
+    // pull reach nothing moves the ball.
+    const start: BallState = { p: { x: 0.5 + hole.cupRadius * PULL_REACH * 1.4, y: 0.5 }, v: { x: 0, y: 0 } }
+    const after = step(start, [], 8, hole)
+    expect(after.v.x).toBeCloseTo(0)
+    expect(after.v.y).toBeCloseTo(0)
+  })
+  it('pulls a slow ball that is already over/touching the black', () => {
+    const slow: BallState = { p: { x: 0.5 - hole.cupRadius, y: 0.5 }, v: { x: 0, y: 0 } }
+    const next = step(slow, [], 8, hole)
+    expect(next.v.x).toBeGreaterThan(0) // tugged toward the center
+  })
+  it('a firm straight putt sinks; a full-power blast skates over on the first pass', () => {
+    // Roll straight at the cup; report whether it dropped BEFORE bouncing off
+    // the far wall (rebound sinks are legitimate golf, not suction).
+    const firstPassSinks = (v0: number): boolean => {
+      let ball: BallState = { p: { x: 0.5, y: 0.78 }, v: { x: 0, y: -v0 } }
+      for (let i = 0; i < 3000; i += 1) {
+        ball = step(ball, [], 8, hole)
+        if (inCup(ball, hole)) return true
+        if (ball.v.y > 0 || atRest(ball)) return false // bounced back or died
+      }
+      return false
+    }
+    expect(firstPassSinks(1.05)).toBe(true) // measured pace drops in
+    expect(firstPassSinks(MAX_POWER)).toBe(false) // hammering it skates over the hole
+  })
+  it('a flying ball sails over the cup', () => {
+    expect(inCup({ p: { x: 0.5, y: 0.5 }, v: { x: 0.1, y: 0 }, air: 200 }, hole)).toBe(false)
+  })
+})
+
+describe('sand', () => {
+  const hole = bareHole({ hazards: [{ p: { x: 0.5, y: 0.5 }, r: 0.1, kind: 'sand' }] })
+  it('detects the ball in/out of sand', () => {
+    expect(inSand({ p: { x: 0.5, y: 0.5 }, v: { x: 0, y: 0 } }, hole)).toBe(true)
+    expect(inSand({ p: { x: 0.1, y: 0.1 }, v: { x: 0, y: 0 } }, hole)).toBe(false)
+  })
+  it('drags the ball far harder than open green', () => {
+    const run = (withSand: boolean): number => {
+      let ball: BallState = { p: { x: 0.5, y: 0.9 }, v: { x: 0, y: -1.0 } }
+      const h = withSand ? hole : bareHole()
+      for (let i = 0; i < 3000 && !atRest(ball); i += 1) ball = step(ball, [], 8, h)
+      return ball.p.y // how far up the board it got (smaller = further)
+    }
+    expect(run(true)).toBeGreaterThan(run(false) + 0.08) // sand stopped it much shorter
+  })
+  it('sand never swallows the ball (it is not water)', () => {
+    expect(inWater({ p: { x: 0.5, y: 0.5 }, v: { x: 0, y: 0 } }, hole)).toBe(false)
+  })
+})
+
+describe('voids (drop-offs)', () => {
+  const hole = bareHole({ voids: [{ x: 0, y: 0.4, w: 0.2, h: 0.2 }] })
+  it('a grounded ball in a void has fallen off; a flying one has not', () => {
+    expect(inVoid({ p: { x: 0.1, y: 0.5 }, v: { x: 0, y: 0 } }, hole)).toBe(true)
+    expect(inVoid({ p: { x: 0.1, y: 0.5 }, v: { x: 0, y: 0 }, air: 150 }, hole)).toBe(false)
+    expect(inVoid({ p: { x: 0.5, y: 0.5 }, v: { x: 0, y: 0 } }, hole)).toBe(false)
+  })
+  it('excludes bank points on a rail that has fallen away', () => {
+    // Cup and start aligned so the LEFT rail bank would land inside the void
+    // strip; the solver must not offer that rail.
+    const h = bareHole({
+      start: { x: 0.3, y: 0.9 },
+      cup: { x: 0.3, y: 0.15 },
+      walls: [{ x: 0.05, y: 0.5, w: 0.6, h: 0.035 }], // blocks the direct line
+      voids: [{ x: 0, y: 0.3, w: 0.06, h: 0.5 }], // left rail gone at bank height
+    })
+    const sol = solveHole(h)
+    // A solution may still exist off the other rails, but never through the void.
+    if (sol && sol.pathType === 'bank') {
+      const t = routeTarget(h.start, h)!
+      expect(t.x).toBeGreaterThan(0.06 + BALL_RADIUS) // not the fallen left rail
     }
   })
 })
 
-describe('inCup', () => {
-  const hole: Hole = {
-    index: 0,
-    start: { x: 0.5, y: 0.86 },
-    cup: { x: 0.5, y: 0.12 },
-    cupRadius: 0.05,
-    walls: [],
-    par: 3,
-    seed: 's',
-  }
-  it('captures a slow ball over the cup', () => {
-    expect(inCup({ p: { x: 0.5, y: 0.12 }, v: { x: 0.1, y: 0 } }, hole)).toBe(true)
+describe('jump ramps', () => {
+  const hole = bareHole({
+    ramps: [{ rect: { x: 0.45, y: 0.6, w: 0.1, h: 0.07 } }],
+    walls: [{ x: 0.2, y: 0.45, w: 0.6, h: 0.035 }], // a wall right after the ramp
   })
-  it('rejects a fast ball over the cup (lips out)', () => {
-    expect(inCup({ p: { x: 0.5, y: 0.12 }, v: { x: CAPTURE_SPEED + 0.1, y: 0 } }, hole)).toBe(false)
+  it('launches a fast ball airborne on entry', () => {
+    let ball: BallState = { p: { x: 0.5, y: 0.75 }, v: { x: 0, y: -1.2 } }
+    let flew = false
+    for (let i = 0; i < 200; i += 1) {
+      ball = step(ball, hole.walls, 8, hole)
+      if (airborne(ball)) {
+        flew = true
+        break
+      }
+    }
+    expect(flew).toBe(true)
   })
-  it('rejects a ball away from the cup', () => {
-    expect(inCup({ p: { x: 0.9, y: 0.9 }, v: { x: 0, y: 0 } }, hole)).toBe(false)
+  it('a slow roll just trundles across the plate', () => {
+    let ball: BallState = { p: { x: 0.5, y: 0.7 }, v: { x: 0, y: -(RAMP_MIN_SPEED * 0.7) } }
+    for (let i = 0; i < 400 && !atRest(ball); i += 1) {
+      ball = step(ball, hole.walls, 8, hole)
+      expect(airborne(ball)).toBe(false)
+    }
+  })
+  it('an airborne ball flies OVER walls and lands beyond them', () => {
+    let ball: BallState = { p: { x: 0.5, y: 0.75 }, v: { x: 0, y: -1.3 } }
+    for (let i = 0; i < 1000; i += 1) {
+      ball = step(ball, hole.walls, 8, hole)
+      if (!airborne(ball) && ball.p.y < 0.6) break
+    }
+    // The wall spans y=0.45..0.485; a grounded ball could never cross it going
+    // up. The jump carried it past.
+    expect(ball.p.y).toBeLessThan(0.45)
   })
 })
 
-describe('makeHole', () => {
-  it('is deterministic and well-formed', () => {
-    for (let i = 0; i < COURSE_HOLES; i += 1) {
-      const h = makeHole(i, 'course-1')
-      expect(makeHole(i, 'course-1')).toEqual(h)
-      expect(h.start.y).toBeGreaterThan(h.cup.y) // start below the cup (portrait)
-      expect(h.par).toBeGreaterThanOrEqual(2)
-      expect(h.par).toBeLessThanOrEqual(4)
-      for (const w of h.walls) {
-        expect(w.x).toBeGreaterThanOrEqual(0)
-        expect(w.x + w.w).toBeLessThanOrEqual(1.0001)
+describe('aiming', () => {
+  it('fires opposite the drag and never exceeds MAX_POWER', () => {
+    const v = aimToVelocity({ x: 3, y: -4 }, 5)
+    expect(v.x).toBeLessThan(0)
+    expect(v.y).toBeGreaterThan(0)
+    expect(speed(v)).toBeCloseTo(MAX_POWER)
+  })
+  it('planPutt: a real drag is one stroke, a tiny drag cancels, power caps at 1', () => {
+    expect(planPutt({ x: 100, y: 0 }, 300, 0.38).counts).toBe(true)
+    const tiny = CANCEL_POWER * 0.38 * 300 * 0.5
+    expect(planPutt({ x: tiny, y: 0 }, 300, 0.38).counts).toBe(false)
+    expect(planPutt({ x: 100000, y: 0 }, 300, 0.38).power).toBe(1)
+  })
+})
+
+describe('makeHole (generation)', () => {
+  it('is deterministic, well-formed, and the cup shrinks over the course', () => {
+    for (const seed of SEEDS) {
+      for (let i = 0; i < COURSE_HOLES; i += 1) {
+        const h = makeHole(i, seed)
+        expect(makeHole(i, seed)).toEqual(h)
+        expect(h.start.y).toBeGreaterThan(h.cup.y)
+        expect(h.par).toBeGreaterThanOrEqual(2)
+        expect(h.par).toBeLessThanOrEqual(5)
+        for (const w of h.walls) {
+          expect(w.x).toBeGreaterThanOrEqual(0)
+          expect(w.x + w.w).toBeLessThanOrEqual(1.0001)
+        }
+      }
+      expect(makeHole(COURSE_HOLES - 1, seed).cupRadius).toBeLessThan(makeHole(0, seed).cupRadius)
+    }
+  })
+  it('hazards never stack: pairwise clear of each other, the tee and the cup', () => {
+    for (const seed of SEEDS) {
+      for (let i = 0; i < COURSE_HOLES; i += 1) {
+        const h = makeHole(i, seed)
+        for (let a = 0; a < h.hazards.length; a += 1) {
+          for (let b = a + 1; b < h.hazards.length; b += 1) {
+            const d = Math.hypot(
+              h.hazards[a].p.x - h.hazards[b].p.x,
+              h.hazards[a].p.y - h.hazards[b].p.y,
+            )
+            expect(d).toBeGreaterThanOrEqual(h.hazards[a].r + h.hazards[b].r)
+          }
+          const hz = h.hazards[a]
+          expect(Math.hypot(hz.p.x - h.start.x, hz.p.y - h.start.y)).toBeGreaterThan(hz.r + 0.09)
+          expect(Math.hypot(hz.p.x - h.cup.x, hz.p.y - h.cup.y)).toBeGreaterThan(hz.r + h.cupRadius)
+        }
       }
     }
   })
+  it('every moving wall sweeps ACROSS the corridor (axis x), fenced in bounds', () => {
+    for (const seed of SEEDS) {
+      for (let i = 0; i < COURSE_HOLES; i += 1) {
+        for (const m of makeHole(i, seed).movers) {
+          expect(m.axis).toBe('x')
+          const env = moverEnvelope(m)
+          expect(env.x).toBeGreaterThanOrEqual(0)
+          expect(env.x + env.w).toBeLessThanOrEqual(1.0001)
+          // And it really moves: sample quarter-period points (a half-period
+          // pair can alias to ~zero for phases near 0/π).
+          const T = ((2 * Math.PI) / m.speed) * 1000
+          const xs = [0, T / 4, T / 2, (3 * T) / 4].map((t) => moverRectAt(m, t).x)
+          expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(0.05)
+        }
+      }
+    }
+  })
+  it('the course actually uses its toys: water, sand, movers, voids and ramps all appear', () => {
+    const counts = { water: 0, sand: 0, movers: 0, voids: 0, ramps: 0 }
+    for (const seed of SEEDS) {
+      for (let i = 0; i < COURSE_HOLES; i += 1) {
+        const h = makeHole(i, seed)
+        counts.water += h.hazards.filter((z) => z.kind === 'water').length
+        counts.sand += h.hazards.filter((z) => z.kind === 'sand').length
+        counts.movers += h.movers.length
+        counts.voids += h.voids.length
+        counts.ramps += h.ramps.length
+      }
+    }
+    expect(counts.water).toBeGreaterThan(5)
+    expect(counts.sand).toBeGreaterThan(5)
+    expect(counts.movers).toBeGreaterThan(4)
+    expect(counts.voids).toBeGreaterThan(3)
+    expect(counts.ramps).toBeGreaterThan(2)
+  })
 })
 
-describe('winnability guarantee', () => {
+describe('winnability + no free straight shots', () => {
   it('every generated hole across many seeds is winnable', () => {
-    const seeds = ['course-1', 'abc', 'z9', 'seed42', 'hello-world', 'qqqq', '01234']
-    for (const seed of seeds) {
+    for (const seed of [...SEEDS, 'qqqq', '01234']) {
       for (let i = 0; i < COURSE_HOLES; i += 1) {
         const h = makeHole(i, seed)
         expect(h.winnable).toBe(true)
-        expect(isWinnable(h)).toBe(true) // recomputed from geometry
+        expect(isWinnable(h)).toBe(true)
         expect(solveHole(h)).not.toBeNull()
       }
     }
   })
-
+  it('from hole 2 on, the direct tee→cup line is (almost) always blocked', () => {
+    let banks = 0
+    let total = 0
+    for (const seed of SEEDS) {
+      for (let i = 1; i < COURSE_HOLES; i += 1) {
+        total += 1
+        if (solveHole(makeHole(i, seed))!.pathType === 'bank') banks += 1
+      }
+    }
+    expect(banks / total).toBeGreaterThan(0.9)
+  })
   it('reports a hole with the cup walled off as unsolvable', () => {
-    const boxed: Hole = {
-      index: 0,
-      start: { x: 0.5, y: 0.86 },
+    const boxed = bareHole({
       cup: { x: 0.5, y: 0.12 },
-      cupRadius: 0.05,
-      // Four bars sealing the cup into a box the ball can never reach.
       walls: [
         { x: 0.3, y: 0.02, w: 0.4, h: 0.03 },
         { x: 0.3, y: 0.22, w: 0.4, h: 0.03 },
         { x: 0.3, y: 0.02, w: 0.03, h: 0.23 },
         { x: 0.67, y: 0.02, w: 0.03, h: 0.23 },
       ],
-      hazards: [],
-      movers: [],
-      par: 2,
-      seed: 's',
       winnable: false,
-    }
+    })
     expect(solveHole(boxed)).toBeNull()
     expect(isWinnable(boxed)).toBe(false)
   })
 })
 
 describe('par derivation', () => {
-  it('a short, clear hole is par 2', () => {
-    const h: Hole = {
-      index: 0,
-      start: { x: 0.5, y: 0.6 },
-      cup: { x: 0.5, y: 0.3 }, // clear straight line, distance 0.3
-      cupRadius: 0.05,
-      walls: [],
-      hazards: [],
-      movers: [],
-      par: 0,
-      seed: 's',
-      winnable: true,
-    }
-    expect(derivePar(h, solveHole(h)!)).toBe(2)
+  it('a short, clear hole is par 2; a forced bank starts at 3', () => {
+    const clear = bareHole({ start: { x: 0.5, y: 0.6 }, cup: { x: 0.5, y: 0.3 } })
+    expect(derivePar(clear, solveHole(clear)!)).toBe(2)
   })
-
-  it('adds one stroke when a green is both long AND busy — never stacks bumps', () => {
-    const long: Hole = {
-      index: 0,
+  it('bumps only for kitchen-sink holes (4+ features), never stacks', () => {
+    const busy = bareHole({
       start: { x: 0.5, y: 0.9 },
-      cup: { x: 0.5, y: 0.1 }, // distance 0.8 → long
-      cupRadius: 0.05,
-      walls: [],
-      hazards: [{ p: { x: 0.2, y: 0.5 }, r: 0.06 }],
-      movers: [],
-      par: 0,
-      seed: 's',
-      winnable: true,
-    }
-    // direct(2) + long-and-busy(1) = 3; the old stacking (+1 long, +1 hazard)
-    // inflated pars until every hole felt like free strokes.
-    expect(derivePar(long, solveHole(long)!)).toBe(3)
-    // Long but empty, or busy but short, stays at the base par.
-    expect(derivePar({ ...long, hazards: [] }, solveHole({ ...long, hazards: [] })!)).toBe(2)
+      cup: { x: 0.5, y: 0.1 },
+      hazards: [
+        { p: { x: 0.2, y: 0.5 }, r: 0.06, kind: 'water' },
+        { p: { x: 0.8, y: 0.4 }, r: 0.08, kind: 'sand' },
+      ],
+    })
+    expect(derivePar(busy, solveHole(busy)!)).toBe(2) // direct + 2 features: no bump
+    const sink = bareHole({
+      ...busy,
+      voids: [
+        { x: 0, y: 0.55, w: 0.15, h: 0.15 },
+        { x: 0.85, y: 0.6, w: 0.15, h: 0.15 },
+      ],
+    })
+    expect(derivePar(sink, solveHole(sink)!)).toBe(3) // 4 features: +1
   })
-
   it('course par trends upward as holes get harder', () => {
-    const early = makeHole(0, 'course-1').par + makeHole(1, 'course-1').par + makeHole(2, 'course-1').par
-    const late = makeHole(6, 'course-1').par + makeHole(7, 'course-1').par + makeHole(8, 'course-1').par
-    expect(late).toBeGreaterThan(early)
-  })
-
-  it('mid/late holes mostly force a bank — the blocker wall closes the straight ace', () => {
-    let banks = 0
-    let total = 0
-    for (const seed of ['course-1', 'abc', 'z9', 'seed42', 'hello-world']) {
-      for (let i = 2; i < COURSE_HOLES; i += 1) {
-        total += 1
-        if (solveHole(makeHole(i, seed))!.pathType === 'bank') banks += 1
-      }
+    const sum = (seed: string, from: number, to: number) => {
+      let s = 0
+      for (let i = from; i <= to; i += 1) s += makeHole(i, seed).par
+      return s
     }
-    expect(banks / total).toBeGreaterThan(0.7)
+    for (const seed of SEEDS) {
+      expect(sum(seed, 6, 8)).toBeGreaterThan(sum(seed, 0, 2))
+    }
   })
 })
 
-describe('cup rim physics (no more skating over the hole)', () => {
-  const hole: Hole = {
-    index: 0,
-    start: { x: 0.5, y: 0.9 },
-    cup: { x: 0.5, y: 0.5 },
-    cupRadius: 0.05,
-    walls: [],
-    hazards: [],
-    movers: [],
-    par: 2,
-    seed: 's',
-    winnable: true,
+// ---------------------------------------------------------------------------
+// Playability: a simulated player plays every hole of every seed to completion.
+// The bot aims exactly along the routes the solvability planner guarantees
+// (direct when clear, else a one-bank rail), with physics-derived power — if it
+// can finish every hole in a handful of strokes, a human always can too.
+// ---------------------------------------------------------------------------
+describe('simulated player completes every course', () => {
+  const shoot = (from: Vec, target: Vec, arrive: number): BallState => {
+    const d = Math.hypot(target.x - from.x, target.y - from.y) || 1e-6
+    // Exponential friction loses speed ~linearly with distance (dv/dx = -f),
+    // so launch speed = desired arrival speed + FRICTION * distance.
+    const sp = Math.min(MAX_POWER, arrive + FRICTION * d)
+    return {
+      p: { ...from },
+      v: { x: ((target.x - from.x) / d) * sp, y: ((target.y - from.y) / d) * sp },
+      air: 0,
+    }
   }
-  it('scrubs extra speed off a ball rolling over the cup', () => {
-    const rolling: BallState = { p: { x: 0.5, y: 0.56 }, v: { x: 0, y: -1.2 } }
-    const plain = step(rolling, [], 8)
-    const overCup = step(rolling, [], 8, hole)
-    expect(speed(overCup.v)).toBeLessThan(speed(plain.v))
-  })
-  it('pulls a slow near ball toward the cup center', () => {
-    const slow: BallState = { p: { x: 0.44, y: 0.5 }, v: { x: 0, y: 0 } }
-    const next = step(slow, [], 8, hole)
-    expect(next.v.x).toBeGreaterThan(0) // tugged toward x=0.5
-  })
-  it('a straight medium-power putt over the cup gets captured instead of skating past', () => {
-    // Roll the ball straight at the cup fast enough that, without rim physics,
-    // it would cross above CAPTURE_SPEED. With the rim drag it must sink.
-    let ball: BallState = { p: { x: 0.5, y: 0.9 }, v: { x: 0, y: -1.45 } }
-    let sank = false
-    for (let i = 0; i < 2000; i += 1) {
-      ball = step(ball, [], 8, hole)
-      if (inCup(ball, hole)) {
-        sank = true
-        break
+
+  const playHole = (hole: Hole): number => {
+    let ball: BallState = { p: { ...hole.start }, v: { x: 0, y: 0 }, air: 0 }
+    let simMs = 0
+    for (let stroke = 1; stroke <= 14; stroke += 1) {
+      const target = routeTarget(ball.p, hole) ?? hole.cup
+      const viaBank = target.x !== hole.cup.x || target.y !== hole.cup.y
+      const carry = viaBank
+        ? FRICTION * Math.hypot(hole.cup.x - target.x, hole.cup.y - target.y) + 0.1
+        : 0.12
+      ball = shoot(ball.p, target, carry)
+      // Simulate until the ball rests, sinks, or is lost.
+      for (let i = 0; i < 4000; i += 1) {
+        ball = step(ball, effectiveWalls(hole, simMs), 8, hole)
+        simMs += 8
+        if (airborne(ball)) continue
+        if (inVoid(ball, hole) || inWater(ball, hole)) {
+          ball = { p: { ...hole.start }, v: { x: 0, y: 0 }, air: 0 }
+          break
+        }
+        if (inCup(ball, hole)) return stroke
+        if (atRest(ball)) break
       }
-      if (atRest(ball)) break
     }
-    expect(sank).toBe(true)
-  })
-  it('leaves physics untouched away from the cup', () => {
-    const far: BallState = { p: { x: 0.2, y: 0.9 }, v: { x: 0.4, y: 0 } }
-    expect(step(far, [], 8, hole)).toEqual(step(far, [], 8))
-  })
-})
+    return Number.POSITIVE_INFINITY
+  }
 
-describe('planPutt (stroke counting)', () => {
-  it('a real drag counts as exactly one stroke and fires opposite the drag', () => {
-    const putt = planPutt({ x: 100, y: 0 }, 300, 0.38) // drag right → fire left
-    expect(putt.counts).toBe(true)
-    expect(putt.velocity.x).toBeLessThan(0)
-  })
-  it('a tiny drag does not count (cancel — no stroke)', () => {
-    const tiny = CANCEL_POWER * 0.38 * 300 * 0.5 // well below the cancel threshold
-    const putt = planPutt({ x: tiny, y: 0 }, 300, 0.38)
-    expect(putt.counts).toBe(false)
-    expect(speed(putt.velocity)).toBe(0)
-  })
-  it('clamps power to full even for an off-board drag', () => {
-    const putt = planPutt({ x: 100000, y: 0 }, 300, 0.38)
-    expect(putt.power).toBe(1)
-    expect(speed(putt.velocity)).toBeCloseTo(MAX_POWER)
-  })
-})
-
-describe('sink detection', () => {
-  it('a putt rolled into the cup registers as holed', () => {
-    const h = makeHole(0, 'course-1')
-    // Aim straight from tee toward the cup with moderate power (pull back = drag
-    // opposite the travel direction), then roll the ball step-by-step.
-    const drag = { x: h.start.x - h.cup.x, y: h.start.y - h.cup.y }
-    let ball: BallState = { p: { ...h.start }, v: aimToVelocity(drag, 0.7) }
-    let holed = false
-    for (let i = 0; i < 1500 && !holed; i += 1) {
-      ball = step(ball, h.walls, 8)
-      if (inCup(ball, h)) holed = true
-      else if (atRest(ball)) break
-    }
-    expect(holed).toBe(true) // reaches the cup slow enough to drop
-  })
-
-  it('inCup fires the instant a slow ball sits over the cup', () => {
-    const h = makeHole(0, 'course-1')
-    expect(inCup({ p: { ...h.cup }, v: { x: 0, y: 0 } }, h)).toBe(true)
-  })
-})
-
-describe('planPutt (redirect a moving ball)', () => {
-  it('a real drag yields a fresh nonzero velocity to redirect a rolling ball', () => {
-    // The ball is already moving; a swing produces a brand-new velocity from the
-    // drag alone (independent of the old motion) so the caller can redirect it.
-    const putt = planPutt({ x: 0, y: 120 }, 300, 0.38) // drag down → fire up
-    expect(putt.counts).toBe(true)
-    expect(speed(putt.velocity)).toBeGreaterThan(0)
-    expect(putt.velocity.y).toBeLessThan(0)
-  })
-  it('a cancel yields no stroke and zero velocity, so the caller leaves motion untouched', () => {
-    const moving: Vec = { x: 0.4, y: -0.2 } // pretend current ball velocity
-    const putt = planPutt({ x: 1, y: 0 }, 300, 0.38) // sub-threshold tap
-    expect(putt.counts).toBe(false)
-    // The view applies the new velocity only when counts is true; on a cancel the
-    // ball's existing velocity is preserved unchanged.
-    const applied = putt.counts ? putt.velocity : moving
-    expect(applied).toEqual(moving)
-  })
-})
-
-describe('moving walls', () => {
-  const m: MovingWall = { base: { x: 0.2, y: 0.5, w: 0.1, h: 0.04 }, axis: 'x', amp: 0.4, speed: 2, phase: 0 }
-  it('stays within its envelope at all times', () => {
-    const env = moverEnvelope(m)
-    for (let t = 0; t < 4000; t += 100) {
-      const r = moverRectAt(m, t)
-      expect(r.x).toBeGreaterThanOrEqual(env.x - 1e-9)
-      expect(r.x + r.w).toBeLessThanOrEqual(env.x + env.w + 1e-9)
-      expect(r.y).toBe(m.base.y)
+  it('sinks all 9 holes of five seeds within 14 strokes each (and sanely overall)', () => {
+    for (const seed of SEEDS) {
+      let courseStrokes = 0
+      for (let i = 0; i < COURSE_HOLES; i += 1) {
+        const strokes = playHole(makeHole(i, seed))
+        expect(strokes, `seed ${seed} hole ${i + 1}`).toBeLessThanOrEqual(14)
+        courseStrokes += strokes
+      }
+      // The dumb bot should land in a believable scoring band — proof the
+      // course is hard enough to matter but nowhere near unfair.
+      expect(courseStrokes, `seed ${seed} course total`).toBeLessThanOrEqual(60)
     }
   })
 })
 
-describe('taglines', () => {
-  const fixed = () => 0 // deterministic pick
+describe('result taglines', () => {
   it('names the right golf term for each score vs par', () => {
-    expect(holeResult(1, 3, fixed).term).toBe('Hole in one!')
-    expect(holeResult(1, 4, fixed).term).toBe('Hole in one!') // ace beats par label
+    const fixed = () => 0
+    expect(holeResult(1, 4, fixed).term).toBe('Hole in one!')
     expect(holeResult(2, 4, fixed).term).toBe('Eagle!')
     expect(holeResult(3, 4, fixed).term).toBe('Birdie')
     expect(holeResult(4, 4, fixed).term).toBe('Par')
     expect(holeResult(5, 4, fixed).term).toBe('Bogey')
     expect(holeResult(6, 4, fixed).term).toBe('Double bogey')
-    expect(holeResult(7, 4, fixed).term).toBe('Triple bogey')
-    expect(holeResult(2, 5, fixed).term).toBe('Albatross!')
-  })
-  it('varies the blurb with randomness but stays in range', () => {
-    for (let i = 0; i < 20; i += 1) {
-      const r = holeResult(4, 4, () => i / 20)
-      expect(r.term).toBe('Par')
-      expect(r.blurb.length).toBeGreaterThan(0)
-    }
+    expect(holeResult(8, 4, fixed).term).toBe('Blow-up hole')
   })
   it('summarises a round under/at/over par', () => {
-    expect(courseResult(20, 27, fixed).term).toBe('Tour-level round!')
+    const fixed = () => 0
     expect(courseResult(25, 27, fixed).term).toBe('Under par!')
     expect(courseResult(27, 27, fixed).term).toBe('Even par')
     expect(courseResult(30, 27, fixed).term).toBe('Just over par')

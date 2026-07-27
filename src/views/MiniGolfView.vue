@@ -1,10 +1,11 @@
 <script setup lang="ts">
 /**
  * Mini Golf — a 9-hole seeded course. Drag anywhere and pull back to aim and set
- * power (like a slingshot), release to putt. Bounce off walls, sink the ball in
- * the cup in as few strokes as possible; score is total strokes vs par. Physics
- * and hole layouts come from services/miniGolf; the sim runs in fixed substeps
- * to avoid tunnelling through thin walls.
+ * power (like a slingshot), release to putt. Bounce off walls, dodge water,
+ * sand, sweeping walls and drop-offs — or hit a jump ramp at speed and fly over
+ * the lot. Sink the ball in the cup in as few strokes as possible; score is
+ * total strokes vs par. Physics and hole layouts come from services/miniGolf;
+ * the sim runs in fixed substeps to avoid tunnelling through thin walls.
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -16,12 +17,14 @@ import { useSquareFit } from '@/composables/useSquareFit'
 import {
   BALL_RADIUS,
   COURSE_HOLES,
+  airborne,
   atRest,
   courseResult,
   effectiveWalls,
   holeResult,
   inCup,
-  inHazard,
+  inVoid,
+  inWater,
   makeHole,
   moverRectAt,
   planPutt,
@@ -49,14 +52,15 @@ const phase = ref<'aim' | 'rolling' | 'sinking' | 'holed' | 'done'>('aim')
 const snackbar = ref(false)
 const holeMsg = ref<Result | null>(null)
 const courseMsg = ref<Result | null>(null)
-const hazardFlash = ref(false)
+const flashMsg = ref('') // transient "Splash!" / "Off the edge!" banner
 
 let hole: Hole = makeHole(0, 'init')
-let ball: BallState = { p: { ...hole.start }, v: { x: 0, y: 0 } }
+let ball: BallState = { p: { ...hole.start }, v: { x: 0, y: 0 }, air: 0 }
 let raf = 0
 let lastTs = 0
 let acc = 0
 let simMs = 0 // clock for moving obstacles
+let airTotal = 0 // ms of the current jump, for the arc animation
 
 let aiming = false
 let dragStart = { x: 0, y: 0 }
@@ -81,12 +85,13 @@ const stopLoop = () => {
 const loadHole = () => {
   hole = makeHole(holeIndex.value, seedCode.value)
   par.value = hole.par
-  ball = { p: { ...hole.start }, v: { x: 0, y: 0 } }
+  ball = { p: { ...hole.start }, v: { x: 0, y: 0 }, air: 0 }
   strokes.value = 0
   phase.value = 'aim'
   aiming = false
   holeMsg.value = null
   simMs = 0
+  airTotal = 0
   startLoop()
 }
 
@@ -109,8 +114,55 @@ const draw = () => {
   ctx.fillStyle = 'rgba(255,255,255,0.03)'
   for (let i = 0; i < S; i += 16) ctx.fillRect(0, i, S, 8) // subtle mow stripes
 
-  // Hazards (pits) — drawn under the walls/ball
+  // Voids — the green simply isn't there. A dark drop with a bright broken edge
+  // so it reads as "you will fall", not as decoration.
+  for (const v of hole.voids) {
+    const vx = v.x * S
+    const vy = v.y * S
+    const vw = v.w * S
+    const vh = v.h * S
+    ctx.fillStyle = '#050810'
+    ctx.fillRect(vx, vy, vw, vh)
+    // Inner falloff shading
+    const grad = ctx.createLinearGradient(vx, vy, vx, vy + Math.min(18, vh))
+    grad.addColorStop(0, 'rgba(2, 6, 23, 0.0)')
+    grad.addColorStop(1, 'rgba(2, 6, 23, 0.55)')
+    ctx.fillStyle = grad
+    ctx.fillRect(vx, vy, vw, Math.min(18, vh))
+    // Jagged bright rim on the sides that border grass
+    ctx.strokeStyle = 'rgba(74, 222, 128, 0.5)'
+    ctx.lineWidth = 2
+    ctx.setLineDash([7, 5])
+    ctx.strokeRect(vx + 1, vy + 1, vw - 2, vh - 2)
+    ctx.setLineDash([])
+  }
+
+  // Sand — pale patches with speckles.
   for (const hz of hole.hazards) {
+    if (hz.kind !== 'sand') continue
+    const hx = hz.p.x * S
+    const hy = hz.p.y * S
+    const hr = hz.r * S
+    ctx.beginPath()
+    ctx.arc(hx, hy, hr, 0, Math.PI * 2)
+    ctx.fillStyle = '#d6b98c'
+    ctx.fill()
+    ctx.beginPath()
+    ctx.arc(hx, hy, hr * 0.82, 0, Math.PI * 2)
+    ctx.strokeStyle = 'rgba(120, 90, 40, 0.35)'
+    ctx.lineWidth = 1.5
+    ctx.stroke()
+    ctx.fillStyle = 'rgba(120, 90, 40, 0.45)'
+    for (let k = 0; k < 7; k += 1) {
+      const a = (k / 7) * Math.PI * 2 + hz.p.x * 40
+      const rr = hr * (0.25 + 0.5 * ((k * 37) % 10) / 10)
+      ctx.fillRect(hx + Math.cos(a) * rr, hy + Math.sin(a) * rr, 2, 2)
+    }
+  }
+
+  // Water pools — drawn under the walls/ball.
+  for (const hz of hole.hazards) {
+    if (hz.kind !== 'water') continue
     const hx = hz.p.x * S
     const hy = hz.p.y * S
     const hr = hz.r * S
@@ -129,6 +181,30 @@ const draw = () => {
     ctx.stroke()
   }
 
+  // Jump ramps — a bright plate with up-chevrons: "hit me fast".
+  for (const ramp of hole.ramps) {
+    const rx = ramp.rect.x * S
+    const ry = ramp.rect.y * S
+    const rw = ramp.rect.w * S
+    const rh = ramp.rect.h * S
+    ctx.fillStyle = '#b45309'
+    ctx.fillRect(rx, ry, rw, rh)
+    ctx.fillStyle = '#f59e0b'
+    ctx.fillRect(rx + 2, ry + 2, rw - 4, rh - 4)
+    ctx.strokeStyle = '#fffbeb'
+    ctx.lineWidth = 2
+    ctx.lineCap = 'round'
+    const cx = rx + rw / 2
+    for (let k = 0; k < 2; k += 1) {
+      const cy = ry + rh * (0.72 - k * 0.34)
+      ctx.beginPath()
+      ctx.moveTo(cx - rw * 0.2, cy)
+      ctx.lineTo(cx, cy - rh * 0.22)
+      ctx.lineTo(cx + rw * 0.2, cy)
+      ctx.stroke()
+    }
+  }
+
   // Static walls
   ctx.fillStyle = '#5b3a1e'
   for (const w of hole.walls) ctx.fillRect(w.x * S, w.y * S, w.w * S, w.h * S)
@@ -140,13 +216,20 @@ const draw = () => {
     ctx.fillRect(r.x * S, r.y * S, r.w * S, r.h * S)
   }
 
-  // Cup + flag
+  // Cup + flag. The black circle is the REAL capture zone — what you see is
+  // what sinks.
   const cx = hole.cup.x * S
   const cy = hole.cup.y * S
+  const cr = hole.cupRadius * S
   ctx.beginPath()
-  ctx.arc(cx, cy, hole.cupRadius * S * 0.6, 0, Math.PI * 2)
+  ctx.arc(cx, cy, cr, 0, Math.PI * 2)
   ctx.fillStyle = '#0b1020'
   ctx.fill()
+  ctx.beginPath()
+  ctx.arc(cx, cy, cr, 0, Math.PI * 2)
+  ctx.strokeStyle = 'rgba(226, 232, 240, 0.55)'
+  ctx.lineWidth = 1.5
+  ctx.stroke()
   ctx.strokeStyle = '#e2e8f0'
   ctx.lineWidth = 2
   ctx.beginPath()
@@ -187,13 +270,22 @@ const draw = () => {
     }
   }
 
-  // Ball. While sinking it shrinks and slides into the cup for a satisfying drop.
+  // Ball. While sinking it shrinks into the cup; while airborne it arcs up
+  // (bigger, with a detached shadow) so the jump reads instantly.
   const sink = phase.value === 'sinking' ? Math.min(1, sinkT) : 0
+  const air = ball.air ?? 0
+  const jump = airTotal > 0 && air > 0 ? Math.sin(Math.PI * (1 - air / airTotal)) : 0
   const bpx = (ball.p.x + (hole.cup.x - ball.p.x) * sink) * S
   const bpy = (ball.p.y + (hole.cup.y - ball.p.y) * sink) * S
-  const br = BALL_RADIUS * S * (1 - 0.85 * sink)
+  const br = Math.max(0.5, BALL_RADIUS * S * (1 - 0.85 * sink) * (1 + 0.8 * jump))
+  if (jump > 0) {
+    ctx.beginPath()
+    ctx.ellipse(bpx, bpy + 4 + jump * 10, br * 0.9, br * 0.45, 0, 0, Math.PI * 2)
+    ctx.fillStyle = 'rgba(0,0,0,0.35)'
+    ctx.fill()
+  }
   ctx.beginPath()
-  ctx.arc(bpx, bpy, Math.max(0.5, br), 0, Math.PI * 2)
+  ctx.arc(bpx, bpy - jump * S * 0.045, br, 0, Math.PI * 2)
   ctx.fillStyle = '#f8fafc'
   ctx.shadowColor = 'rgba(0,0,0,0.4)'
   ctx.shadowBlur = 6
@@ -224,16 +316,17 @@ const holed = () => {
   draw()
 }
 
-// The ball fell in a hazard: send it back to the tee. The swing is already spent,
-// so this costs the player without a phantom stroke.
-const resetToTee = () => {
-  ball = { p: { ...hole.start }, v: { x: 0, y: 0 } }
+// The ball is gone (water or off the edge): back to the tee. The swing is
+// already spent, so this costs the player without a phantom stroke.
+const resetToTee = (message: string) => {
+  ball = { p: { ...hole.start }, v: { x: 0, y: 0 }, air: 0 }
+  airTotal = 0
   phase.value = 'aim'
   aiming = false
   detachDrag()
-  hazardFlash.value = true
+  flashMsg.value = message
   clearTimeout(flashTimer)
-  flashTimer = window.setTimeout(() => (hazardFlash.value = false), 1100)
+  flashTimer = window.setTimeout(() => (flashMsg.value = ''), 1300)
 }
 
 // One continuous loop: moving obstacles animate every frame; physics advances
@@ -248,10 +341,17 @@ const loop = (ts: number) => {
   if (phase.value === 'rolling') {
     acc += dt
     while (acc >= STEP_MS) {
+      const wasAirborne = airborne(ball)
       ball = step(ball, effectiveWalls(hole, simMs), STEP_MS, hole)
       acc -= STEP_MS
-      if (inHazard(ball, hole)) {
-        resetToTee()
+      if (!wasAirborne && airborne(ball)) airTotal = ball.air ?? 0 // jump just launched
+      if (airborne(ball)) continue // flying: nothing on the ground can touch it
+      if (inVoid(ball, hole)) {
+        resetToTee('Off the edge! Back to the tee')
+        break
+      }
+      if (inWater(ball, hole)) {
+        resetToTee('Splash! Back to the tee')
         break
       }
       if (inCup(ball, hole)) {
@@ -335,8 +435,8 @@ function onPointerUp(e: PointerEvent) {
   )
   // A cancel (tiny drag) — or an interaction that resolved into a non-playable
   // phase (holed/done) — is a pure no-op: the ball is never touched, so a rolling
-  // ball keeps rolling exactly as before.
-  if (!putt.counts || (phase.value !== 'aim' && phase.value !== 'rolling')) {
+  // ball keeps rolling exactly as before. A mid-air ball can't be steered either.
+  if (!putt.counts || airborne(ball) || (phase.value !== 'aim' && phase.value !== 'rolling')) {
     draw()
     return
   }
@@ -381,6 +481,13 @@ onMounted(() => {
   seedCode.value = p || randomSeed()
   if (!p) router.replace({ name: 'mini-golf', params: { seed: seedCode.value } })
   loadHole()
+  if (import.meta.env.DEV) {
+    // Playtest hook (dev builds only): jump straight to a hole.
+    ;(window as unknown as Record<string, unknown>).__golfSkip = (i: number) => {
+      holeIndex.value = Math.max(0, Math.min(COURSE_HOLES - 1, i))
+      loadHole()
+    }
+  }
 })
 onBeforeUnmount(() => {
   stopLoop()
@@ -394,8 +501,9 @@ onBeforeUnmount(() => {
     <div class="golf-head">
       <GameToolbar title="Mini Golf" shareable @share="share">
         <template #intro>
-          Drag and pull back to aim and set power — like a slingshot — then release to putt. Bounce off
-          the walls and sink the ball in as few strokes as you can, across nine holes.
+          Drag and pull back to aim and set power — like a slingshot — then release to putt. Bank off
+          the walls, dodge water, sand and drop-offs (or jump them off a ramp), and sink the ball in
+          as few strokes as you can, across nine holes.
         </template>
         <template #settings>
           <v-btn variant="tonal" color="primary" prepend-icon="mdi-refresh" @click="newCourse">New course</v-btn>
@@ -407,18 +515,23 @@ onBeforeUnmount(() => {
           <ul>
             <li>Press and drag <em>away</em> from the direction you want to putt — a longer drag means more power.</li>
             <li>Release to shoot. A tiny drag cancels.</li>
-            <li>You can swing again while the ball is still rolling — grab it to redirect a moving ball (it still counts as a stroke).</li>
-            <li>The cup grabs at the ball: rolling over it bleeds off speed and a slow ball gets pulled in — but a full-power blast will still skate across.</li>
+            <li>You can swing again while the ball is still rolling (it costs a stroke) — but not while it's mid-air.</li>
           </ul>
-          <h3>Hazards</h3>
+          <h3>The course</h3>
           <ul>
-            <li>Blue pits swallow the ball and send it back to the tee — the wasted swing still counts.</li>
-            <li>The lighter timber walls slide back and forth; time your shot or go around.</li>
+            <li>From hole 2 the straight line to the cup is always blocked — read the walls and play the banks.</li>
+            <li><strong>Water</strong> (blue) swallows the ball: back to the tee, swing spent.</li>
+            <li><strong>Sand</strong> (tan) drags hard — momentum goes there to die.</li>
+            <li><strong>Sweeping timber</strong> slides across the green; time your shot.</li>
+            <li><strong>Drop-offs</strong> (dark, dashed edge) are missing green — roll in and you fall off, back to the tee. You can't bank off a rail that's fallen away.</li>
+            <li><strong>Jump ramps</strong> (amber chevrons): cross one fast and the ball flies — over walls, water, everything — until it lands. A slow roll just trundles across.</li>
+            <li>The cup shrinks as the course goes on. The black circle is the real capture zone: the ball must be over it, and slow, to drop.</li>
           </ul>
           <h3>Tips</h3>
           <ul>
-            <li>Use the walls to bank shots around obstacles. Holes get longer and busier as you go.</li>
-            <li>Ease off near the hole so the ball stays in.</li>
+            <li>Full power off a ramp on the tee line is the risky ace route on late holes.</li>
+            <li>Ease off near the hole — a hot ball skates across the cup.</li>
+            <li>Sand isn't always the enemy: it can catch a ball that would otherwise roll into water.</li>
           </ul>
         </template>
       </GameToolbar>
@@ -442,7 +555,7 @@ onBeforeUnmount(() => {
       />
 
       <transition name="fade">
-        <div v-if="hazardFlash" class="hazard-flash">Splash! Back to the tee</div>
+        <div v-if="flashMsg" class="hazard-flash">{{ flashMsg }}</div>
       </transition>
 
       <div v-if="phase === 'holed'" class="overlay">

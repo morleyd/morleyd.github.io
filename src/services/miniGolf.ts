@@ -5,6 +5,23 @@
  * obstacles, seeded hole layouts, a solvability guarantee, par derivation and the
  * golf-language result taglines.
  *
+ * The course teaches its mechanics one hole at a time and composes them:
+ *   1. plain green (the only hole where a straight ace is even possible)
+ *   2+ every hole is generated so the direct tee→cup line is BLOCKED — you
+ *      play the rails (a one-bank route is always guaranteed clear)
+ *   3+ WATER pools near the putting lanes (splash → back to the tee)
+ *   4+ SAND patches (heavy drag — momentum dies in them)
+ *   5+ MOVING walls that sweep ACROSS the corridor (gates and wipers)
+ *   6+ VOIDS: corner bites and edge drop-offs where the green simply ends —
+ *      roll in and you fall off (back to the tee); a rail beside a drop-off
+ *      can't be banked
+ *   7+ JUMP ramps on the blocked direct line: hit one fast and the ball goes
+ *      airborne, flying over walls, water and voids — a risky ace line
+ *   ...and the cup shrinks as the course goes on.
+ *
+ * The cup is honest: the black circle you see IS the capture zone. The ball
+ * has to be over the black — and slow — to drop; there is no long-range pull.
+ *
  * Coordinates are fractions of the (square) play area: x,y in [0,1]. Holes run
  * bottom (tee, larger y) to top (cup, smaller y). Velocities are per second.
  */
@@ -19,6 +36,9 @@ export interface Vec {
 export interface BallState {
   p: Vec
   v: Vec
+  /** Airborne time remaining (ms). While > 0 the ball flies: no friction, no
+   *  walls, no capture, no hazards — set by hitting a jump ramp at speed. */
+  air?: number
 }
 
 /** An axis-aligned wall rectangle the ball bounces off (fractions of the area). */
@@ -29,11 +49,17 @@ export interface Rect {
   h: number
 }
 
-/** A pit/water hazard: if the ball's centre enters, it resets to the tee. The
- *  swing that sent it there is already spent, so a hazard costs the player. */
+/** A circular ground hazard. WATER swallows the ball (back to the tee, the
+ *  swing already spent); SAND just drags hard — momentum goes to die there. */
 export interface Hazard {
   p: Vec
   r: number
+  kind: 'water' | 'sand'
+}
+
+/** A jump plate: cross it faster than RAMP_MIN_SPEED and the ball launches. */
+export interface Ramp {
+  rect: Rect
 }
 
 /** A wall that oscillates back and forth along one axis (harder-hole variety). */
@@ -55,30 +81,50 @@ export interface Hole {
   walls: Rect[]
   hazards: Hazard[]
   movers: MovingWall[]
+  /** Regions where the green simply ends — the ball falls off (back to tee). */
+  voids: Rect[]
+  ramps: Ramp[]
   par: number
   seed: string
   winnable: boolean
 }
 
 export const BALL_RADIUS = 0.022
-export const FRICTION = 1.2 // velocity halving-ish drag per second (see step)
+// Friction sets the maximum roll: exponential drag loses speed linearly with
+// DISTANCE (dv/dx = -FRICTION), so a full-power putt travels MAX_POWER/FRICTION
+// = 1.0 board-lengths. Bank routes on later holes are longer than that — they
+// must be played as a lag putt plus a holing putt, which is where the pars
+// come from. Holing range (arrive under CAPTURE_SPEED from full power) is
+// (MAX_POWER - CAPTURE_SPEED) / FRICTION = 0.5.
+export const FRICTION = 1.6
 export const STOP_SPEED = 0.02 // below this the ball is considered at rest
 export const MAX_POWER = 1.6 // max launch speed from a full-strength stroke
-export const CAPTURE_SPEED = 1.0 // ball must be slower than this to drop in the cup
+export const CAPTURE_SPEED = 0.8 // ball must be slower than this to drop in the cup
 export const CANCEL_POWER = 0.06 // drags weaker than this cancel (no stroke)
 export const COURSE_HOLES = 9
 
-// The cup grabs at the ball like a real one: rolling across its rim bleeds off
-// speed (RIM_DRAG, applied within RIM_REACH of the cup) and a slow-enough ball
-// nearby gets pulled toward the center (RIM_PULL). Together these stop a
-// well-aimed putt from skating straight over the hole at speed.
-export const RIM_REACH = 1.8 // in cup radii
-export const RIM_DRAG = 2.6 // extra exponential drag per second over the rim
-export const RIM_PULL = 0.5 // pull acceleration toward the cup when slow
+// The cup interacts only at touching range: the drawn black circle IS the
+// capture zone (dist < cupRadius, i.e. ball center over the black), the rim
+// scrubs speed within RIM_REACH cup-radii, and a slow ball that is already
+// touching the black gets a small pull so it drops instead of lipping. No
+// long-range suction.
+export const RIM_REACH = 1.5 // rim drag zone, in cup radii
+export const RIM_DRAG = 1.6 // extra exponential drag per second over the rim
+export const RIM_PULL = 0.4 // pull acceleration once over the black and slow
+export const PULL_REACH = 1.25 // pull zone, in cup radii (≈ ball touching the black)
+
+export const SAND_DRAG = 4.5 // extra exponential drag per second in sand
+
+export const RAMP_MIN_SPEED = 0.35 // slower than this just rolls over the plate
+export const RAMP_AIR_PER_SPEED = 380 // ms of flight per unit of speed
+export const RAMP_AIR_MAX = 620 // flight time cap (ms)
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
 const clamp01 = (v: number, r: number) => Math.max(r, Math.min(1 - r, v))
 const dist = (a: Vec, b: Vec) => Math.hypot(a.x - b.x, a.y - b.y)
+
+const pointInRect = (p: Vec, r: Rect): boolean =>
+  p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h
 
 /** Reflect the ball off the outer bounds and any wall rectangles (one step). */
 export function collide(state: BallState, walls: Rect[]): BallState {
@@ -139,28 +185,49 @@ export function collide(state: BallState, walls: Rect[]): BallState {
   px = Math.max(r, Math.min(1 - r, px))
   py = Math.max(r, Math.min(1 - r, py))
 
-  return { p: { x: px, y: py }, v: { x: vx, y: vy } }
+  return { p: { x: px, y: py }, v: { x: vx, y: vy }, air: state.air }
 }
 
 /**
- * Advance the ball one fixed step: integrate, apply friction (plus the cup's
- * rim drag/pull when a hole is provided), then collide.
+ * Advance the ball one fixed step.
+ *
+ * Airborne (air > 0): pure linear flight — no friction, no walls, no cup, and
+ * the hazard/void checks in the driver don't apply until it lands.
+ *
+ * Grounded: integrate, apply friction (much more in sand, plus the cup's rim
+ * drag/pull at touching range when a hole is provided), collide, and launch
+ * off any jump ramp crossed at speed.
  */
 export function step(state: BallState, walls: Rect[], dtMs: number, hole?: Hole): BallState {
   const dt = dtMs / 1000
+
+  const air = state.air ?? 0
+  if (air > 0) {
+    return {
+      p: { x: state.p.x + state.v.x * dt, y: state.p.y + state.v.y * dt },
+      v: { x: state.v.x, y: state.v.y },
+      air: Math.max(0, air - dtMs),
+    }
+  }
+
+  const before = state.p
   const moved: BallState = {
     p: { x: state.p.x + state.v.x * dt, y: state.p.y + state.v.y * dt },
     v: { x: state.v.x, y: state.v.y },
+    air: 0,
   }
-  // Exponential friction.
+
+  // Exponential friction — heavier in sand.
   let decay = Math.exp(-FRICTION * dt)
+  if (hole && inSand(moved, hole)) decay *= Math.exp(-SAND_DRAG * dt)
   if (hole) {
     const d = dist(moved.p, hole.cup)
     if (d < hole.cupRadius * RIM_REACH) {
-      // Rolling over the cup: the rim scrubs speed off...
+      // Rolling over the cup's rim scrubs speed off...
       decay *= Math.exp(-RIM_DRAG * dt)
-      // ...and pulls a slow ball toward the center so it drops instead of lipping.
-      if (speed(moved.v) < CAPTURE_SPEED * 1.4 && d > 1e-6) {
+      // ...and once the ball is over/touching the black and slow, a small pull
+      // drops it in instead of letting it lip out. Touching range only.
+      if (d < hole.cupRadius * PULL_REACH && speed(moved.v) < CAPTURE_SPEED && d > 1e-6) {
         const pull = (RIM_PULL * dt) / d
         moved.v.x += (hole.cup.x - moved.p.x) * pull
         moved.v.y += (hole.cup.y - moved.p.y) * pull
@@ -169,20 +236,50 @@ export function step(state: BallState, walls: Rect[], dtMs: number, hole?: Hole)
   }
   moved.v.x *= decay
   moved.v.y *= decay
-  return collide(moved, walls)
+
+  const out = collide(moved, walls)
+
+  // Jump ramps: entering a plate at speed launches the ball on its current
+  // heading. Flight time (≈ jump distance) scales with entry speed.
+  if (hole) {
+    const spd = speed(out.v)
+    if (spd >= RAMP_MIN_SPEED) {
+      for (const ramp of hole.ramps) {
+        if (!pointInRect(before, ramp.rect) && pointInRect(out.p, ramp.rect)) {
+          out.air = Math.min(RAMP_AIR_MAX, RAMP_AIR_PER_SPEED * spd)
+          break
+        }
+      }
+    }
+  }
+
+  return out
 }
 
 export const speed = (v: Vec): number => Math.hypot(v.x, v.y)
-export const atRest = (state: BallState): boolean => speed(state.v) < STOP_SPEED
+export const airborne = (state: BallState): boolean => (state.air ?? 0) > 0
+export const atRest = (state: BallState): boolean => !airborne(state) && speed(state.v) < STOP_SPEED
 
-/** Whether the ball is over the cup and slow enough to be captured. */
+/** Whether the ball is over the cup's black and slow enough to be captured.
+ *  A flying ball sails over the hole. */
 export function inCup(state: BallState, hole: Hole): boolean {
+  if (airborne(state)) return false
   return dist(state.p, hole.cup) < hole.cupRadius && speed(state.v) < CAPTURE_SPEED
 }
 
-/** Whether the ball's centre has fallen into any pit hazard. */
-export function inHazard(state: BallState, hole: Hole): boolean {
-  return hole.hazards.some((h) => dist(state.p, h.p) < h.r)
+const inHazardKind = (state: BallState, hole: Hole, kind: Hazard['kind']): boolean =>
+  !airborne(state) && hole.hazards.some((h) => h.kind === kind && dist(state.p, h.p) < h.r)
+
+/** Whether the ball's centre has rolled into water (splash → back to the tee). */
+export const inWater = (state: BallState, hole: Hole): boolean => inHazardKind(state, hole, 'water')
+
+/** Whether the ball is currently dragging through a sand patch. */
+export const inSand = (state: BallState, hole: Hole): boolean => inHazardKind(state, hole, 'sand')
+
+/** Whether the ball has rolled off the green into a void (fall → back to tee). */
+export function inVoid(state: BallState, hole: Hole): boolean {
+  if (airborne(state)) return false
+  return hole.voids.some((v) => pointInRect(state.p, v))
 }
 
 // ---------------------------------------------------------------------------
@@ -292,16 +389,18 @@ function segHitsCircle(a: Vec, b: Vec, c: Vec, radius: number): boolean {
 
 interface Obstacles {
   rects: Rect[]
-  circles: Hazard[]
+  circles: Array<{ p: Vec; r: number }>
 }
 
 /** The obstacle set a putt must avoid: static walls, the full sweep of every
- *  moving wall, and every hazard. Using mover ENVELOPES keeps a found path valid
- *  no matter the wall's phase, so the hole stays winnable at all times. */
+ *  moving wall, every WATER pool, and every void (you can't roll across a
+ *  drop-off). Sand only slows, so it doesn't block a route; ramps are flat.
+ *  Using mover ENVELOPES keeps a found path valid no matter the wall's phase,
+ *  so the hole stays winnable at all times. */
 function holeObstacles(hole: Hole): Obstacles {
   return {
-    rects: [...hole.walls, ...hole.movers.map(moverEnvelope)],
-    circles: hole.hazards,
+    rects: [...hole.walls, ...hole.movers.map(moverEnvelope), ...hole.voids],
+    circles: hole.hazards.filter((h) => h.kind === 'water'),
   }
 }
 
@@ -313,7 +412,7 @@ function clearPath(a: Vec, b: Vec, obs: Obstacles): boolean {
 }
 
 /** Where a start→cup shot would bank off the reflecting line `at` on `axis`. */
-function bankPoint(start: Vec, cup: Vec, axis: 'x' | 'y', at: number): Vec | null {
+export function bankPoint(start: Vec, cup: Vec, axis: 'x' | 'y', at: number): Vec | null {
   const r = BALL_RADIUS
   if (axis === 'x') {
     const mirroredX = 2 * at - cup.x
@@ -335,6 +434,25 @@ function bankPoint(start: Vec, cup: Vec, axis: 'x' | 'y', at: number): Vec | nul
   return { x, y: at }
 }
 
+export const RAILS: Array<['x' | 'y', number]> = [
+  ['x', BALL_RADIUS],
+  ['x', 1 - BALL_RADIUS],
+  ['y', BALL_RADIUS],
+  ['y', 1 - BALL_RADIUS],
+]
+
+/** A rail can't be banked off where the green has fallen away into a void. */
+function bankPointUsable(b: Vec, hole: Hole): boolean {
+  const margin = BALL_RADIUS * 2
+  return !hole.voids.some(
+    (v) =>
+      b.x >= v.x - margin &&
+      b.x <= v.x + v.w + margin &&
+      b.y >= v.y - margin &&
+      b.y <= v.y + v.h + margin,
+  )
+}
+
 export interface Solution {
   pathType: PathType
   strokes: number // idealised strokes to sink from the tee (1 = ace line)
@@ -342,22 +460,16 @@ export interface Solution {
 
 /**
  * Find a guaranteed-clear route from tee to cup: a direct line, else a single
- * bank off any of the four rails. Returns null when the hole cannot be solved
- * this way — the generator then regenerates or clears the layout.
+ * bank off any of the four rails (never off a rail that has fallen into a
+ * void). Returns null when the hole cannot be solved this way — the generator
+ * then regenerates or clears the layout.
  */
 export function solveHole(hole: Hole): Solution | null {
   const obs = holeObstacles(hole)
   if (clearPath(hole.start, hole.cup, obs)) return { pathType: 'direct', strokes: 1 }
-  const r = BALL_RADIUS
-  const rails: Array<['x' | 'y', number]> = [
-    ['x', r],
-    ['x', 1 - r],
-    ['y', r],
-    ['y', 1 - r],
-  ]
-  for (const [axis, at] of rails) {
+  for (const [axis, at] of RAILS) {
     const b = bankPoint(hole.start, hole.cup, axis, at)
-    if (b && clearPath(hole.start, b, obs) && clearPath(b, hole.cup, obs)) {
+    if (b && bankPointUsable(b, hole) && clearPath(hole.start, b, obs) && clearPath(b, hole.cup, obs)) {
       return { pathType: 'bank', strokes: 2 }
     }
   }
@@ -367,139 +479,277 @@ export function solveHole(hole: Hole): Solution | null {
 export const isWinnable = (hole: Hole): boolean => solveHole(hole) !== null
 
 /**
- * Par from the hole's real difficulty: base on the shortest route type (a clear
- * direct line is a two-putt; a forced bank is three), plus at most ONE bump for
- * a green that is both long and busy. Bounded 2..4 — an honest target rather
- * than free strokes.
+ * The next aim point from an arbitrary ball position: the cup when the direct
+ * line is clear, else a usable one-bank rail point with both legs clear, else
+ * null (boxed in — just play at the cup and improvise). Powers the playability
+ * simulation in the spec, and matches exactly what solveHole guarantees from
+ * the tee.
+ */
+export function routeTarget(p: Vec, hole: Hole): Vec | null {
+  const obs = holeObstacles(hole)
+  if (clearPath(p, hole.cup, obs)) return { ...hole.cup }
+  for (const [axis, at] of RAILS) {
+    const b = bankPoint(p, hole.cup, axis, at)
+    if (b && bankPointUsable(b, hole) && clearPath(p, b, obs) && clearPath(b, hole.cup, obs)) {
+      return b
+    }
+  }
+  return null
+}
+
+/**
+ * Par from the hole's real difficulty: a clear direct line is a two-putt, a
+ * forced bank is three (perfect play holes a bank route in two — lag putt +
+ * finish — so three is an earned target, not free strokes); +1 only for
+ * kitchen-sink holes (4+ hazards/movers/voids). Bounded 2..5.
  */
 export function derivePar(hole: Hole, sol: Solution): number {
   let par = sol.pathType === 'direct' ? 2 : 3
-  if (dist(hole.start, hole.cup) >= 0.72 && hole.hazards.length + hole.movers.length > 0) par += 1
-  return clamp(par, 2, 4)
+  const features = hole.hazards.length + hole.movers.length + hole.voids.length
+  if (features >= 4) par += 1
+  return clamp(par, 2, 5)
 }
 
 // ---------------------------------------------------------------------------
 // Hole generation (progressive difficulty + solvability guarantee)
 // ---------------------------------------------------------------------------
 
-function buildCandidate(index: number, seed: string, salt: number): Hole {
-  const rng = rngFromSeed(`golf:${seed}:${index}:${salt}`)
+const rectsOverlap = (a: Rect, b: Rect, pad = 0.02): boolean =>
+  a.x < b.x + b.w + pad && a.x + a.w > b.x - pad && a.y < b.y + b.h + pad && a.y + a.h > b.y - pad
+
+/**
+ * `sparse` progressively thins a layout when a fully-loaded one refuses to
+ * leave a bank route open: 1 drops the decoration walls, 2 also drops the
+ * second mover/void/water/sand. Used by makeHole's retry ladder so the busiest
+ * holes stay bank-only instead of degrading to a free straight shot.
+ */
+function buildCandidate(index: number, seed: string, salt: number, sparse = 0): Hole {
+  const rng = rngFromSeed(`golf:${seed}:${index}:${salt}:${sparse}`)
   const t = index / (COURSE_HOLES - 1) // 0 (first) .. 1 (last): difficulty ramp
 
-  // Longer greens on later holes.
+  // Longer greens and smaller cups on later holes.
   const startY = 0.8 + t * 0.1
   const cupY = 0.28 - t * 0.16
-  const start: Vec = { x: clamp01(0.5 + (rng() - 0.5) * 0.5, BALL_RADIUS), y: startY }
-  const cup: Vec = { x: clamp01(0.5 + (rng() - 0.5) * 0.7, 0.06), y: cupY }
+  const start: Vec = { x: clamp01(0.5 + (rng() - 0.5) * 0.6, BALL_RADIUS * 2), y: startY }
+  const cup: Vec = { x: clamp01(0.5 + (rng() - 0.5) * 0.8, 0.07), y: cupY }
+  const cupRadius = 0.05 - 0.014 * t
   const span = start.y - cup.y
 
-  // Walls. From the third hole on, the first wall is a deliberate BLOCKER laid
-  // across the direct tee→cup line, so the straight ace stops being free and the
-  // hole has to be played off the rails (solvability still guarantees a bank
-  // route). The rest are decoration/bank targets, and never stack: a wall that
-  // overlaps an already-placed one is skipped rather than piled on top.
-  const walls: Rect[] = []
-  const overlapsExisting = (r: Rect): boolean =>
-    walls.some(
-      (w) =>
-        r.x < w.x + w.w + 0.02 &&
-        r.x + r.w > w.x - 0.02 &&
-        r.y < w.y + w.h + 0.02 &&
-        r.y + r.h > w.y - 0.02,
-    )
-  if (index >= 2) {
-    // A horizontal bar centered on the midpoint of the tee→cup segment.
-    const midT = 0.4 + rng() * 0.25
-    const mx = start.x + (cup.x - start.x) * midT
-    const my = start.y + (cup.y - start.y) * midT
-    const w = 0.3 + rng() * (0.2 + t * 0.25)
-    walls.push({ x: clamp(mx - w / 2, 0.02, 0.98 - w), y: my - 0.0175, w, h: 0.035 })
+  // A point on the direct tee→cup line, offset sideways by `off` (perpendicular).
+  const lanePoint = (u: number, off: number): Vec => {
+    const lx = start.x + (cup.x - start.x) * u
+    const ly = start.y + (cup.y - start.y) * u
+    const dx = cup.x - start.x
+    const dy = cup.y - start.y
+    const len = Math.hypot(dx, dy) || 1
+    return { x: lx + (-dy / len) * off, y: ly + (dx / len) * off }
   }
-  const wallCount = Math.min(6, 1 + Math.round(t * 3) + Math.floor(rng() * 2))
-  for (let i = 0; i < wallCount; i += 1) {
-    const bandY = cup.y + 0.14 + ((i + 0.5) / wallCount) * (span - 0.28) + (rng() - 0.5) * 0.05
-    // NOTE: the rng() call order here is the determinism contract for shared
-    // seeds — reordering these draws reshapes every existing course.
-    let cand: Rect
-    if (rng() < 0.6) {
-      const w = 0.24 + rng() * (0.22 + t * 0.22)
-      cand = { x: clamp01(rng() * (1 - w), 0), y: bandY, w, h: 0.035 }
-    } else {
-      const h = 0.13 + rng() * (0.14 + t * 0.12)
-      cand = { x: clamp(0.18 + rng() * 0.6, 0.05, 0.92), y: bandY - h / 2, w: 0.035, h }
-    }
+
+  // --- Walls -----------------------------------------------------------------
+  // From hole 2 on, BLOCKER bars are laid across the direct tee→cup line so the
+  // straight ace is gone and the hole plays off the rails. Decoration walls
+  // never stack on anything already placed.
+  const walls: Rect[] = []
+  const allRects = (): Rect[] => walls
+  const overlapsExisting = (r: Rect): boolean => allRects().some((w) => rectsOverlap(r, w))
+
+  const blockerCount = index === 0 ? 0 : index >= 5 ? 2 : 1
+  const blockerUs = blockerCount === 2 ? [0.32 + rng() * 0.1, 0.6 + rng() * 0.12] : [0.42 + rng() * 0.2]
+  for (const u of blockerUs.slice(0, blockerCount)) {
+    const mx = start.x + (cup.x - start.x) * u
+    const my = start.y + (cup.y - start.y) * u
+    const w = 0.34 + rng() * 0.18 + t * 0.14
+    const bx = clamp(mx - w / 2, 0.02, 0.98 - w)
+    const cand: Rect = { x: bx, y: my - 0.0175, w, h: 0.035 }
+    // The clamp near an edge can slide the bar off the line — recenter if so.
+    if (!segHitsRect(start, cup, cand, BALL_RADIUS)) cand.x = clamp(mx - w / 2, 0, 1 - w)
     if (!overlapsExisting(cand)) walls.push(cand)
   }
 
-  // Pit hazards start appearing mid-course and grow more likely toward the end.
-  const hazards: Hazard[] = []
-  const addHazard = () => {
-    const r = 0.05 + rng() * 0.03
-    const p: Vec = {
-      x: clamp(0.18 + rng() * 0.64, 0.12, 0.88),
-      y: cup.y + 0.16 + rng() * Math.max(0.05, span - 0.32),
-    }
-    // Keep-away margins: past the tee, and past the cup's RADIUS (0.05) plus a
-    // putting lane — this previously used cup.y (the cup's coordinate) by
-    // mistake, which silently rejected most hazards on early holes.
-    if (dist(p, start) > r + 0.1 && dist(p, cup) > r + 0.05 + 0.02) hazards.push({ p, r })
-  }
-  if (index >= 3 && rng() < 0.35 + t * 0.55) addHazard()
-  if (index >= 6 && rng() < 0.5) addHazard()
-
-  // A single sliding wall on the harder holes for timing variety. Its envelope
-  // is fenced inside the green and kept narrow enough to leave a clear lane.
+  // --- Moving walls -------------------------------------------------------------
+  // Placed right after the blockers so they get first pick of the open bands.
+  // Both variants sweep ACROSS the ball's corridor (along x): a long GATE bar
+  // whose opening slides side to side, and a vertical WIPER blade. (A vertical
+  // bar sliding along its own length never actually changed anything.)
   const movers: MovingWall[] = []
-  if (index >= 4 && rng() < 0.4 + (t - 0.4) * 0.6) {
-    const horizontal = rng() < 0.5
-    const midY = cup.y + 0.3 + rng() * Math.max(0.05, span - 0.5)
-    if (horizontal) {
-      const w = 0.16 + rng() * 0.08
-      const amp = 0.34 + rng() * 0.12
-      const x = clamp(0.08 + rng() * (1 - w - amp - 0.16), 0.05, 1 - w - amp - 0.05)
-      movers.push({ base: { x, y: midY, w, h: 0.035 }, axis: 'x', amp, speed: 1 + rng() * 1, phase: rng() * 6.28 })
-    } else {
-      const h = 0.14 + rng() * 0.08
-      const amp = 0.22 + rng() * 0.1
-      const y = clamp(cup.y + 0.14 + rng() * 0.1, 0.06, 1 - h - amp - 0.05)
-      const x = clamp(0.2 + rng() * 0.6, 0.06, 0.9)
-      movers.push({ base: { x, y, w: 0.035, h }, axis: 'y', amp, speed: 1 + rng() * 1, phase: rng() * 6.28 })
+  const addMover = (): void => {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const midY = cup.y + 0.16 + rng() * Math.max(0.1, span - 0.34)
+      const horizontal = rng() < 0.65
+      const base: Rect = horizontal
+        ? { x: 0, y: midY, w: 0.16 + rng() * 0.08, h: 0.035 }
+        : { x: 0, y: midY - (0.16 + rng() * 0.06) / 2, w: 0.035, h: 0.16 + rng() * 0.06 }
+      const amp = 0.3 + rng() * 0.18
+      base.x = clamp(0.06 + rng() * (1 - base.w - amp - 0.12), 0.03, 1 - base.w - amp - 0.03)
+      const m: MovingWall = { base, axis: 'x', amp, speed: 0.9 + rng() * 1.1, phase: rng() * 6.28 }
+      // The sweep must not stack on the blockers or another mover's sweep.
+      const env = moverEnvelope(m)
+      if (
+        !walls.some((w) => rectsOverlap(env, w)) &&
+        !movers.some((o) => rectsOverlap(env, moverEnvelope(o)))
+      ) {
+        movers.push(m)
+        return
+      }
     }
   }
+  if (index >= 4) addMover()
+  if (index >= 7 && sparse < 2 && rng() < 0.6) addMover()
 
-  return { index, start, cup, cupRadius: 0.05, walls, hazards, movers, par: 2, seed, winnable: false }
+  // --- Decoration walls (bank targets) — never stacked on anything ---------------
+  const wallCount = sparse >= 1 ? 0 : Math.min(3, Math.round(t * 2) + Math.floor(rng() * 2))
+  for (let i = 0; i < wallCount; i += 1) {
+    const bandY = cup.y + 0.14 + ((i + 0.5) / Math.max(1, wallCount)) * (span - 0.28) + (rng() - 0.5) * 0.05
+    let cand: Rect
+    if (rng() < 0.55) {
+      const w = 0.2 + rng() * (0.16 + t * 0.16)
+      cand = { x: clamp01(rng() * (1 - w), 0), y: bandY, w, h: 0.035 }
+    } else {
+      const h = 0.12 + rng() * (0.12 + t * 0.1)
+      cand = { x: clamp(0.15 + rng() * 0.66, 0.05, 0.92), y: bandY - h / 2, w: 0.035, h }
+    }
+    if (!overlapsExisting(cand) && !movers.some((m) => rectsOverlap(cand, moverEnvelope(m))))
+      walls.push(cand)
+  }
+
+  // --- Hazards (water + sand) -------------------------------------------------
+  // Placed to threaten the actual putting lanes: near the direct line and the
+  // bank routes, never stacked on each other, never crowding the tee or cup,
+  // never under a wall or a moving wall's sweep.
+  const hazards: Hazard[] = []
+  const hazardFits = (p: Vec, r: number): boolean => {
+    // The whole pool stays (essentially) on the board — no clipped half-moons.
+    if (p.x < r * 0.9 || p.x > 1 - r * 0.9 || p.y < r * 0.9 || p.y > 1 - r * 0.9) return false
+    if (dist(p, start) < r + 0.12) return false
+    if (dist(p, cup) < r + cupRadius + 0.09) return false
+    if (hazards.some((h) => dist(p, h.p) < r + h.r + 0.04)) return false
+    // Not buried under a wall or a sweeping wall's envelope.
+    const bounds = { x: p.x - r, y: p.y - r, w: r * 2, h: r * 2 }
+    if (walls.some((w) => rectsOverlap(w, bounds, 0))) return false
+    if (movers.some((m) => rectsOverlap(moverEnvelope(m), bounds, 0))) return false
+    return true
+  }
+  const addHazard = (kind: Hazard['kind'], maxOff: number): void => {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const r = kind === 'water' ? 0.055 + rng() * 0.03 : 0.07 + rng() * 0.04
+      const u = 0.25 + rng() * 0.5
+      const off = (rng() < 0.5 ? -1 : 1) * (kind === 'sand' ? rng() * maxOff : 0.08 + rng() * maxOff)
+      const p = lanePoint(u, off)
+      if (hazardFits(p, r)) {
+        hazards.push({ p: { x: clamp01(p.x, r * 0.9), y: clamp01(p.y, r * 0.9) }, r, kind })
+        return
+      }
+    }
+  }
+  if (index >= 2) addHazard('water', 0.22)
+  if (index >= 4 && sparse < 2 && rng() < 0.7) addHazard('water', 0.26)
+  if (index >= 3) addHazard('sand', 0.14)
+  if (index >= 6 && sparse < 2 && rng() < 0.6) addHazard('sand', 0.18)
+
+  // --- Voids (the green just ends) ---------------------------------------------
+  const voids: Rect[] = []
+  const voidOk = (v: Rect): boolean => {
+    const grown = { x: v.x - 0.1, y: v.y - 0.1, w: v.w + 0.2, h: v.h + 0.2 }
+    if (pointInRect(start, grown) || pointInRect(cup, grown)) return false
+    if (walls.some((w) => rectsOverlap(v, w))) return false
+    if (movers.some((m) => rectsOverlap(v, moverEnvelope(m)))) return false
+    if (hazards.some((h) => pointInRect(h.p, { x: v.x - h.r, y: v.y - h.r, w: v.w + 2 * h.r, h: v.h + 2 * h.r })))
+      return false
+    return true
+  }
+  const addVoid = (): void => {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      let v: Rect
+      if (rng() < 0.5) {
+        // Corner bite: the green is missing a corner.
+        const left = rng() < 0.5
+        const top = rng() < 0.5
+        const w = 0.22 + rng() * 0.14
+        const h = 0.18 + rng() * 0.12
+        v = { x: left ? 0 : 1 - w, y: top ? 0 : 1 - h, w, h }
+      } else {
+        // Edge shelf: a strip of missing green along one side rail.
+        const left = rng() < 0.5
+        const w = 0.05 + rng() * 0.025
+        const h = 0.26 + rng() * 0.18
+        v = { x: left ? 0 : 1 - w, y: 0.2 + rng() * 0.42, w, h }
+      }
+      if (voidOk(v)) {
+        voids.push(v)
+        return
+      }
+    }
+  }
+  if (index >= 5) addVoid()
+  if (index >= 7 && sparse < 2 && rng() < 0.6) addVoid()
+
+  // --- Jump ramps -----------------------------------------------------------------
+  // A plate on the (blocked) direct line, early in the shot: hammer a straight
+  // putt through it and the ball flies the blocker — the risky ace line.
+  const ramps: Ramp[] = []
+  if (index >= 6) {
+    const u = 0.16 + rng() * 0.1
+    const p = lanePoint(u, 0)
+    const rect: Rect = { x: clamp(p.x - 0.05, 0.02, 0.88), y: clamp(p.y - 0.035, 0.02, 0.91), w: 0.1, h: 0.07 }
+    const clearOfEverything =
+      !walls.some((w) => rectsOverlap(rect, w)) &&
+      !movers.some((m) => rectsOverlap(rect, moverEnvelope(m))) &&
+      !voids.some((v) => rectsOverlap(rect, v)) &&
+      !hazards.some((h) => dist({ x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 }, h.p) < h.r + 0.09)
+    if (clearOfEverything) ramps.push({ rect })
+  }
+
+  return {
+    index,
+    start,
+    cup,
+    cupRadius,
+    walls,
+    hazards,
+    movers,
+    voids,
+    ramps,
+    par: 2,
+    seed,
+    winnable: false,
+  }
 }
 
-/** Remove any walls/hazards/movers blocking the direct tee→cup line, guaranteeing
- *  a clear shot. The safety net when random layouts refuse to be solvable. */
+/** Remove anything blocking the direct tee→cup line, guaranteeing a clear shot.
+ *  The safety net when random layouts refuse to be solvable. */
 function clearBlockers(hole: Hole): void {
   const line = (obs: Obstacles) => clearPath(hole.start, hole.cup, obs)
   hole.walls = hole.walls.filter((w) => line({ rects: [w], circles: [] }))
-  hole.hazards = hole.hazards.filter((c) => line({ rects: [], circles: [c] }))
+  hole.hazards = hole.hazards.filter(
+    (c) => c.kind === 'sand' || line({ rects: [], circles: [{ p: c.p, r: c.r }] }),
+  )
   hole.movers = hole.movers.filter((m) => line({ rects: [moverEnvelope(m)], circles: [] }))
+  hole.voids = hole.voids.filter((v) => line({ rects: [v], circles: [] }))
 }
 
 /**
- * Generate a deterministic, always-winnable hole. Layouts are retried with new
- * salts until one is solvable (direct or one-bank); as a last resort blocking
- * obstacles are cleared so a direct shot always exists. Par is then derived from
- * the actual route + hazards, so it tracks real difficulty.
+ * Generate a deterministic, always-winnable hole. Hole 1 may be a clean direct
+ * line; every later hole REQUIRES a layout whose only guaranteed route is a
+ * bank — the straight ace is generated away. Layouts are retried with new salts
+ * until one qualifies; as a last resort blocking obstacles are cleared so a
+ * direct shot always exists. Par is then derived from the actual route.
  */
 export function makeHole(index: number, seed: string): Hole {
-  // From the third hole on, prefer a layout whose best route is a BANK — the
-  // blocker wall did its job and the hole actually asks for a shot. Fall back to
-  // any solvable layout, then to clearing blockers.
   let fallback: { hole: Hole; sol: Solution } | null = null
-  for (let salt = 0; salt < 24; salt += 1) {
-    const hole = buildCandidate(index, seed, salt)
-    const sol = solveHole(hole)
-    if (!sol) continue
-    if (index < 2 || sol.pathType === 'bank') {
-      hole.par = derivePar(hole, sol)
-      hole.winnable = true
-      return hole
+  // Retry ladder: full layouts first, then progressively sparser ones — a busy
+  // finale hole should shed its clutter before it ever concedes a straight ace.
+  for (let sparse = 0; sparse <= 2; sparse += 1) {
+    for (let salt = 0; salt < 64; salt += 1) {
+      const hole = buildCandidate(index, seed, salt, sparse)
+      const sol = solveHole(hole)
+      if (!sol) continue
+      if (index === 0 || sol.pathType === 'bank') {
+        hole.par = derivePar(hole, sol)
+        hole.winnable = true
+        return hole
+      }
+      if (!fallback) fallback = { hole, sol }
     }
-    if (!fallback) fallback = { hole, sol }
   }
   if (fallback) {
     fallback.hole.par = derivePar(fallback.hole, fallback.sol)
