@@ -54,6 +54,21 @@ const holeMsg = ref<Result | null>(null)
 const courseMsg = ref<Result | null>(null)
 const flashMsg = ref('') // transient "Splash!" / "Off the edge!" banner
 
+// Speed-run clock: play time for the whole course (aiming counts, the
+// between-holes scorecard doesn't). Starts with the first putt.
+const elapsedMs = ref(0)
+const bestLabel = ref('') // stored course record for this seed
+const isNewRecord = ref(false)
+const timeLabel = computed(() => {
+  const s = Math.floor(elapsedMs.value / 1000)
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+})
+const fmtMs = (ms: number) => {
+  const s = Math.floor(ms / 1000)
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+}
+const timing = () => totalStrokes.value > 0 || strokes.value > 0 || holeIndex.value > 0
+
 let hole: Hole = makeHole(0, 'init')
 let ball: BallState = { p: { ...hole.start }, v: { x: 0, y: 0 }, air: 0 }
 let raf = 0
@@ -498,6 +513,7 @@ const loop = (ts: number) => {
   const dt = lastTs ? Math.min(48, ts - lastTs) : STEP_MS
   lastTs = ts
   simMs += dt
+  if (timing() && phase.value !== 'holed' && phase.value !== 'done') elapsedMs.value += dt
 
   if (phase.value === 'rolling') {
     acc += dt
@@ -613,7 +629,25 @@ const nextHole = () => {
     courseMsg.value = courseResult(totalStrokes.value, totalPar.value)
     phase.value = 'done'
     stopLoop()
-    if (totalStrokes.value <= totalPar.value) burstConfetti({ count: 140, power: 1.1 })
+    // Course record for this seed: fastest time wins (it's a speed run);
+    // strokes ride along for bragging rights.
+    isNewRecord.value = false
+    try {
+      const key = `golf-best:${seedCode.value}`
+      const prev = JSON.parse(localStorage.getItem(key) ?? 'null') as
+        | { ms: number; strokes: number }
+        | null
+      if (!prev || elapsedMs.value < prev.ms) {
+        localStorage.setItem(key, JSON.stringify({ ms: elapsedMs.value, strokes: totalStrokes.value }))
+        isNewRecord.value = Boolean(prev)
+        bestLabel.value = ''
+      } else {
+        bestLabel.value = `${fmtMs(prev.ms)} · ${prev.strokes} strokes`
+      }
+    } catch {
+      bestLabel.value = ''
+    }
+    if (totalStrokes.value <= totalPar.value || isNewRecord.value) burstConfetti({ count: 140, power: 1.1 })
     return
   }
   holeIndex.value += 1
@@ -626,6 +660,9 @@ const newCourse = () => {
   holeIndex.value = 0
   totalStrokes.value = 0
   totalPar.value = 0
+  elapsedMs.value = 0
+  isNewRecord.value = false
+  bestLabel.value = ''
   loadHole()
 }
 
@@ -678,10 +715,14 @@ onBeforeUnmount(() => {
             <li>Release to shoot. A tiny drag cancels.</li>
             <li>You can swing again while the ball is still rolling (it costs a stroke) — but not while it's mid-air.</li>
           </ul>
+          <h3>Speed run</h3>
+          <ul>
+            <li>The clock starts on your first putt and runs while you play (it pauses on the scorecards). Fastest time for a course is saved as its record — strokes are only half the game.</li>
+          </ul>
           <h3>The course</h3>
           <ul>
             <li>From hole 2 the straight line to the cup is always blocked — read the walls and play the banks.</li>
-            <li>Greens aren't always square: corner bites and side notches make Ls, doglegs and waists. Their timber rails bounce like any wall — new bank angles.</li>
+            <li>Every course deals the full deck of shapes across its nine greens: an L, a donut, a figure-eight, a serpent, a W, an hourglass pinch and an amoeba. Timber-railed edges bounce like any wall; torn dark edges are drop-offs.</li>
             <li><strong>Water</strong> (blue) swallows the ball: back to the tee, swing spent.</li>
             <li><strong>Sand</strong> (tan) drags hard — momentum goes there to die.</li>
             <li><strong>Sweeping timber</strong> slides across the green; time your shot.</li>
@@ -704,6 +745,7 @@ onBeforeUnmount(() => {
         <v-chip size="small" variant="tonal">Par {{ par }}</v-chip>
         <div class="text-body-2">Strokes: <span class="font-weight-bold">{{ strokes }}</span></div>
         <v-spacer />
+        <div class="text-body-2 font-weight-bold tabular"><v-icon icon="mdi-timer-outline" size="small" /> {{ timeLabel }}</div>
         <div class="text-body-2 text-medium-emphasis">Total {{ totalStrokes }} ({{ toPar }})</div>
       </div>
     </div>
@@ -732,6 +774,9 @@ onBeforeUnmount(() => {
       <div v-else-if="phase === 'done'" class="overlay">
         <p class="text-h4 mb-1">{{ courseMsg?.term ?? 'Course complete!' }}</p>
         <p class="text-body-1 mb-1">{{ courseMsg?.blurb }}</p>
+        <p class="text-h5 mb-1"><v-icon icon="mdi-timer-outline" size="small" /> {{ timeLabel }}</p>
+        <p v-if="isNewRecord" class="text-body-1 mb-1 text-amber">⚡ New course record!</p>
+        <p v-else-if="bestLabel" class="text-body-2 text-medium-emphasis mb-1">Course record: {{ bestLabel }}</p>
         <p class="text-body-2 text-medium-emphasis mb-1">{{ totalStrokes }} strokes</p>
         <p class="text-h6 mb-4">{{ toPar === 'even' ? 'Even par' : `${toPar} to par` }}</p>
         <v-btn color="primary" variant="flat" prepend-icon="mdi-refresh" @click="newCourse">New course</v-btn>
@@ -785,6 +830,12 @@ onBeforeUnmount(() => {
 .canvas {
   display: block;
   touch-action: none;
+}
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+.text-amber {
+  color: #fbbf24;
 }
 .overlay {
   position: absolute;

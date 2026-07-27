@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   BALL_RADIUS,
+  SHAPE_TEMPLATES,
+  templateFor,
   CANCEL_POWER,
   CAPTURE_SPEED,
   COURSE_HOLES,
@@ -318,6 +320,22 @@ describe('makeHole (generation)', () => {
     expect(dramatic).toBeGreaterThan(15) // Ls, serpents, Ws — not nibbles
     expect(islands).toBeGreaterThan(3) // donuts and eights exist
     expect(bigChasms).toBeGreaterThan(3) // some outlines are treacherous, not railed
+  })
+  it('every course deals the full shape deck — an L, O, 8, serpent, W, pinch AND amoeba', () => {
+    for (const seed of SEEDS) {
+      // The deck assigns each template exactly once across holes 3–9.
+      const dealt = new Set<string>()
+      for (let i = 2; i < COURSE_HOLES; i += 1) dealt.add(templateFor(seed, i))
+      expect(dealt.size).toBe(SHAPE_TEMPLATES.length)
+      // And the generated holes actually carry their silhouettes (the sparse
+      // ladder may thin clutter but almost never the shape itself).
+      let shaped = 0
+      for (let i = 2; i < COURSE_HOLES; i += 1) {
+        const h = makeHole(i, seed)
+        if (h.cuts.length + h.voids.length > 0) shaped += 1
+      }
+      expect(shaped, `seed ${seed}`).toBeGreaterThanOrEqual(6)
+    }
   })
   it('every waypoint route is made of genuinely puttable straight legs', () => {
     for (const seed of SEEDS) {

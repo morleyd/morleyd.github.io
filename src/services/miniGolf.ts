@@ -676,53 +676,68 @@ interface ShapePiece {
   kind: 'rail' | 'chasm'
 }
 
+/** The silhouette repertoire. Every course deals ONE of each across its
+ *  shaped holes (see templateFor), so a full round always shows the whole
+ *  menagerie. */
+export const SHAPE_TEMPLATES = ['L', 'donut', 'serpent', 'eight', 'W', 'amoeba', 'pinch'] as const
+export type ShapeTemplate = (typeof SHAPE_TEMPLATES)[number] | 'full'
+
 /**
- * The course silhouette, picked before anything else. Early holes are plain;
- * later ones are mostly DRAMATIC: giant corner Ls, donuts around an island,
- * figure-eights weaving two islands, serpents and Ws snaking between huge
- * side slabs, and amoebas of mixed pieces. Each piece is independently railed
- * or treacherous.
+ * Which silhouette a hole gets: the first two holes are plain, then the seven
+ * templates are dealt as a seed-shuffled deck over holes 3–9 — no repeats, no
+ * course without an 8 or a W or an amoeba.
  */
-function shapePieces(index: number, t: number, rng: () => number): ShapePiece[] {
-  const kindRoll = (): ShapePiece['kind'] => (rng() < 0.3 + 0.2 * t ? 'chasm' : 'rail')
-  let pick = 'full'
-  if (index >= 2) {
-    const pool = index >= 5 ? ['L', 'donut', 'serpent', 'eight', 'W', 'amoeba'] : ['L', 'donut', 'serpent']
-    if (rng() < (index >= 5 ? 0.85 : 0.7)) pick = pool[Math.floor(rng() * pool.length)]
+export function templateFor(seed: string, index: number): ShapeTemplate {
+  if (index < 2) return 'full'
+  const rng = rngFromSeed(`golf-shapes:${seed}`)
+  const deck = [...SHAPE_TEMPLATES]
+  for (let i = deck.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(rng() * (i + 1))
+    ;[deck[i], deck[j]] = [deck[j], deck[i]]
   }
-  switch (pick) {
+  return deck[(index - 2) % deck.length]
+}
+
+/**
+ * Build a template's pieces. These are DEEP: quarter-board Ls, fat islands,
+ * slabs reaching two-thirds of the way across. Each piece independently rolls
+ * railed (timber, bank off it) or chasm (torn edge, fall in).
+ */
+function shapePieces(template: ShapeTemplate, t: number, rng: () => number): ShapePiece[] {
+  const kindRoll = (): ShapePiece['kind'] => (rng() < 0.3 + 0.2 * t ? 'chasm' : 'rail')
+  switch (template) {
     case 'L': {
-      // A giant corner block — nearly a quarter of the board gone.
+      // A giant corner block — a quarter of the board or more, gone.
       const left = rng() < 0.5
       const top = rng() < 0.5
-      const w = 0.42 + rng() * 0.13
-      const h = 0.36 + rng() * 0.12
+      const w = 0.45 + rng() * 0.15
+      const h = 0.38 + rng() * 0.12
       return [{ rect: { x: left ? 0 : 1 - w, y: top ? 0 : 1 - h, w, h }, kind: kindRoll() }]
     }
     case 'donut': {
-      // A central island: play around either side (the O).
-      const w = 0.26 + rng() * 0.1
-      const h = 0.22 + rng() * 0.1
+      // A fat central island: play around either side (the O).
+      const w = 0.3 + rng() * 0.12
+      const h = 0.26 + rng() * 0.1
       return [
         {
-          rect: { x: 0.5 - w / 2 + (rng() - 0.5) * 0.12, y: 0.46 - h / 2 + (rng() - 0.5) * 0.1, w, h },
+          rect: { x: 0.5 - w / 2 + (rng() - 0.5) * 0.1, y: 0.46 - h / 2 + (rng() - 0.5) * 0.1, w, h },
           kind: kindRoll(),
         },
       ]
     }
     case 'eight': {
       // Two stacked islands: weave between them (the 8).
-      const w1 = 0.2 + rng() * 0.06
-      const w2 = 0.2 + rng() * 0.06
+      const w1 = 0.24 + rng() * 0.08
+      const w2 = 0.24 + rng() * 0.08
       return [
-        { rect: { x: 0.5 - w1 / 2 + (rng() - 0.5) * 0.1, y: 0.25, w: w1, h: 0.14 }, kind: kindRoll() },
-        { rect: { x: 0.5 - w2 / 2 + (rng() - 0.5) * 0.1, y: 0.56, w: w2, h: 0.14 }, kind: kindRoll() },
+        { rect: { x: 0.5 - w1 / 2 + (rng() - 0.5) * 0.12, y: 0.24, w: w1, h: 0.15 }, kind: kindRoll() },
+        { rect: { x: 0.5 - w2 / 2 + (rng() - 0.5) * 0.12, y: 0.55, w: w2, h: 0.15 }, kind: kindRoll() },
       ]
     }
     case 'serpent': {
-      // Two opposing slabs: an S-corridor snaking across the whole board.
-      const th = 0.14 + rng() * 0.04
-      const reach = 0.56 + rng() * 0.1
+      // Two opposing slabs reaching well past the middle: a true S-corridor.
+      const th = 0.15 + rng() * 0.04
+      const reach = 0.62 + rng() * 0.08
       const leftFirst = rng() < 0.5
       const y1 = 0.26 + rng() * 0.04
       const y2 = y1 + th + 0.15 + rng() * 0.04
@@ -732,9 +747,9 @@ function shapePieces(index: number, t: number, rng: () => number): ShapePiece[] 
       ]
     }
     case 'W': {
-      // Three alternating slabs: a full zigzag.
+      // Three alternating slabs: a full zigzag, top to bottom.
       const th = 0.11 + rng() * 0.02
-      const reach = 0.52 + rng() * 0.08
+      const reach = 0.56 + rng() * 0.08
       const leftFirst = rng() < 0.5
       const gap = 0.12 + rng() * 0.02
       const y1 = 0.16 + rng() * 0.03
@@ -746,19 +761,32 @@ function shapePieces(index: number, t: number, rng: () => number): ShapePiece[] 
         { rect: { x: leftFirst ? 0 : 1 - reach, y: y3, w: reach, h: th }, kind: kindRoll() },
       ]
     }
+    case 'pinch': {
+      // An hourglass: two slabs squeeze in from both sides, leaving one gate.
+      const th = 0.14 + rng() * 0.04
+      const y = 0.36 + rng() * 0.16
+      const gateX = 0.3 + rng() * 0.4
+      const gate = 0.18 + rng() * 0.08
+      const leftW = Math.max(0.12, gateX - gate / 2)
+      const rightX = Math.min(0.88, gateX + gate / 2)
+      return [
+        { rect: { x: 0, y, w: leftW, h: th }, kind: kindRoll() },
+        { rect: { x: rightX, y, w: 1 - rightX, h: th }, kind: kindRoll() },
+      ]
+    }
     case 'amoeba': {
-      // An irregular organism: a big corner blob, a side pseudopod, an island.
+      // An irregular organism: a big corner blob, a deep side pseudopod, an island.
       const pieces: ShapePiece[] = []
       const cLeft = rng() < 0.5
       const cTop = rng() < 0.5
-      const cw = 0.3 + rng() * 0.12
-      const ch = 0.24 + rng() * 0.1
+      const cw = 0.34 + rng() * 0.14
+      const ch = 0.28 + rng() * 0.1
       pieces.push({ rect: { x: cLeft ? 0 : 1 - cw, y: cTop ? 0 : 1 - ch, w: cw, h: ch }, kind: kindRoll() })
-      const nw = 0.14 + rng() * 0.06
-      const nh = 0.24 + rng() * 0.12
-      const notch: Rect = { x: cLeft ? 1 - nw : 0, y: 0.3 + rng() * 0.25, w: nw, h: nh }
+      const nw = 0.18 + rng() * 0.12
+      const nh = 0.3 + rng() * 0.16
+      const notch: Rect = { x: cLeft ? 1 - nw : 0, y: 0.28 + rng() * 0.25, w: nw, h: nh }
       if (!pieces.some((p) => rectsOverlap(notch, p.rect, 0.12))) pieces.push({ rect: notch, kind: kindRoll() })
-      const iw = 0.15 + rng() * 0.06
+      const iw = 0.16 + rng() * 0.08
       const island: Rect = { x: 0.36 + rng() * 0.2, y: 0.32 + rng() * 0.2, w: iw, h: iw * (0.8 + rng() * 0.4) }
       if (!pieces.some((p) => rectsOverlap(island, p.rect, 0.12))) pieces.push({ rect: island, kind: kindRoll() })
       return pieces
@@ -768,14 +796,20 @@ function shapePieces(index: number, t: number, rng: () => number): ShapePiece[] 
   }
 }
 
-function buildCandidate(index: number, seed: string, salt: number, sparse = 0): Hole | null {
+function buildCandidate(
+  index: number,
+  seed: string,
+  salt: number,
+  sparse = 0,
+  template: ShapeTemplate = 'full',
+): Hole | null {
   const rng = rngFromSeed(`golf:${seed}:${index}:${salt}:${sparse}`)
   const t = index / (COURSE_HOLES - 1) // 0 (first) .. 1 (last): difficulty ramp
 
   // --- Course silhouette first: everything else fits around it. ---------------
-  // sparse >= 2 falls back to a plain board so the retry ladder always ends
-  // somewhere placeable.
-  const pieces = sparse >= 2 ? [] : shapePieces(index, t, rng)
+  // The template survives the whole sparse ladder except the very last rung —
+  // a course should shed clutter, not its shape.
+  const pieces = sparse >= 3 ? [] : shapePieces(template, t, rng)
   const shapeCuts = pieces.filter((p) => p.kind === 'rail').map((p) => p.rect)
   const shapeVoids = pieces.filter((p) => p.kind === 'chasm').map((p) => p.rect)
   const shapeRects = pieces.map((p) => p.rect)
@@ -1058,9 +1092,10 @@ export function makeHole(index: number, seed: string): Hole {
   // finale hole should shed its clutter before it ever concedes a straight ace.
   // A hole is playable when the waypoint router finds ANY multi-leg route; from
   // hole 2 on we additionally demand the straight tee→cup ace be blocked.
-  for (let sparse = 0; sparse <= 2; sparse += 1) {
+  const template = templateFor(seed, index)
+  for (let sparse = 0; sparse <= 3; sparse += 1) {
     for (let salt = 0; salt < 64; salt += 1) {
-      const hole = buildCandidate(index, seed, salt, sparse)
+      const hole = buildCandidate(index, seed, salt, sparse, template)
       if (!hole) continue // silhouette left no room for tee/cup
       if (!routeWaypoints(hole.start, hole)) continue // not connected
       const sol = solveHole(hole)
@@ -1080,7 +1115,7 @@ export function makeHole(index: number, seed: string): Hole {
   // Last resort (no candidate was playable at all): peel obstacles off one
   // layer at a time until a route opens, so even a degenerate seed keeps most
   // of its hole — never a naked green with a free straight shot.
-  const hole = buildCandidate(index, seed, 0) ?? buildCandidate(index, seed, 0, 2)!
+  const hole = buildCandidate(index, seed, 0, 0, template) ?? buildCandidate(index, seed, 0, 3)!
   const peels: Array<() => void> = [
     () => (hole.voids = hole.voids.slice(0, 1)),
     () => (hole.voids = []),
