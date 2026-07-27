@@ -178,6 +178,40 @@ const draw = () => {
     ctx.fill()
   }
 
+  // Shape cuts — the course outline itself. Outside is just... not course:
+  // page-dark, with a timber rail along every face that borders grass (you
+  // bank off these exactly like the outer walls).
+  for (const c of hole.cuts) {
+    const cx0 = c.x * S
+    const cy0 = c.y * S
+    const cw = c.w * S
+    const ch = c.h * S
+    ctx.fillStyle = '#0a0f1e'
+    ctx.fillRect(cx0, cy0, cw, ch)
+    const rail = Math.max(4, S * 0.012)
+    ctx.fillStyle = '#5b3a1e'
+    if (c.x > 0.001) ctx.fillRect(cx0 - 1, cy0, rail, ch) // left face exposed
+    if (c.x + c.w < 0.999) ctx.fillRect(cx0 + cw - rail + 1, cy0, rail, ch) // right face
+    if (c.y > 0.001) ctx.fillRect(cx0, cy0 - 1, cw, rail) // top face
+    if (c.y + c.h < 0.999) ctx.fillRect(cx0, cy0 + ch - rail + 1, cw, rail) // bottom face
+    // A grain line along the longest exposed rail for the hand-laid look.
+    ctx.strokeStyle = 'rgba(0,0,0,0.3)'
+    ctx.lineWidth = 1
+    if (ch >= cw && (c.x > 0.001 || c.x + c.w < 0.999)) {
+      const rx = c.x > 0.001 ? cx0 + rail * 0.45 : cx0 + cw - rail * 0.45
+      ctx.beginPath()
+      ctx.moveTo(rx, cy0 + 3)
+      ctx.lineTo(rx, cy0 + ch - 3)
+      ctx.stroke()
+    } else if (c.y > 0.001 || c.y + c.h < 0.999) {
+      const ry = c.y > 0.001 ? cy0 + rail * 0.45 : cy0 + ch - rail * 0.45
+      ctx.beginPath()
+      ctx.moveTo(cx0 + 3, ry)
+      ctx.lineTo(cx0 + cw - 3, ry)
+      ctx.stroke()
+    }
+  }
+
   // Voids — the green simply isn't there: a dark drop behind a torn-turf edge,
   // with a few cracks running off into the grass.
   for (const v of hole.voids) {
@@ -647,12 +681,13 @@ onBeforeUnmount(() => {
           <h3>The course</h3>
           <ul>
             <li>From hole 2 the straight line to the cup is always blocked — read the walls and play the banks.</li>
+            <li>Greens aren't always square: corner bites and side notches make Ls, doglegs and waists. Their timber rails bounce like any wall — new bank angles.</li>
             <li><strong>Water</strong> (blue) swallows the ball: back to the tee, swing spent.</li>
             <li><strong>Sand</strong> (tan) drags hard — momentum goes there to die.</li>
             <li><strong>Sweeping timber</strong> slides across the green; time your shot.</li>
             <li><strong>Drop-offs</strong> (dark, dashed edge) are missing green — roll in and you fall off, back to the tee. You can't bank off a rail that's fallen away.</li>
             <li><strong>Jump ramps</strong> (amber pads): cross one fast and the ball launches <em>where the chevrons point</em> — over walls, water, everything — until it lands. They rarely point at the flag; read the kicker before you trust it. A slow roll just trundles across.</li>
-            <li>The cup is barely bigger than the ball, and tightens as the course goes on. The black circle is the real capture zone: the ball must be over it, and slow, to drop.</li>
+            <li>The cup is barely bigger than the ball, and tightens as the course goes on. Pass dead over the hole and the ball drops at any speed — but a hot ball grazing the edge lips out.</li>
           </ul>
           <h3>Tips</h3>
           <ul>

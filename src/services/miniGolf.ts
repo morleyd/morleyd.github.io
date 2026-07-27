@@ -87,6 +87,10 @@ export interface Hole {
   /** Regions where the green simply ends — the ball falls off (back to tee). */
   voids: Rect[]
   ramps: Ramp[]
+  /** SHAPE cuts: solid regions outside the course outline, fenced by rails the
+   *  ball banks off — corner bites and side notches turn the square into Ls,
+   *  doglegs and waists. Unlike voids these are safe: you bounce, not fall. */
+  cuts: Rect[]
   par: number
   seed: string
   winnable: boolean
@@ -102,7 +106,11 @@ export const BALL_RADIUS = 0.022
 export const FRICTION = 1.6
 export const STOP_SPEED = 0.02 // below this the ball is considered at rest
 export const MAX_POWER = 1.6 // max launch speed from a full-strength stroke
-export const CAPTURE_SPEED = 0.8 // ball must be slower than this to drop in the cup
+export const CAPTURE_SPEED = 0.9 // a GRAZING ball must be slower than this to drop
+/** Within this fraction of the cup radius the ball is over the hole itself —
+ *  there is nothing under it, so it drops at ANY speed. Only edge grazes can
+ *  stay out by being hot. */
+export const CUP_CORE = 0.6
 export const CANCEL_POWER = 0.06 // drags weaker than this cancel (no stroke)
 export const COURSE_HOLES = 9
 
@@ -112,7 +120,7 @@ export const COURSE_HOLES = 9
 // touching the black gets a small pull so it drops instead of lipping. No
 // long-range suction.
 export const RIM_REACH = 1.5 // rim drag zone, in cup radii
-export const RIM_DRAG = 1.6 // extra exponential drag per second over the rim
+export const RIM_DRAG = 2.4 // extra exponential drag per second over the rim
 export const RIM_PULL = 0.4 // pull acceleration once over the black and slow
 export const PULL_REACH = 1.25 // pull zone, in cup radii (≈ ball touching the black)
 
@@ -265,11 +273,14 @@ export const speed = (v: Vec): number => Math.hypot(v.x, v.y)
 export const airborne = (state: BallState): boolean => (state.air ?? 0) > 0
 export const atRest = (state: BallState): boolean => !airborne(state) && speed(state.v) < STOP_SPEED
 
-/** Whether the ball is over the cup's black and slow enough to be captured.
- *  A flying ball sails over the hole. */
+/** Whether the ball drops: over the hole's CORE it falls at any speed (there
+ *  is nothing under it — a fast ball can't skate across open air), while an
+ *  edge graze needs to be slow or it lips out. A flying ball sails over. */
 export function inCup(state: BallState, hole: Hole): boolean {
   if (airborne(state)) return false
-  return dist(state.p, hole.cup) < hole.cupRadius && speed(state.v) < CAPTURE_SPEED
+  const d = dist(state.p, hole.cup)
+  if (d >= hole.cupRadius) return false
+  return d < hole.cupRadius * CUP_CORE || speed(state.v) < CAPTURE_SPEED
 }
 
 const inHazardKind = (state: BallState, hole: Hole, kind: Hazard['kind']): boolean =>
@@ -307,9 +318,10 @@ export function moverEnvelope(m: MovingWall): Rect {
     : { x: m.base.x, y: m.base.y, w: m.base.w, h: m.base.h + m.amp }
 }
 
-/** All solid rectangles in effect at time `tMs`: static walls + live movers. */
+/** All solid rectangles in effect at time `tMs`: the course outline's shape
+ *  cuts, static walls, and live movers. */
 export function effectiveWalls(hole: Hole, tMs: number): Rect[] {
-  return [...hole.walls, ...hole.movers.map((m) => moverRectAt(m, tMs))]
+  return [...hole.cuts, ...hole.walls, ...hole.movers.map((m) => moverRectAt(m, tMs))]
 }
 
 // ---------------------------------------------------------------------------
@@ -404,7 +416,7 @@ interface Obstacles {
  *  so the hole stays winnable at all times. */
 function holeObstacles(hole: Hole): Obstacles {
   return {
-    rects: [...hole.walls, ...hole.movers.map(moverEnvelope), ...hole.voids],
+    rects: [...hole.cuts, ...hole.walls, ...hole.movers.map(moverEnvelope), ...hole.voids],
     circles: hole.hazards.filter((h) => h.kind === 'water'),
   }
 }
@@ -552,6 +564,42 @@ function buildCandidate(index: number, seed: string, salt: number, sparse = 0): 
     return { x: lx + (-dy / len) * off, y: ly + (dx / len) * off }
   }
 
+  // --- Shape cuts: the course outline itself -----------------------------------
+  // Solid regions outside the course, fenced by rails the ball banks off. From
+  // the second hole on, the board is often not a square: corner bites and side
+  // notches make Ls, doglegs and waisted greens.
+  const cuts: Rect[] = []
+  const cutOk = (c: Rect): boolean => {
+    const grown = { x: c.x - 0.13, y: c.y - 0.13, w: c.w + 0.26, h: c.h + 0.26 }
+    if (pointInRect(start, grown) || pointInRect(cup, grown)) return false
+    return !cuts.some((o) => rectsOverlap(c, o, 0.08))
+  }
+  const addCut = (): void => {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      let c: Rect
+      if (rng() < 0.6) {
+        // Corner bite → L-shaped course.
+        const left = rng() < 0.5
+        const top = rng() < 0.5
+        const w = 0.24 + rng() * 0.2
+        const h = 0.2 + rng() * 0.18
+        c = { x: left ? 0 : 1 - w, y: top ? 0 : 1 - h, w, h }
+      } else {
+        // Side notch → waisted/dogleg course.
+        const left = rng() < 0.5
+        const w = 0.12 + rng() * 0.08
+        const h = 0.28 + rng() * 0.2
+        c = { x: left ? 0 : 1 - w, y: 0.15 + rng() * Math.max(0.05, 0.7 - h), w, h }
+      }
+      if (cutOk(c)) {
+        cuts.push(c)
+        return
+      }
+    }
+  }
+  if (index >= 1 && rng() < 0.45 + 0.35 * t) addCut()
+  if (index >= 4 && sparse < 2 && rng() < 0.4) addCut()
+
   // --- Walls -----------------------------------------------------------------
   // From hole 2 on, BLOCKER bars are laid across the direct tee→cup line so the
   // straight ace is gone and the hole plays off the rails. Decoration walls
@@ -572,7 +620,8 @@ function buildCandidate(index: number, seed: string, salt: number, sparse = 0): 
     const cand: Rect = { x: bx, y: my - 0.0175, w, h: 0.035 }
     // The clamp near an edge can slide the bar off the line — recenter if so.
     if (!segHitsRect(start, cup, cand, BALL_RADIUS)) cand.x = clamp(mx - w / 2, 0, 1 - w)
-    if (!overlapsExisting(cand)) walls.push(cand)
+    // A bar swallowed by a shape cut is dead weight — the cut already blocks.
+    if (!overlapsExisting(cand) && !cuts.some((c) => rectsOverlap(cand, c, 0))) walls.push(cand)
   }
 
   // --- Moving walls -------------------------------------------------------------
@@ -591,10 +640,12 @@ function buildCandidate(index: number, seed: string, salt: number, sparse = 0): 
       const amp = 0.3 + rng() * 0.18
       base.x = clamp(0.06 + rng() * (1 - base.w - amp - 0.12), 0.03, 1 - base.w - amp - 0.03)
       const m: MovingWall = { base, axis: 'x', amp, speed: 0.9 + rng() * 1.1, phase: rng() * 6.28 }
-      // The sweep must not stack on the blockers or another mover's sweep.
+      // The sweep must not stack on the blockers, the shape cuts, or another
+      // mover's sweep.
       const env = moverEnvelope(m)
       if (
         !walls.some((w) => rectsOverlap(env, w)) &&
+        !cuts.some((c) => rectsOverlap(env, c)) &&
         !movers.some((o) => rectsOverlap(env, moverEnvelope(o)))
       ) {
         movers.push(m)
@@ -617,7 +668,11 @@ function buildCandidate(index: number, seed: string, salt: number, sparse = 0): 
       const h = 0.12 + rng() * (0.12 + t * 0.1)
       cand = { x: clamp(0.15 + rng() * 0.66, 0.05, 0.92), y: bandY - h / 2, w: 0.035, h }
     }
-    if (!overlapsExisting(cand) && !movers.some((m) => rectsOverlap(cand, moverEnvelope(m))))
+    if (
+      !overlapsExisting(cand) &&
+      !cuts.some((c) => rectsOverlap(cand, c)) &&
+      !movers.some((m) => rectsOverlap(cand, moverEnvelope(m)))
+    )
       walls.push(cand)
   }
 
@@ -640,6 +695,9 @@ function buildCandidate(index: number, seed: string, salt: number, sparse = 0): 
         pointInRect(p, { x: w.x - grown, y: w.y - grown, w: w.w + 2 * grown, h: w.h + 2 * grown }),
       )
     )
+      return false
+    // Fully on the course: nowhere near off the outline's shape cuts.
+    if (cuts.some((c) => pointInRect(p, { x: c.x - r, y: c.y - r, w: c.w + 2 * r, h: c.h + 2 * r })))
       return false
     const bounds = { x: p.x - r, y: p.y - r, w: r * 2, h: r * 2 }
     if (movers.some((m) => rectsOverlap(moverEnvelope(m), bounds, 0))) return false
@@ -668,6 +726,7 @@ function buildCandidate(index: number, seed: string, salt: number, sparse = 0): 
   const voidOk = (v: Rect): boolean => {
     const grown = { x: v.x - 0.1, y: v.y - 0.1, w: v.w + 0.2, h: v.h + 0.2 }
     if (pointInRect(start, grown) || pointInRect(cup, grown)) return false
+    if (cuts.some((c) => rectsOverlap(v, c, 0.06))) return false
     if (walls.some((w) => rectsOverlap(v, w))) return false
     if (movers.some((m) => rectsOverlap(v, moverEnvelope(m)))) return false
     if (hazards.some((h) => pointInRect(h.p, { x: v.x - h.r, y: v.y - h.r, w: v.w + 2 * h.r, h: v.h + 2 * h.r })))
@@ -706,23 +765,32 @@ function buildCandidate(index: number, seed: string, salt: number, sparse = 0): 
   // for the dream ace. Reading where the chevrons actually point is the skill.
   const ramps: Ramp[] = []
   if (index >= 6) {
-    const u = 0.16 + rng() * 0.12
-    const off = (rng() < 0.5 ? -1 : 1) * (0.04 + rng() * 0.12)
-    const p = lanePoint(u, off)
-    const rect: Rect = { x: clamp(p.x - 0.05, 0.02, 0.88), y: clamp(p.y - 0.035, 0.02, 0.91), w: 0.1, h: 0.07 }
-    const center = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 }
-    // Facing: toward the cup, then rotated by a healthy random skew (±15°–49°,
-    // with a rare ~1-in-6 true liner at only a few degrees off).
-    const toCup = Math.atan2(cup.y - center.y, cup.x - center.x)
-    const skew = rng() < 0.17 ? (rng() - 0.5) * 0.12 : (rng() < 0.5 ? -1 : 1) * (0.26 + rng() * 0.6)
-    const ang = toCup + skew
-    const dir: Vec = { x: Math.cos(ang), y: Math.sin(ang) }
-    const clearOfEverything =
-      !walls.some((w) => rectsOverlap(rect, w)) &&
-      !movers.some((m) => rectsOverlap(rect, moverEnvelope(m))) &&
-      !voids.some((v) => rectsOverlap(rect, v)) &&
-      !hazards.some((h) => dist(center, h.p) < h.r + 0.09)
-    if (clearOfEverything) ramps.push({ rect, dir })
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const u = 0.14 + rng() * 0.16
+      // Beside the tee line, never ON it: a kicker on the safe line would turn
+      // the guaranteed route into a lottery (any firm putt gets hijacked).
+      const off = (rng() < 0.5 ? -1 : 1) * (0.1 + rng() * 0.1)
+      const p = lanePoint(u, off)
+      const rect: Rect = { x: clamp(p.x - 0.05, 0.02, 0.88), y: clamp(p.y - 0.035, 0.02, 0.91), w: 0.1, h: 0.07 }
+      if (segHitsRect(start, cup, rect, BALL_RADIUS * 2)) continue
+      const center = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 }
+      // Facing: toward the cup, then rotated by a healthy random skew (±15°–49°,
+      // with a rare ~1-in-6 true liner at only a few degrees off).
+      const toCup = Math.atan2(cup.y - center.y, cup.x - center.x)
+      const skew = rng() < 0.17 ? (rng() - 0.5) * 0.12 : (rng() < 0.5 ? -1 : 1) * (0.26 + rng() * 0.6)
+      const ang = toCup + skew
+      const dir: Vec = { x: Math.cos(ang), y: Math.sin(ang) }
+      const clearOfEverything =
+        !walls.some((w) => rectsOverlap(rect, w)) &&
+        !cuts.some((c) => rectsOverlap(rect, c)) &&
+        !movers.some((m) => rectsOverlap(rect, moverEnvelope(m))) &&
+        !voids.some((v) => rectsOverlap(rect, v)) &&
+        !hazards.some((h) => dist(center, h.p) < h.r + 0.09)
+      if (clearOfEverything) {
+        ramps.push({ rect, dir })
+        break
+      }
+    }
   }
 
   return {
@@ -735,6 +803,7 @@ function buildCandidate(index: number, seed: string, salt: number, sparse = 0): 
     movers,
     voids,
     ramps,
+    cuts,
     par: 2,
     seed,
     winnable: false,
@@ -745,6 +814,7 @@ function buildCandidate(index: number, seed: string, salt: number, sparse = 0): 
  *  The safety net when random layouts refuse to be solvable. */
 function clearBlockers(hole: Hole): void {
   const line = (obs: Obstacles) => clearPath(hole.start, hole.cup, obs)
+  hole.cuts = hole.cuts.filter((c) => line({ rects: [c], circles: [] }))
   hole.walls = hole.walls.filter((w) => line({ rects: [w], circles: [] }))
   hole.hazards = hole.hazards.filter(
     (c) => c.kind === 'sand' || line({ rects: [], circles: [{ p: c.p, r: c.r }] }),
@@ -791,6 +861,8 @@ export function makeHole(index: number, seed: string): Hole {
     () => (hole.voids = []),
     () => (hole.movers = hole.movers.slice(0, 1)),
     () => (hole.movers = []),
+    () => (hole.cuts = hole.cuts.slice(0, 1)),
+    () => (hole.cuts = []),
     () => (hole.walls = hole.walls.slice(0, Math.max(1, hole.walls.length - 1))),
     () => (hole.walls = hole.walls.slice(0, 1)),
   ]

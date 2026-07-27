@@ -47,6 +47,7 @@ const bareHole = (over: Partial<Hole> = {}): Hole => ({
   movers: [],
   voids: [],
   ramps: [],
+  cuts: [],
   par: 2,
   seed: 's',
   winnable: true,
@@ -89,8 +90,14 @@ describe('cup capture (the black circle is the real capture zone)', () => {
       inCup({ p: { x: 0.5 + hole.cupRadius * 0.9, y: 0.5 }, v: { x: 0.1, y: 0 } }, hole),
     ).toBe(true)
   })
-  it('rejects a fast ball over the cup (lips out)', () => {
-    expect(inCup({ p: { x: 0.5, y: 0.5 }, v: { x: CAPTURE_SPEED + 0.1, y: 0 } }, hole)).toBe(false)
+  it('a fast ball dead over the hole drops (nothing under it) — a hot graze lips out', () => {
+    // Dead center: any speed falls in.
+    expect(inCup({ p: { x: 0.5, y: 0.5 }, v: { x: MAX_POWER, y: 0 } }, hole)).toBe(true)
+    // Grazing the black's edge while hot: stays out.
+    const graze = { x: 0.5 + hole.cupRadius * 0.8, y: 0.5 }
+    expect(inCup({ p: graze, v: { x: CAPTURE_SPEED + 0.1, y: 0 } }, hole)).toBe(false)
+    // The same graze, slow: drops.
+    expect(inCup({ p: graze, v: { x: 0.2, y: 0 } }, hole)).toBe(true)
   })
   it('rejects a ball just OUTSIDE the black — no long-range suction', () => {
     const p = { x: 0.5 + hole.cupRadius * 1.05, y: 0.5 }
@@ -109,11 +116,11 @@ describe('cup capture (the black circle is the real capture zone)', () => {
     const next = step(slow, [], 8, hole)
     expect(next.v.x).toBeGreaterThan(0) // tugged toward the center
   })
-  it('a firm straight putt sinks; a full-power blast skates over on the first pass', () => {
-    // Roll straight at the cup; report whether it dropped BEFORE bouncing off
-    // the far wall (rebound sinks are legitimate golf, not suction).
-    const firstPassSinks = (v0: number): boolean => {
-      let ball: BallState = { p: { x: 0.5, y: 0.78 }, v: { x: 0, y: -v0 } }
+  it('putts over the hole drop at any speed; hot edge-grazes skate past', () => {
+    // Roll straight up the board at the given x; report whether it dropped
+    // BEFORE bouncing off the far wall (rebound sinks are legitimate golf).
+    const firstPassSinks = (v0: number, x: number): boolean => {
+      let ball: BallState = { p: { x, y: 0.78 }, v: { x: 0, y: -v0 } }
       for (let i = 0; i < 3000; i += 1) {
         ball = step(ball, [], 8, hole)
         if (inCup(ball, hole)) return true
@@ -121,8 +128,9 @@ describe('cup capture (the black circle is the real capture zone)', () => {
       }
       return false
     }
-    expect(firstPassSinks(1.05)).toBe(true) // measured pace drops in
-    expect(firstPassSinks(MAX_POWER)).toBe(false) // hammering it skates over the hole
+    expect(firstPassSinks(1.05, 0.5)).toBe(true) // measured pace drops in
+    expect(firstPassSinks(MAX_POWER, 0.5)).toBe(true) // dead-center blast STILL drops — no skating over open air
+    expect(firstPassSinks(MAX_POWER, 0.5 + hole.cupRadius * 0.85)).toBe(false) // hot graze lips out
   })
   it('a flying ball sails over the cup', () => {
     expect(inCup({ p: { x: 0.5, y: 0.5 }, v: { x: 0.1, y: 0 }, air: 200 }, hole)).toBe(false)
@@ -279,6 +287,37 @@ describe('makeHole (generation)', () => {
     expect(late).toBeGreaterThan(0.65)
     expect(late).toBeGreaterThan(early)
   })
+  it('the board is often not a square: shape cuts appear, clear of tee and cup, and are solid', () => {
+    let found = 0
+    for (const seed of [...SEEDS, 'r1', 'r2', 'r3', 'r4', 'r5']) {
+      for (let i = 0; i < COURSE_HOLES; i += 1) {
+        const h = makeHole(i, seed)
+        for (const c of h.cuts) {
+          found += 1
+          // Tee and cup are never inside (or hugging) a cut.
+          expect(c.x <= h.start.x && h.start.x <= c.x + c.w && c.y <= h.start.y && h.start.y <= c.y + c.h).toBe(false)
+          expect(c.x <= h.cup.x && h.cup.x <= c.x + c.w && c.y <= h.cup.y && h.cup.y <= c.y + c.h).toBe(false)
+          // Anchored to the board edge (it's the outline, not an island).
+          const onEdge = c.x <= 0.001 || c.x + c.w >= 0.999 || c.y <= 0.001 || c.y + c.h >= 0.999
+          expect(onEdge).toBe(true)
+        }
+        // Cuts are solid: they participate in the physics wall set.
+        for (const c of h.cuts) expect(effectiveWalls(h, 0)).toContainEqual(c)
+      }
+    }
+    expect(found).toBeGreaterThan(10)
+  })
+  it('a ball rolled at a shape cut banks off its rail instead of entering', () => {
+    const h = bareHole({ cuts: [{ x: 0, y: 0.3, w: 0.2, h: 0.3 }] })
+    let ball: BallState = { p: { x: 0.5, y: 0.45 }, v: { x: -1.2, y: 0 } }
+    for (let i = 0; i < 2000; i += 1) {
+      ball = step(ball, effectiveWalls(h, 0), 8, h)
+      // Never inside the cut.
+      expect(ball.p.x >= 0.2 - 0.001 || ball.p.y < 0.3 || ball.p.y > 0.6).toBe(true)
+      if (atRest(ball)) break
+    }
+    expect(ball.p.x).toBeGreaterThan(0.2) // came to rest on the course side
+  })
   it('ramps usually do NOT point at the flag (and dir is a unit vector)', () => {
     let skewed = 0
     const ramps: Array<{ ang: number }> = []
@@ -367,10 +406,13 @@ describe('winnability + no free straight shots', () => {
       }
     }
   })
-  it('no hole past the first is ever a naked green (walls always present)', () => {
+  it('no hole past the first is ever a naked green (walls or shape cuts present)', () => {
     for (const seed of [...SEEDS, 'r1', 'r2', 'r3', 'r4', 'r5', 'qqqq', '01234']) {
       for (let i = 1; i < COURSE_HOLES; i += 1) {
-        expect(makeHole(i, seed).walls.length, `seed ${seed} hole ${i + 1}`).toBeGreaterThan(0)
+        const h = makeHole(i, seed)
+        // A cut counts as structure: an L-course dogleg blocks the line even
+        // with no bars on the green.
+        expect(h.walls.length + h.cuts.length, `seed ${seed} hole ${i + 1}`).toBeGreaterThan(0)
       }
     }
   })
@@ -460,8 +502,14 @@ describe('simulated player completes every course', () => {
     let ball: BallState = { p: { ...hole.start }, v: { x: 0, y: 0 }, air: 0 }
     let simMs = 0
     for (let stroke = 1; stroke <= 14; stroke += 1) {
-      const target = routeTarget(ball.p, hole) ?? hole.cup
+      // Plan from here; if boxed in (no single-bank route), play a
+      // repositioning shot back toward the tee's guaranteed route — what a
+      // human does — before resorting to firing blind at the cup.
+      const target = routeTarget(ball.p, hole) ?? routeTarget(hole.start, hole) ?? { ...hole.cup }
       const viaBank = target.x !== hole.cup.x || target.y !== hole.cup.y
+      // A struggling human varies the line a touch instead of repeating the
+      // exact shot — mirror that so one bad interaction can't loop forever.
+      if (stroke > 4) target.x += ((stroke % 3) - 1) * 0.02
       const carry = viaBank
         ? FRICTION * Math.hypot(hole.cup.x - target.x, hole.cup.y - target.y) + 0.1
         : 0.12
