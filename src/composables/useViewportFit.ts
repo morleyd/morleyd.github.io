@@ -14,8 +14,11 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
  * @param aspect        board width / height.
  * @param reserveBottom space (px) used by anything BELOW the board (controls,
  *                      footer, page padding). Everything ABOVE is measured live.
+ * @param marginX       minimum free space (px) kept on EACH side of the board —
+ *                      room for pull-back drags to travel past the board edge
+ *                      on touch screens. Moot whenever height is the constraint.
  */
-export function useViewportFit(aspect: number, reserveBottom = 80) {
+export function useViewportFit(aspect: number, reserveBottom = 80, marginX = 0) {
   const el = ref<HTMLElement | null>(null)
   const h = ref(320)
   const w = ref(Math.round(320 * aspect))
@@ -35,8 +38,9 @@ export function useViewportFit(aspect: number, reserveBottom = 80) {
       document.documentElement.clientHeight || Infinity,
     )
     const availH = viewportH - top - reserveBottom
-    // Fill the height, but never let the proportional width overflow the parent.
-    const height = Math.max(140, Math.floor(Math.min(availH, availW / aspect)))
+    // Fill the height, but never let the proportional width overflow the parent
+    // (or eat into the enforced side margins).
+    const height = Math.max(140, Math.floor(Math.min(availH, (availW - 2 * marginX) / aspect)))
     h.value = height
     w.value = Math.round(height * aspect)
   }

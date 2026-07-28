@@ -22,8 +22,11 @@
  * The cup is honest: the black circle you see IS the capture zone. The ball
  * has to be over the black — and slow — to drop; there is no long-range pull.
  *
- * Coordinates are fractions of the (square) play area: x,y in [0,1]. Holes run
- * bottom (tee, larger y) to top (cup, smaller y). Velocities are per second.
+ * Coordinates are fractions of the board WIDTH: x in [0,1], y in [0, WORLD_H].
+ * The board is portrait (taller than wide) so phones keep free margin beside it
+ * to drag through — a horizontal putt near a side wall needs somewhere for the
+ * finger to go. Holes run bottom (tee, larger y) to top (cup, smaller y).
+ * Velocities are per second, in the same width-relative units.
  */
 
 import { rngFromSeed } from './seed'
@@ -96,6 +99,9 @@ export interface Hole {
   winnable: boolean
 }
 
+/** Board aspect: 1 wide × WORLD_H tall. Portrait uses phones' spare vertical
+ *  space and leaves horizontal margin beside the board for pull-back drags. */
+export const WORLD_H = 1.5
 export const BALL_RADIUS = 0.022
 // Friction sets the maximum roll: exponential drag loses speed linearly with
 // DISTANCE (dv/dx = -FRICTION), so a full-power putt travels MAX_POWER/FRICTION
@@ -131,7 +137,10 @@ export const RAMP_AIR_PER_SPEED = 380 // ms of flight per unit of speed
 export const RAMP_AIR_MAX = 620 // flight time cap (ms)
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
-const clamp01 = (v: number, r: number) => Math.max(r, Math.min(1 - r, v))
+// Axis-specific board clamps: the two axes have different bounds, so the axis
+// is in the name — reaching for the wrong one shouldn't be writable.
+const clampX = (v: number, r: number) => clamp(v, r, 1 - r)
+const clampY = (v: number, r: number) => clamp(v, r, WORLD_H - r)
 const dist = (a: Vec, b: Vec) => Math.hypot(a.x - b.x, a.y - b.y)
 
 const pointInRect = (p: Vec, r: Rect): boolean =>
@@ -154,8 +163,8 @@ export function collide(state: BallState, walls: Rect[]): BallState {
   if (py < r) {
     py = r
     vy = Math.abs(vy)
-  } else if (py > 1 - r) {
-    py = 1 - r
+  } else if (py > WORLD_H - r) {
+    py = WORLD_H - r
     vy = -Math.abs(vy)
   }
 
@@ -193,8 +202,8 @@ export function collide(state: BallState, walls: Rect[]): BallState {
   }
 
   // Re-clamp: pushing out of an inner wall must never leave the play area.
-  px = Math.max(r, Math.min(1 - r, px))
-  py = Math.max(r, Math.min(1 - r, py))
+  px = clampX(px, r)
+  py = clampY(py, r)
 
   return { p: { x: px, y: py }, v: { x: vx, y: vy }, air: state.air }
 }
@@ -442,7 +451,7 @@ export function bankPoint(start: Vec, cup: Vec, axis: 'x' | 'y', at: number): Ve
     const t = (at - start.x) / denom
     if (t <= 0 || t >= 1) return null
     const y = start.y + t * (cup.y - start.y)
-    if (y < r || y > 1 - r) return null
+    if (y < r || y > WORLD_H - r) return null
     return { x: at, y }
   }
   const mirroredY = 2 * at - cup.y
@@ -459,7 +468,7 @@ export const RAILS: Array<['x' | 'y', number]> = [
   ['x', BALL_RADIUS],
   ['x', 1 - BALL_RADIUS],
   ['y', BALL_RADIUS],
-  ['y', 1 - BALL_RADIUS],
+  ['y', WORLD_H - BALL_RADIUS],
 ]
 
 /** A rail can't be banked off where the green has fallen away into a void. */
@@ -505,14 +514,15 @@ export function solveHole(hole: Hole): Solution | null {
 // player would actually putt.
 // ---------------------------------------------------------------------------
 
-const NAV_N = 30
+const NAV_N = 30 // columns; rows scale with the board's aspect
+const NAV_M = Math.round(NAV_N * WORLD_H)
 
 /** Straight putting legs from `from` to the cup through free space (the cup is
  *  the last entry), or null when no route exists at all. */
 export function routeWaypoints(from: Vec, hole: Hole): Vec[] | null {
   const obs = holeObstacles(hole)
   const blockedAt = (x: number, y: number): boolean => {
-    if (x < BALL_RADIUS || x > 1 - BALL_RADIUS || y < BALL_RADIUS || y > 1 - BALL_RADIUS) return true
+    if (x < BALL_RADIUS || x > 1 - BALL_RADIUS || y < BALL_RADIUS || y > WORLD_H - BALL_RADIUS) return true
     for (const r of obs.rects) {
       if (
         x > r.x - PLAN_MARGIN &&
@@ -529,22 +539,23 @@ export function routeWaypoints(from: Vec, hole: Hole): Vec[] | null {
   }
 
   const cx = (i: number) => i / (NAV_N - 1)
-  const blocked = new Uint8Array(NAV_N * NAV_N)
-  for (let j = 0; j < NAV_N; j += 1) {
-    for (let i = 0; i < NAV_N; i += 1) blocked[j * NAV_N + i] = blockedAt(cx(i), cx(j)) ? 1 : 0
+  const cy = (j: number) => (j / (NAV_M - 1)) * WORLD_H
+  const blocked = new Uint8Array(NAV_N * NAV_M)
+  for (let j = 0; j < NAV_M; j += 1) {
+    for (let i = 0; i < NAV_N; i += 1) blocked[j * NAV_N + i] = blockedAt(cx(i), cy(j)) ? 1 : 0
   }
 
   // Snap an arbitrary point to the nearest free cell (spiralling outward).
   const cellFor = (p: Vec): number => {
     const i0 = Math.round(p.x * (NAV_N - 1))
-    const j0 = Math.round(p.y * (NAV_N - 1))
-    for (let ring = 0; ring < NAV_N; ring += 1) {
+    const j0 = Math.round((p.y / WORLD_H) * (NAV_M - 1))
+    for (let ring = 0; ring < Math.max(NAV_N, NAV_M); ring += 1) {
       for (let dj = -ring; dj <= ring; dj += 1) {
         for (let di = -ring; di <= ring; di += 1) {
           if (Math.max(Math.abs(di), Math.abs(dj)) !== ring) continue
           const i = i0 + di
           const j = j0 + dj
-          if (i < 0 || i >= NAV_N || j < 0 || j >= NAV_N) continue
+          if (i < 0 || i >= NAV_N || j < 0 || j >= NAV_M) continue
           if (!blocked[j * NAV_N + i]) return j * NAV_N + i
         }
       }
@@ -557,7 +568,7 @@ export function routeWaypoints(from: Vec, hole: Hole): Vec[] | null {
   if (startCell < 0 || goalCell < 0) return null
 
   // 4-connected BFS (no diagonal corner-squeezes).
-  const prev = new Int32Array(NAV_N * NAV_N).fill(-1)
+  const prev = new Int32Array(NAV_N * NAV_M).fill(-1)
   prev[startCell] = startCell
   const queue = [startCell]
   let found = startCell === goalCell
@@ -573,7 +584,7 @@ export function routeWaypoints(from: Vec, hole: Hole): Vec[] | null {
     ]) {
       const ni = ci + di
       const nj = cj + dj
-      if (ni < 0 || ni >= NAV_N || nj < 0 || nj >= NAV_N) continue
+      if (ni < 0 || ni >= NAV_N || nj < 0 || nj >= NAV_M) continue
       const n = nj * NAV_N + ni
       if (blocked[n] || prev[n] >= 0) continue
       prev[n] = cur
@@ -589,7 +600,7 @@ export function routeWaypoints(from: Vec, hole: Hole): Vec[] | null {
   // Cell path goal→start, then re-ordered start→goal as points.
   const pts: Vec[] = [{ ...hole.cup }]
   for (let c = goalCell; c !== startCell; c = prev[c]) {
-    pts.push({ x: cx(c % NAV_N), y: cx(Math.floor(c / NAV_N)) })
+    pts.push({ x: cx(c % NAV_N), y: cy(Math.floor(c / NAV_N)) })
   }
   pts.push({ ...from })
   pts.reverse()
@@ -702,6 +713,10 @@ export function templateFor(seed: string, index: number): ShapeTemplate {
  * Build a template's pieces. These are DEEP: quarter-board Ls, fat islands,
  * slabs reaching two-thirds of the way across. Each piece independently rolls
  * railed (timber, bank off it) or chasm (torn edge, fall in).
+ *
+ * NOTE: rects here are authored in the UNIT square (y and h in [0,1], "1" =
+ * full board height) — the caller stretches them onto the portrait board by
+ * WORLD_H. New templates must NOT use world-space y values.
  */
 function shapePieces(template: ShapeTemplate, t: number, rng: () => number): ShapePiece[] {
   const kindRoll = (): ShapePiece['kind'] => (rng() < 0.3 + 0.2 * t ? 'chasm' : 'rail')
@@ -808,22 +823,26 @@ function buildCandidate(
 
   // --- Course silhouette first: everything else fits around it. ---------------
   // The template survives the whole sparse ladder except the very last rung —
-  // a course should shed clutter, not its shape.
-  const pieces = sparse >= 3 ? [] : shapePieces(template, t, rng)
+  // a course should shed clutter, not its shape. Templates are authored in the
+  // unit square and stretched onto the portrait board.
+  const pieces = (sparse >= 3 ? [] : shapePieces(template, t, rng)).map((p) => ({
+    kind: p.kind,
+    rect: { x: p.rect.x, y: p.rect.y * WORLD_H, w: p.rect.w, h: p.rect.h * WORLD_H },
+  }))
   const shapeCuts = pieces.filter((p) => p.kind === 'rail').map((p) => p.rect)
   const shapeVoids = pieces.filter((p) => p.kind === 'chasm').map((p) => p.rect)
   const shapeRects = pieces.map((p) => p.rect)
 
   // Tee and cup live in the silhouette's free space (sampled, with margin).
-  const startY = 0.8 + t * 0.1
-  const cupY = 0.28 - t * 0.16
+  const startY = (0.8 + t * 0.1) * WORLD_H
+  const cupY = (0.28 - t * 0.16) * WORLD_H
   const clearOfShape = (p: Vec, margin: number): boolean =>
     !shapeRects.some((r) =>
       pointInRect(p, { x: r.x - margin, y: r.y - margin, w: r.w + 2 * margin, h: r.h + 2 * margin }),
     )
   const samplePoint = (y: number, spread: number, edge: number): Vec | null => {
     for (let attempt = 0; attempt < 14; attempt += 1) {
-      const p: Vec = { x: clamp01(0.5 + (rng() - 0.5) * spread, edge), y }
+      const p: Vec = { x: clampX(0.5 + (rng() - 0.5) * spread, edge), y }
       if (clearOfShape(p, 0.09)) return p
     }
     return null
@@ -911,7 +930,7 @@ function buildCandidate(
     let cand: Rect
     if (rng() < 0.55) {
       const w = 0.2 + rng() * (0.16 + t * 0.16)
-      cand = { x: clamp01(rng() * (1 - w), 0), y: bandY, w, h: 0.035 }
+      cand = { x: clampX(rng() * (1 - w), 0), y: bandY, w, h: 0.035 }
     } else {
       const h = 0.12 + rng() * (0.12 + t * 0.1)
       cand = { x: clamp(0.15 + rng() * 0.66, 0.05, 0.92), y: bandY - h / 2, w: 0.035, h }
@@ -931,7 +950,7 @@ function buildCandidate(
   const hazards: Hazard[] = []
   const hazardFits = (p: Vec, r: number): boolean => {
     // The whole pool stays (essentially) on the board — no clipped half-moons.
-    if (p.x < r * 0.9 || p.x > 1 - r * 0.9 || p.y < r * 0.9 || p.y > 1 - r * 0.9) return false
+    if (p.x < r * 0.9 || p.x > 1 - r * 0.9 || p.y < r * 0.9 || p.y > WORLD_H - r * 0.9) return false
     if (dist(p, start) < r + 0.12) return false
     if (dist(p, cup) < r + cupRadius + 0.09) return false
     if (hazards.some((h) => dist(p, h.p) < r + h.r + 0.04)) return false
@@ -965,7 +984,7 @@ function buildCandidate(
           ? lanePoint(0.2 + rng() * 0.6, (rng() < 0.5 ? -1 : 1) * (kind === 'sand' ? rng() * maxOff : 0.08 + rng() * maxOff))
           : { x: 0.1 + rng() * 0.8, y: cup.y + 0.12 + rng() * Math.max(0.1, span - 0.2) }
       if (hazardFits(p, r)) {
-        hazards.push({ p: { x: clamp01(p.x, r * 0.9), y: clamp01(p.y, r * 0.9) }, r, kind })
+        hazards.push({ p: { x: clampX(p.x, r * 0.9), y: clampY(p.y, r * 0.9) }, r, kind })
         return
       }
     }
@@ -998,13 +1017,13 @@ function buildCandidate(
         const top = rng() < 0.5
         const w = 0.22 + rng() * 0.14
         const h = 0.18 + rng() * 0.12
-        v = { x: left ? 0 : 1 - w, y: top ? 0 : 1 - h, w, h }
+        v = { x: left ? 0 : 1 - w, y: top ? 0 : WORLD_H - h, w, h }
       } else {
         // Edge shelf: a strip of missing green along one side rail.
         const left = rng() < 0.5
         const w = 0.05 + rng() * 0.025
         const h = 0.26 + rng() * 0.18
-        v = { x: left ? 0 : 1 - w, y: 0.2 + rng() * 0.42, w, h }
+        v = { x: left ? 0 : 1 - w, y: (0.2 + rng() * 0.42) * WORLD_H, w, h }
       }
       if (voidOk(v)) {
         voids.push(v)
@@ -1027,7 +1046,7 @@ function buildCandidate(
       // the guaranteed route into a lottery (any firm putt gets hijacked).
       const off = (rng() < 0.5 ? -1 : 1) * (0.1 + rng() * 0.1)
       const p = lanePoint(u, off)
-      const rect: Rect = { x: clamp(p.x - 0.05, 0.02, 0.88), y: clamp(p.y - 0.035, 0.02, 0.91), w: 0.1, h: 0.07 }
+      const rect: Rect = { x: clamp(p.x - 0.05, 0.02, 0.88), y: clamp(p.y - 0.035, 0.02, WORLD_H - 0.09), w: 0.1, h: 0.07 }
       if (segHitsRect(start, cup, rect, BALL_RADIUS * 2)) continue
       const center = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 }
       // Facing: toward the cup, then rotated by a healthy random skew (±15°–49°,

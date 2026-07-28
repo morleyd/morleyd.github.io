@@ -13,10 +13,11 @@ import GameToolbar from '@/components/GameToolbar.vue'
 import { copyToClipboard } from '@/services/share'
 import { mulberry32, randomSeed, strToSeed } from '@/services/seed'
 import { burstConfetti } from '@/services/confetti'
-import { useSquareFit } from '@/composables/useSquareFit'
+import { useViewportFit } from '@/composables/useViewportFit'
 import {
   BALL_RADIUS,
   COURSE_HOLES,
+  WORLD_H,
   airborne,
   atRest,
   courseResult,
@@ -34,7 +35,13 @@ import {
   type Result,
 } from '@/services/miniGolf'
 
-const { el: boardEl, px: boardPx } = useSquareFit(36)
+// Portrait board (1 × WORLD_H): phones have spare height, and the enforced side
+// margins leave the finger somewhere to go on a horizontal pull-back near a
+// side wall — the whole reason the board isn't a square. Height derives from
+// width (the fit's own h can disagree by a rounding pixel) so boardW is the one
+// source of truth: one watch, no stale canvas on height-only viewport shifts.
+const { el: boardEl, w: boardW } = useViewportFit(1 / WORLD_H, 36, 44)
+const boardH = computed(() => Math.round(boardW.value * WORLD_H))
 
 const route = useRoute()
 const router = useRouter()
@@ -256,21 +263,27 @@ const draw = () => {
   const ctx = canvas.getContext('2d')
   if (!ctx) return
   const dpr = window.devicePixelRatio || 1
-  const S = boardPx.value
-  if (canvas.width !== S * dpr || canvas.height !== S * dpr) {
-    canvas.width = S * dpr
-    canvas.height = S * dpr
+  const S = boardW.value // px per world unit (world is 1 wide × WORLD_H tall)
+  const H = boardH.value
+  // Round the backing-store size: comparing against fractional S*dpr (Android
+  // dprs like 2.625) would mismatch the stored integer and re-allocate the
+  // bitmap on every frame.
+  const pw = Math.round(S * dpr)
+  const ph = Math.round(H * dpr)
+  if (canvas.width !== pw || canvas.height !== ph) {
+    canvas.width = pw
+    canvas.height = ph
   }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
   // Turf: base green with seeded organic mottling instead of ruled stripes —
   // soft light/dark patches like real (imperfectly mowed) grass.
   ctx.fillStyle = '#166534'
-  ctx.fillRect(0, 0, S, S)
+  ctx.fillRect(0, 0, S, H)
   const turf = mulberry32((strToSeed(hole.seed) + hole.index * 7919) >>> 0)
   for (let i = 0; i < 16; i += 1) {
     const bx = turf() * S
-    const by = turf() * S
+    const by = turf() * H
     const br = (0.06 + turf() * 0.12) * S
     ctx.fillStyle = i % 2 === 0 ? 'rgba(255,255,255,0.025)' : 'rgba(0,0,0,0.05)'
     ctx.beginPath()
@@ -293,7 +306,7 @@ const draw = () => {
     if (c.x > 0.001) ctx.fillRect(cx0 - 1, cy0, rail, ch) // left face exposed
     if (c.x + c.w < 0.999) ctx.fillRect(cx0 + cw - rail + 1, cy0, rail, ch) // right face
     if (c.y > 0.001) ctx.fillRect(cx0, cy0 - 1, cw, rail) // top face
-    if (c.y + c.h < 0.999) ctx.fillRect(cx0, cy0 + ch - rail + 1, cw, rail) // bottom face
+    if (c.y + c.h < WORLD_H - 0.001) ctx.fillRect(cx0, cy0 + ch - rail + 1, cw, rail) // bottom face
     // A grain line along the longest exposed rail for the hand-laid look.
     ctx.strokeStyle = 'rgba(0,0,0,0.3)'
     ctx.lineWidth = 1
@@ -303,7 +316,7 @@ const draw = () => {
       ctx.moveTo(rx, cy0 + 3)
       ctx.lineTo(rx, cy0 + ch - 3)
       ctx.stroke()
-    } else if (c.y > 0.001 || c.y + c.h < 0.999) {
+    } else if (c.y > 0.001 || c.y + c.h < WORLD_H - 0.001) {
       const ry = c.y > 0.001 ? cy0 + rail * 0.45 : cy0 + ch - rail * 0.45
       ctx.beginPath()
       ctx.moveTo(cx0 + 3, ry)
@@ -701,7 +714,7 @@ function onPointerUp(e: PointerEvent) {
   detachDrag()
   const putt = planPutt(
     { x: dragCur.x - dragStart.x, y: dragCur.y - dragStart.y },
-    boardPx.value,
+    boardW.value,
     MAX_DRAG_FRAC,
   )
   // A cancel (tiny drag) — or an interaction that resolved into a non-playable
@@ -788,7 +801,7 @@ const share = async () => {
   snackbar.value = true
 }
 
-watch(boardPx, draw)
+watch(boardW, draw)
 
 onMounted(() => {
   const p = typeof route.params.seed === 'string' ? route.params.seed : ''
@@ -906,11 +919,11 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div ref="boardEl" class="stage" :style="{ width: boardPx + 'px', height: boardPx + 'px' }">
+    <div ref="boardEl" class="stage" :style="{ width: boardW + 'px', height: boardH + 'px' }">
       <canvas
         ref="canvasEl"
         class="canvas"
-        :style="{ width: boardPx + 'px', height: boardPx + 'px' }"
+        :style="{ width: boardW + 'px', height: boardH + 'px' }"
         @pointerdown.prevent="onPointerDown"
       />
 

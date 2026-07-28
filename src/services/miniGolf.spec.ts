@@ -10,6 +10,7 @@ import {
   MAX_POWER,
   PULL_REACH,
   RAMP_MIN_SPEED,
+  WORLD_H,
   aimToVelocity,
   airborne,
   atRest,
@@ -63,6 +64,15 @@ describe('collide', () => {
     const out = collide(s, [])
     expect(out.p.x).toBeCloseTo(BALL_RADIUS)
     expect(out.v.x).toBeGreaterThan(0)
+  })
+  it('reflects off the bottom of the portrait board at WORLD_H, not 1', () => {
+    const s: BallState = { p: { x: 0.5, y: WORLD_H - 0.005 }, v: { x: 0, y: 0.4 } }
+    const out = collide(s, [])
+    expect(out.p.y).toBeCloseTo(WORLD_H - BALL_RADIUS)
+    expect(out.v.y).toBeLessThan(0)
+    // ...and a ball rolling around mid-board (y ≈ 1) is NOT at a wall.
+    const mid: BallState = { p: { x: 0.5, y: 1 }, v: { x: 0, y: 0.4 } }
+    expect(collide(mid, [])).toEqual(mid)
   })
   it('reflects off an inner wall along the shallow axis', () => {
     const wall = { x: 0.4, y: 0.4, w: 0.2, h: 0.04 }
@@ -266,6 +276,31 @@ describe('makeHole (generation)', () => {
       expect(makeHole(COURSE_HOLES - 1, seed).cupRadius).toBeLessThan(makeHole(0, seed).cupRadius)
     }
   })
+  it('spreads holes over the full portrait board and never spills past it', () => {
+    for (const seed of SEEDS) {
+      for (let i = 0; i < COURSE_HOLES; i += 1) {
+        const h = makeHole(i, seed)
+        expect(h.start.y, 'the tee uses the extra height').toBeGreaterThan(1)
+        expect(h.start.y).toBeLessThanOrEqual(WORLD_H - BALL_RADIUS)
+        expect(h.cup.y).toBeGreaterThan(0)
+        const rects = [
+          ...h.walls,
+          ...h.cuts,
+          ...h.voids,
+          ...h.ramps.map((r) => r.rect),
+          ...h.movers.map(moverEnvelope),
+        ]
+        for (const r of rects) {
+          expect(r.y).toBeGreaterThanOrEqual(-1e-6)
+          expect(r.y + r.h).toBeLessThanOrEqual(WORLD_H + 1e-4)
+        }
+        for (const hz of h.hazards) {
+          expect(hz.p.y - hz.r * 0.9).toBeGreaterThanOrEqual(-1e-6)
+          expect(hz.p.y + hz.r * 0.9).toBeLessThanOrEqual(WORLD_H + 1e-6)
+        }
+      }
+    }
+  })
   it('the cup is only barely bigger than the ball', () => {
     for (const seed of SEEDS) {
       for (let i = 0; i < COURSE_HOLES; i += 1) {
@@ -311,7 +346,7 @@ describe('makeHole (generation)', () => {
         }
         // Interior islands (donut/eight/amoeba cores) — not edge-anchored.
         for (const r of [...h.cuts, ...h.voids]) {
-          if (r.x > 0.01 && r.x + r.w < 0.99 && r.y > 0.01 && r.y + r.h < 0.99) islands += 1
+          if (r.x > 0.01 && r.x + r.w < 0.99 && r.y > 0.01 && r.y + r.h < WORLD_H - 0.01) islands += 1
           else if (area(r) >= 0.06 && h.voids.includes(r)) bigChasms += 1
         }
       }
