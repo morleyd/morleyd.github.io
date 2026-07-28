@@ -945,7 +945,9 @@ onBeforeUnmount(() => {
           Best stays {{ fmtMs(practiceResult.prev.ms) }} · {{ practiceResult.prev.strokes }}
         </p>
         <p v-else class="text-body-2 text-medium-emphasis mb-1">First time sinking this hole — record set.</p>
-        <div class="d-flex ga-2 mt-3">
+        <!-- flex-wrap: the portrait board is narrower than the pair of buttons
+             on phones, and the stage clips overflow — wrapping stacks them. -->
+        <div class="d-flex ga-2 mt-3 flex-wrap justify-center">
           <v-btn color="primary" variant="flat" prepend-icon="mdi-restart" @click="retryPractice">Retry hole</v-btn>
           <v-btn variant="tonal" prepend-icon="mdi-arrow-left" @click="backToCourse">Back to course</v-btn>
         </div>
@@ -968,7 +970,7 @@ onBeforeUnmount(() => {
         <p v-else-if="bestLabel" class="text-body-2 text-medium-emphasis mb-1">Course record: {{ bestLabel }}</p>
         <p class="text-body-2 text-medium-emphasis mb-1">{{ totalStrokes }} strokes</p>
         <p class="text-h6 mb-4">{{ toPar === 'even' ? 'Even par' : `${toPar} to par` }}</p>
-        <div class="d-flex ga-2">
+        <div class="d-flex ga-2 flex-wrap justify-center">
           <v-btn color="primary" variant="flat" prepend-icon="mdi-timer-refresh-outline" @click="replayCourse">Replay course</v-btn>
           <v-btn variant="tonal" prepend-icon="mdi-refresh" @click="newCourse">New course</v-btn>
         </div>

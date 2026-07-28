@@ -102,7 +102,10 @@ export interface Hole {
 /** Board aspect: 1 wide × WORLD_H tall. Portrait uses phones' spare vertical
  *  space and leaves horizontal margin beside the board for pull-back drags. */
 export const WORLD_H = 1.5
-export const BALL_RADIUS = 0.022
+// Sized for the portrait board: it's narrower than the old square on phones,
+// so the ball carries a slightly larger width-fraction to keep its on-screen
+// size comfortable (~a pixel more than the square-board 0.022).
+export const BALL_RADIUS = 0.0255
 // Friction sets the maximum roll: exponential drag loses speed linearly with
 // DISTANCE (dv/dx = -FRICTION), so a full-power putt travels MAX_POWER/FRICTION
 // = 1.0 board-lengths. Bank routes on later holes are longer than that — they
@@ -419,13 +422,22 @@ interface Obstacles {
 }
 
 /** The obstacle set a putt must avoid: static walls, the full sweep of every
- *  moving wall, every WATER pool, and every void (you can't roll across a
- *  drop-off). Sand only slows, so it doesn't block a route; ramps are flat.
- *  Using mover ENVELOPES keeps a found path valid no matter the wall's phase,
- *  so the hole stays winnable at all times. */
+ *  moving wall, every WATER pool, every void (you can't roll across a
+ *  drop-off) — and every jump RAMP. A ramp doesn't block the ball physically,
+ *  but any planned leg is putted at speed, and a fast ball crossing a kicker
+ *  gets hijacked along the ramp's facing — a guaranteed route that crosses one
+ *  is a lottery, not a guarantee. Sand only slows, so it doesn't block a
+ *  route. Using mover ENVELOPES keeps a found path valid no matter the wall's
+ *  phase, so the hole stays winnable at all times. */
 function holeObstacles(hole: Hole): Obstacles {
   return {
-    rects: [...hole.cuts, ...hole.walls, ...hole.movers.map(moverEnvelope), ...hole.voids],
+    rects: [
+      ...hole.cuts,
+      ...hole.walls,
+      ...hole.movers.map(moverEnvelope),
+      ...hole.voids,
+      ...hole.ramps.map((r) => r.rect),
+    ],
     circles: hole.hazards.filter((h) => h.kind === 'water'),
   }
 }
@@ -850,9 +862,9 @@ function buildCandidate(
   const start = samplePoint(startY, 0.7, BALL_RADIUS * 2)
   const cup = samplePoint(cupY, 0.85, 0.07)
   if (!start || !cup) return null // silhouette left no room — next salt
-  // The cup is barely bigger than the ball (BALL_RADIUS 0.022) and tightens
+  // The cup is barely bigger than the ball (BALL_RADIUS) and tightens
   // further over the course — sinking is an aimed act, not a splash zone.
-  const cupRadius = 0.03 - 0.003 * t
+  const cupRadius = 0.034 - 0.003 * t
   const span = start.y - cup.y
 
   // A point on the direct tee→cup line, offset sideways by `off` (perpendicular).
