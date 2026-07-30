@@ -152,6 +152,22 @@
   -webkit-touch-callout: default;
 }
 
+/* Sliders own their touch gesture completely. `manipulation` (set by the
+   .game-page wildcard above, which overrides the thumb's Vuetify default of
+   `none`) still allows panning — so on a phone, a thumb drag that drifts a few
+   pixels vertically lets the browser claim the gesture for page scroll, the
+   touch is cancelled, and the thumb snaps back to where it started. Vuetify's
+   `pan-y` track default has the same flaw, so this applies to every slider,
+   not just game pages. .v-slider__container is where Vuetify's drag handler
+   lives; scoping to it (not the whole input row) keeps labels/margins
+   scrollable in stacked settings panels. */
+.v-slider__container,
+.v-slider__container *,
+.v-slider.v-input--horizontal .v-slider-track,
+.v-slider.v-input--vertical .v-slider-track {
+  touch-action: none;
+}
+
 @media (max-width: 600px) {
   .page-title {
     font-size: 1.5rem;
