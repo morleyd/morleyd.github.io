@@ -23,6 +23,7 @@ import {
   type Nonogram,
 } from '@/services/nonogram'
 import { patternById, patternsForSize, randomPatternForSize } from '@/services/nonogramPatterns'
+import { recordSolvedPattern, solvedPatternIds } from '@/services/nonogramProgress'
 
 const { el: boardEl, px: boardPx } = useSquareFit(72)
 
@@ -51,11 +52,25 @@ const marks = ref<number[]>([]) // 0 empty · 1 filled · 2 X-marked
 const mode = ref<'fill' | 'mark'>('fill')
 const snackbar = ref(false)
 
-// Pictures the player can pick for the current board size.
+// Which pictures this player has already solved (persisted across visits), so
+// "New puzzle" can serve fresh ones and the picker can show what's done.
+const solvedIds = ref<Set<string>>(solvedPatternIds())
+const currentPatternId = ref('') // id of the picture behind the current puzzle
+const repeatNotice = ref('') // shown when only already-solved pictures remain
+const repeatSnack = ref(false)
+
+// Pictures the player can pick for the current board size (✓ = solved before).
 const patternOptions = computed(() => [
   { title: 'Random', value: 'random' },
-  ...patternsForSize(size.value).map((p) => ({ title: p.name, value: p.id })),
+  ...patternsForSize(size.value).map((p) => ({
+    title: solvedIds.value.has(p.id) ? `${p.name} ✓` : p.name,
+    value: p.id,
+  })),
 ])
+const solvedAtSize = computed(
+  () => patternsForSize(size.value).filter((p) => solvedIds.value.has(p.id)).length,
+)
+const totalAtSize = computed(() => patternsForSize(size.value).length)
 const themeFill = computed(() => THEMES.find((t) => t.id === theme.value)?.fill ?? THEMES[0].fill)
 
 const rows = computed(() => puzzle.value.rows)
@@ -114,11 +129,16 @@ const onVisibility = () => {
   if (document.hidden) stopTimer()
   else startTimer()
 }
-// Stop the clock (and celebrate) the instant the board is solved.
+// Stop the clock (and celebrate) the instant the board is solved, and remember
+// the picture so future "New puzzle" rolls skip it.
 watch(solved, (v) => {
   if (v) {
     stopTimer()
     burstConfetti({ count: 110 })
+    if (currentPatternId.value) {
+      recordSolvedPattern(currentPatternId.value)
+      solvedIds.value = new Set(solvedIds.value).add(currentPatternId.value)
+    }
   }
 })
 
@@ -196,13 +216,37 @@ const build = () => {
   if (p) {
     puzzle.value = nonogramFromPattern(p)
     pictureName.value = p.name
+    currentPatternId.value = p.id
     reset()
     return
   }
   if (pattern.value !== 'random') pattern.value = 'random' // no such picture at this size
   puzzle.value = generateNonogram(size.value, size.value, code.value)
   pictureName.value = ''
+  currentPatternId.value = ''
   reset()
+}
+
+/**
+ * Roll random seeds until one maps to a picture the player hasn't solved yet —
+ * the seed→picture mapping stays deterministic, so the URL still reproduces the
+ * exact puzzle for anyone. When every picture at this size is already solved,
+ * warn that a repeat is coming and accept any seed.
+ */
+const freshSeed = (): string => {
+  const pool = patternsForSize(size.value)
+  const unsolved = pool.filter((p) => !solvedIds.value.has(p.id))
+  if (pool.length && !unsolved.length) {
+    repeatNotice.value = `You've solved all ${pool.length} ${size.value}×${size.value} pictures — here's a repeat!`
+    repeatSnack.value = true
+    return randomSeed()
+  }
+  for (let i = 0; i < 400; i += 1) {
+    const s = randomSeed()
+    const p = randomPatternForSize(size.value, s)
+    if (!p || !solvedIds.value.has(p.id)) return s
+  }
+  return randomSeed() // vanishingly unlikely with any unsolved picture left
 }
 
 // A named picture shares as `@id`; a random puzzle shares its seed code.
@@ -210,7 +254,7 @@ const seedCode = computed(() => (pattern.value === 'random' ? code.value : `@${p
 const syncUrl = () =>
   router.replace({ name: 'nonogram', params: { seed: `${size.value}.${seedCode.value}` } })
 const newGame = () => {
-  if (pattern.value === 'random') code.value = randomSeed()
+  if (pattern.value === 'random') code.value = freshSeed()
   syncUrl()
   build()
 }
@@ -330,6 +374,9 @@ onBeforeUnmount(() => {
               hide-details
               @update:model-value="setPattern"
             />
+            <div class="text-caption text-medium-emphasis mt-1">
+              {{ solvedAtSize }} of {{ totalAtSize }} pictures solved at this size
+            </div>
           </div>
           <div>
             <label class="text-caption text-medium-emphasis d-block mb-1">Fill color</label>
@@ -440,6 +487,7 @@ onBeforeUnmount(() => {
     </v-expand-transition>
 
     <v-snackbar v-model="snackbar" :timeout="2600" color="secondary">Puzzle link copied — share it!</v-snackbar>
+    <v-snackbar v-model="repeatSnack" :timeout="4200" color="warning">{{ repeatNotice }}</v-snackbar>
   </v-container>
 </template>
 
