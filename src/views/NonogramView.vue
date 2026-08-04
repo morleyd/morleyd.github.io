@@ -148,6 +148,8 @@ const solvedTitle = computed(() => {
   if (pictureName.value === 'Heart') return 'It’s a Heart — made with love ❤️'
   return `It’s a ${pictureName.value}! 🎉`
 })
+// Imported pictures carry an artist credit, shown under the banner.
+const solvedCredit = computed(() => patternById(currentPatternId.value)?.credit ?? '')
 
 // Extract a row / column of the player's marks as service `Cell`s.
 const rowCells = (r: number): Cell[] =>
@@ -480,6 +482,7 @@ onBeforeUnmount(() => {
       <div v-if="solved" class="solved-banner mt-4">
         <div class="solved-title">{{ solvedTitle }}</div>
         <div class="text-body-2 text-medium-emphasis">{{ size }}×{{ size }} picture complete · {{ timeLabel }}</div>
+        <div v-if="solvedCredit" class="text-caption text-medium-emphasis">Pixel art: {{ solvedCredit }}</div>
         <v-btn class="mt-2" color="primary" variant="flat" prepend-icon="mdi-refresh" @click="newGame">
           New puzzle
         </v-btn>

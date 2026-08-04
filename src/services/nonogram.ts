@@ -30,6 +30,8 @@ export interface NonogramPattern {
   name: string
   size: number
   rows: string[]
+  /** Artist credit for imported pixel art (shown on solve), e.g. CC0 sources. */
+  credit?: string
   /** Retired from the picker/random pool but still loadable by id, so shared
    *  URLs from before the library rework keep resolving to the same picture. */
   legacy?: boolean

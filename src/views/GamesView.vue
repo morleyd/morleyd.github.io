@@ -78,6 +78,15 @@ const games: GameCard[] = [
     gradient: 'linear-gradient(135deg, rgba(22, 101, 52, 0.5), rgba(52, 211, 153, 0.3))',
   },
   {
+    key: 'nonogram',
+    title: 'Nonogram',
+    description:
+      'Reveal a hidden pixel picture by filling cells that satisfy the row and column number clues. Drag to paint, X-mark the gaps, three sizes.',
+    icon: 'mdi-dots-grid',
+    to: '/nonogram',
+    gradient: 'linear-gradient(135deg, rgba(124, 58, 237, 0.4), rgba(15, 23, 42, 0.3))',
+  },
+  {
     key: 'count-blocks',
     title: 'Count the Blocks',
     description:
@@ -139,15 +148,6 @@ const games: GameCard[] = [
     icon: 'mdi-view-quilt-outline',
     to: '/tetris',
     gradient: 'linear-gradient(135deg, rgba(34, 211, 238, 0.32), rgba(168, 85, 247, 0.30))',
-  },
-  {
-    key: 'nonogram',
-    title: 'Nonogram',
-    description:
-      'Reveal a hidden pixel picture by filling cells that satisfy the row and column number clues. Drag to paint, X-mark the gaps, three sizes.',
-    icon: 'mdi-dots-grid',
-    to: '/nonogram',
-    gradient: 'linear-gradient(135deg, rgba(124, 58, 237, 0.4), rgba(15, 23, 42, 0.3))',
   },
   {
     key: 'connect-4',
