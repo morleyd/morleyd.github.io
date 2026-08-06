@@ -1,17 +1,21 @@
 import { describe, it, expect } from 'vitest'
 import {
   colClues,
+  countSolutions,
   generateNonogram,
+  hasUniqueSolution,
   isSolved,
   lineClue,
   lineComplete,
   lineConsistent,
+  lineCorrect,
   lineSatisfied,
   nonogramFromPattern,
   patternToSolution,
   rowClues,
   satisfiedClues,
   type Cell,
+  type Nonogram,
   type Solution,
 } from './nonogram'
 import {
@@ -65,6 +69,12 @@ describe('generateNonogram', () => {
     const p = generateNonogram(5, 5, 'x')
     expect(p.solution.some(Boolean)).toBe(true)
   })
+  it('generates uniquely-solvable grids', () => {
+    for (const seed of ['a', 'b', 'unique?']) {
+      const p = generateNonogram(6, 6, seed)
+      expect(countSolutions(p.rowClues, p.colClues, 2), seed).toBe(1)
+    }
+  })
 })
 
 describe('isSolved', () => {
@@ -79,15 +89,39 @@ describe('isSolved', () => {
     partial[firstFilled] = false
     expect(isSolved(partial, p)).toBe(false)
   })
-  it('accepts any grid whose clues match (clue-based, not cell-based)', () => {
-    // A symmetric picture where the mirror image satisfies the same clues.
-    //  X .        . X
-    //  X .   vs   . X   → both rows clue [1], both cols clue [2],[0]... differ,
-    // so instead use a case that IS clue-equivalent:
-    //  X X        X X
-    //  . .   ==   . .   (identical) — trivial accept
-    const p = generateNonogram(4, 4, 'clue')
-    expect(isSolved(p.solution.slice(), p)).toBe(true)
+  it('rejects a clue-satisfying grid that is not the picture (cell-exact)', () => {
+    // The 2×2 diagonal: rows [1],[1] and cols [1],[1] are also satisfied by the
+    // anti-diagonal, but only the actual picture counts as solved.
+    const p: Nonogram = {
+      rows: 2,
+      cols: 2,
+      solution: [true, false, false, true],
+      rowClues: [[1], [1]],
+      colClues: [[1], [1]],
+      seed: 't',
+    }
+    expect(isSolved([true, false, false, true], p)).toBe(true)
+    expect(isSolved([false, true, true, false], p)).toBe(false)
+  })
+})
+
+describe('countSolutions', () => {
+  it('counts both diagonals of the ambiguous 2×2', () => {
+    expect(countSolutions([[1], [1]], [[1], [1]])).toBe(2)
+  })
+  it('reports a fully-determined grid as unique', () => {
+    // ## / #. — the [1] in row 1 is pinned to column 0 by the column clues.
+    expect(countSolutions([[2], [1]], [[2], [1]])).toBe(1)
+    expect(hasUniqueSolution({ rowClues: [[2], [1]], colClues: [[2], [1]] })).toBe(true)
+  })
+  it('reports contradictory clues as unsolvable', () => {
+    expect(countSolutions([[2]], [[0], [0]])).toBe(0)
+  })
+  it('stops counting at the limit', () => {
+    // 3×3 with every line clued [1] has 6 permutation-matrix solutions.
+    const clue = [[1], [1], [1]]
+    expect(countSolutions(clue, clue, 2)).toBe(2)
+    expect(countSolutions(clue, clue, 10)).toBe(6)
   })
 })
 
@@ -136,6 +170,15 @@ describe('pattern library', () => {
     for (const p of NONOGRAM_PATTERNS) {
       const nono = nonogramFromPattern(p)
       expect(isSolved(nono.solution, nono), `${p.id} solvable`).toBe(true)
+    }
+  })
+
+  it('every picture is uniquely determined by its clues', () => {
+    // The player must never be able to paint a clue-satisfying grid that isn't
+    // the picture — keep this green when adding patterns (legacy ones too).
+    for (const p of NONOGRAM_PATTERNS) {
+      const nono = nonogramFromPattern(p)
+      expect(hasUniqueSolution(nono), `${p.id} unique`).toBe(true)
     }
   })
 })
@@ -212,6 +255,22 @@ describe('lineComplete', () => {
     // Over-filled: inconsistent, so certainly not complete.
     expect(lineConsistent(cells(1, 1, 1), [2])).toBe(false)
     expect(lineComplete(cells(1, 1, 1), [2])).toBe(false)
+  })
+})
+
+describe('lineCorrect', () => {
+  it('accepts fills that exactly match the solution line', () => {
+    expect(lineCorrect(cells(1, 0, 1, 2), [true, false, true, false])).toBe(true)
+  })
+  it('rejects a clue-satisfying run in the wrong spot', () => {
+    // Solution [.##.]: a 2-run at the left edge satisfies the clue [2] but is misplaced.
+    expect(lineCorrect(cells(1, 1, 0, 0), [false, true, true, false])).toBe(false)
+  })
+  it('rejects an incomplete line', () => {
+    expect(lineCorrect(cells(0, 1, 0, 0), [false, true, true, false])).toBe(false)
+  })
+  it('ignores X-marks on solution-empty cells', () => {
+    expect(lineCorrect(cells(2, 1, 1, 2), [false, true, true, false])).toBe(true)
   })
 })
 

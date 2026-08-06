@@ -17,6 +17,7 @@ import {
   isSolved,
   lineComplete,
   lineConsistent,
+  lineCorrect,
   nonogramFromPattern,
   satisfiedClues,
   type Cell,
@@ -168,23 +169,35 @@ const colSatisfied = computed(() =>
   puzzle.value.colClues.map((clue, c) => satisfiedClues(colCells(c), clue)),
 )
 
+// The solution's rows/columns, for Check to compare fills against.
+const solutionRow = (r: number): boolean[] =>
+  puzzle.value.solution.slice(r * cols.value, (r + 1) * cols.value)
+const solutionCol = (c: number): boolean[] => {
+  const line: boolean[] = []
+  for (let r = 0; r < rows.value; r += 1) line.push(puzzle.value.solution[idx(r, c)])
+  return line
+}
+
 // Validation, set by the Check button and cleared per-line as soon as a square
-// on that line changes. A line is flagged RED when its fills can no longer match
-// the clue, or GREEN when they already form it correctly and completely.
+// on that line changes. A line is flagged GREEN only when its fills are exactly
+// the solution's — complete AND in the right spots. RED when it's provably
+// wrong: the fills can no longer match the clue, or they form the whole clue
+// but in the wrong positions (puzzles are uniquely determined, so a
+// "finished-looking" line that isn't the solution line is a mistake).
 const rowBad = ref<boolean[]>([])
 const colBad = ref<boolean[]>([])
 const rowGood = ref<boolean[]>([])
 const colGood = ref<boolean[]>([])
 const validate = () => {
-  rowGood.value = puzzle.value.rowClues.map((clue, r) => lineComplete(rowCells(r), clue))
-  colGood.value = puzzle.value.colClues.map((clue, c) => lineComplete(colCells(c), clue))
-  // Only flag red where it isn't already green (the two are exclusive, but keep
-  // green authoritative for a done line).
+  rowGood.value = puzzle.value.rowClues.map((_, r) => lineCorrect(rowCells(r), solutionRow(r)))
+  colGood.value = puzzle.value.colClues.map((_, c) => lineCorrect(colCells(c), solutionCol(c)))
   rowBad.value = puzzle.value.rowClues.map(
-    (clue, r) => !rowGood.value[r] && !lineConsistent(rowCells(r), clue),
+    (clue, r) =>
+      !rowGood.value[r] && (lineComplete(rowCells(r), clue) || !lineConsistent(rowCells(r), clue)),
   )
   colBad.value = puzzle.value.colClues.map(
-    (clue, c) => !colGood.value[c] && !lineConsistent(colCells(c), clue),
+    (clue, c) =>
+      !colGood.value[c] && (lineComplete(colCells(c), clue) || !lineConsistent(colCells(c), clue)),
   )
 }
 const clearValidation = () => {
@@ -399,7 +412,7 @@ onBeforeUnmount(() => {
           <li>Tap or drag across cells to fill (or erase) them.</li>
           <li><span class="k">X</span> mode (or right-click) marks a cell you've deduced is empty — just an aid, it doesn't affect solving.</li>
           <li>Each clue number dims once its run is pinned in place.</li>
-          <li><span class="k">Check</span> turns a line's clues green when it's complete and correct, or red when your fills can no longer match it; both clear the moment you edit that line.</li>
+          <li><span class="k">Check</span> turns a line's clues green when its fills exactly match the hidden picture, or red when they're provably wrong; both clear the moment you edit that line. Every puzzle has exactly one solution.</li>
         </ul>
         <h3>Tips</h3>
         <ul>

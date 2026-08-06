@@ -72,26 +72,25 @@ export function colClues(grid: Solution, rows: number, cols: number): number[][]
 
 /**
  * Generate a puzzle by randomly filling cells (biased ~55% so pictures aren't
- * too sparse), then deriving clues. Re-rolls the rare all-empty grid.
+ * too sparse), then deriving clues. Deterministically re-rolls (seed + salt)
+ * until the grid's clues admit exactly one solution, so the player can never
+ * paint a clue-satisfying grid that isn't THE grid. The salt cap is a safety
+ * net — a unique roll shows up within a handful of tries in practice.
  */
 export function generateNonogram(rows: number, cols: number, seed: string): Nonogram {
   const rng = rngFromSeed(`${rows}x${cols}:${seed}`)
-  let solution: Solution
-  let salt = 0
-  do {
+  let solution: Solution = []
+  let rc: number[][] = []
+  let cc: number[][] = []
+  for (let salt = 0; salt < 400; salt += 1) {
     const r = salt === 0 ? rng : rngFromSeed(`${rows}x${cols}:${seed}:${salt}`)
     solution = Array.from({ length: rows * cols }, () => r() < 0.55)
-    salt += 1
-  } while (solution.every((v) => !v))
-
-  return {
-    rows,
-    cols,
-    solution,
-    rowClues: rowClues(solution, rows, cols),
-    colClues: colClues(solution, rows, cols),
-    seed,
+    rc = rowClues(solution, rows, cols)
+    cc = colClues(solution, rows, cols)
+    if (solution.some(Boolean) && countSolutions(rc, cc, 2) === 1) break
   }
+
+  return { rows, cols, solution, rowClues: rc, colClues: cc, seed }
 }
 
 /** Turn a text picture (`#` = filled) into a row-major boolean solution grid. */
@@ -118,20 +117,15 @@ export function nonogramFromPattern(pattern: NonogramPattern): Nonogram {
 }
 
 /**
- * Whether the player's filled cells satisfy all clues. A nonogram is solved when
- * every row and column clue matches — which can be true for a different-looking
- * grid than `solution` when the puzzle isn't uniquely determined, so we check
- * clues rather than exact cell equality.
+ * Whether the player's filled cells are exactly the solution picture. Every
+ * shipped puzzle is uniquely determined by its clues (enforced by
+ * `countSolutions` in tests and by the generator), so any clue-satisfying grid
+ * IS the picture — comparing cells directly just also rejects a partial grid
+ * whose fills happen to sit in the wrong spots mid-solve.
  */
 export function isSolved(marks: boolean[], puzzle: Nonogram): boolean {
-  const { rows, cols, rowClues: rc, colClues: cc } = puzzle
-  for (let r = 0; r < rows; r += 1) {
-    if (!clueEquals(lineClue(row(marks, cols, r)), rc[r])) return false
-  }
-  for (let c = 0; c < cols; c += 1) {
-    if (!clueEquals(lineClue(col(marks, rows, cols, c)), cc[c])) return false
-  }
-  return true
+  const { solution } = puzzle
+  return marks.length === solution.length && solution.every((v, i) => marks[i] === v)
 }
 
 const clueEquals = (a: number[], b: number[]): boolean =>
@@ -154,6 +148,15 @@ export function lineComplete(cells: Cell[], clue: number[]): boolean {
     cells.map((c) => c === FILLED),
     clue,
   )
+}
+
+/**
+ * Whether the line's FILLED cells are exactly the solution's — complete AND in
+ * the right spots, not merely a clue-satisfying arrangement. Check uses this
+ * for green so a run parked in the wrong columns is never blessed.
+ */
+export function lineCorrect(cells: Cell[], solutionLine: boolean[]): boolean {
+  return solutionLine.every((filled, i) => (cells[i] === FILLED) === filled)
 }
 
 /**
@@ -251,4 +254,130 @@ export function lineConsistent(cells: Cell[], clue: number[]): boolean {
   }
 
   return solve(0, 0)
+}
+
+// --- Solution counting ----------------------------------------------------
+// Used to guarantee puzzles are uniquely determined by their clues: the
+// pattern-library test asserts countSolutions === 1 for every picture, and
+// generateNonogram re-rolls until its random grid is unique.
+
+/** Grid/line cell state while solving: -1 unknown, 0 known-empty, 1 known-filled. */
+type SolveState = -1 | 0 | 1
+
+/**
+ * Enumerate every placement of `runs` compatible with the line's known cells
+ * (as fill bitmasks — lines are ≤ 30 cells). Returns the bitwise OR and AND of
+ * all placements, or null when none fits: a bit clear in `or` is empty in every
+ * placement, a bit set in `and` is filled in every placement.
+ */
+function linePlacements(state: SolveState[], runs: number[]): { or: number; and: number } | null {
+  const n = state.length
+  // Minimum cells needed for runs i.. (their lengths + single gaps between).
+  const need: number[] = new Array(runs.length + 1).fill(0)
+  for (let i = runs.length - 1; i >= 0; i -= 1) {
+    need[i] = runs[i] + need[i + 1] + (i + 1 < runs.length ? 1 : 0)
+  }
+  let or = 0
+  let and = -1
+  let any = false
+  const rec = (pos: number, ci: number, acc: number) => {
+    if (ci === runs.length) {
+      for (let k = pos; k < n; k += 1) if (state[k] === 1) return // leftover fill
+      or |= acc
+      and &= acc
+      any = true
+      return
+    }
+    const len = runs[ci]
+    for (let start = pos; start + need[ci] <= n; start += 1) {
+      let fits = true
+      for (let k = start; k < start + len; k += 1) {
+        if (state[k] === 0) {
+          fits = false
+          break
+        }
+      }
+      // The run must be followed by a gap (line edge or a non-filled cell).
+      if (fits && (start + len === n || state[start + len] !== 1)) {
+        rec(start + len + 1, ci + 1, acc | (((1 << len) - 1) << start))
+      }
+      // Advancing `start` leaves this cell empty — illegal over a known fill.
+      if (state[start] === 1) return
+    }
+  }
+  rec(0, 0, 0)
+  return any ? { or, and } : null
+}
+
+/**
+ * Count the solutions to a clue set, stopping at `limit` (default 2 — enough to
+ * distinguish unique / not unique). Line-by-line constraint propagation to a
+ * fixpoint, then branch on the first undetermined cell. Grids up to 30×30.
+ * `onSolution` receives each solution grid as it's found (for diagnostics).
+ */
+export function countSolutions(
+  rowClues: number[][],
+  colClues: number[][],
+  limit = 2,
+  onSolution?: (solution: Solution) => void,
+): number {
+  const rows = rowClues.length
+  const cols = colClues.length
+  const rowRuns = rowClues.map((c) => (c.length === 1 && c[0] === 0 ? [] : c))
+  const colRuns = colClues.map((c) => (c.length === 1 && c[0] === 0 ? [] : c))
+  let count = 0
+
+  // Deduce forced cells on one line; returns false on contradiction.
+  const deduceLine = (grid: Int8Array, cells: number[], runs: number[]): boolean => {
+    const state = cells.map((i) => grid[i] as SolveState)
+    const res = linePlacements(state, runs)
+    if (!res) return false
+    for (let k = 0; k < cells.length; k += 1) {
+      if (grid[cells[k]] !== -1) continue
+      if (!(res.or & (1 << k))) grid[cells[k]] = 0
+      else if (res.and & (1 << k)) grid[cells[k]] = 1
+    }
+    return true
+  }
+
+  const rowIdx = Array.from({ length: rows }, (_, r) =>
+    Array.from({ length: cols }, (_, c) => r * cols + c),
+  )
+  const colIdx = Array.from({ length: cols }, (_, c) =>
+    Array.from({ length: rows }, (_, r) => r * cols + c),
+  )
+
+  const propagate = (grid: Int8Array): boolean => {
+    for (;;) {
+      const before = grid.join('')
+      for (let r = 0; r < rows; r += 1) if (!deduceLine(grid, rowIdx[r], rowRuns[r])) return false
+      for (let c = 0; c < cols; c += 1) if (!deduceLine(grid, colIdx[c], colRuns[c])) return false
+      if (grid.join('') === before) return true
+    }
+  }
+
+  const search = (grid: Int8Array): void => {
+    if (count >= limit) return
+    if (!propagate(grid)) return
+    const i = grid.indexOf(-1)
+    if (i < 0) {
+      count += 1
+      onSolution?.(Array.from(grid, (v) => v === 1))
+      return
+    }
+    for (const v of [1, 0] as const) {
+      const branch = Int8Array.from(grid)
+      branch[i] = v
+      search(branch)
+      if (count >= limit) return
+    }
+  }
+
+  search(new Int8Array(rows * cols).fill(-1))
+  return count
+}
+
+/** Whether the puzzle's clues admit exactly one solution. */
+export function hasUniqueSolution(p: Pick<Nonogram, 'rowClues' | 'colClues'>): boolean {
+  return countSolutions(p.rowClues, p.colClues, 2) === 1
 }
