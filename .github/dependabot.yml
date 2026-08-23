@@ -1,0 +1,15 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: saturday
+    # Batch everything into a single PR instead of one per advisory
+    groups:
+      npm-dependencies:
+        patterns:
+          - "*"
+    # These are all build-time deps for a static site; low real-world risk,
+    # so a weekly digest PR is plenty. Cap open PRs to avoid pile-ups.
+    open-pull-requests-limit: 1
