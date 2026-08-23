@@ -3,6 +3,8 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [master]
+  pull_request:
+    branches: [master]
   workflow_dispatch:
 
 # Allow the workflow to publish to GitHub Pages
@@ -41,6 +43,9 @@ jobs:
 
   deploy:
     needs: build
+    # Build (above) runs on PRs so auto-merge can gate on it, but only ever
+    # publish from master — never from a pull request.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
