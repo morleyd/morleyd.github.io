@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   colClues,
   countSolutions,
+  forcedCells,
   generateNonogram,
   hasUniqueSolution,
   isSolved,
@@ -14,6 +15,7 @@ import {
   patternToSolution,
   rowClues,
   satisfiedClues,
+  serializeForLLM,
   type Cell,
   type Nonogram,
   type Solution,
@@ -296,6 +298,76 @@ describe('randomPatternForSize', () => {
 
   it('returns undefined when no picture fits the size', () => {
     expect(randomPatternForSize(7, 'x')).toBeUndefined()
+  })
+})
+
+describe('forcedCells', () => {
+  it('finds the overlap of a big clue on a blank line', () => {
+    // Clue 3 in a length-5 line: the middle cell is filled in every placement.
+    expect(forcedCells(cells(0, 0, 0, 0, 0), [3])).toEqual({
+      fill: [false, false, true, false, false],
+      empty: [false, false, false, false, false],
+    })
+  })
+
+  it('propagates a known fill to force the rest of the run and its tail', () => {
+    // Clue 3 with cell 0 filled: run is pinned to 0–2, so 3–4 are forced empty.
+    expect(forcedCells(cells(1, 0, 0, 0, 0), [3])).toEqual({
+      fill: [true, true, true, false, false],
+      empty: [false, false, false, true, true],
+    })
+  })
+
+  it('forces every cell empty on a 0-clue line', () => {
+    expect(forcedCells(cells(0, 0), [0])).toEqual({ fill: [false, false], empty: [true, true] })
+  })
+
+  it('returns null when the marks already contradict the clue', () => {
+    // Clue 3 in length 3 needs all three, but the middle is X-marked empty.
+    expect(forcedCells(cells(0, 2, 0), [3])).toBeNull()
+  })
+})
+
+describe('serializeForLLM', () => {
+  // 3x3:  # . #  /  # # .  /  . . #
+  const p: Nonogram = {
+    rows: 3,
+    cols: 3,
+    solution: [true, false, true, true, true, false, false, false, true],
+    rowClues: [[1, 1], [2], [1]],
+    colClues: [[2], [1], [1, 1]],
+    seed: 't',
+  }
+
+  it('renders numbered clues and the current marks with a ruler', () => {
+    // Player filled r1c1 and X-marked r1c2; everything else untouched.
+    const marks = [1, 2, 0, 0, 0, 0, 0, 0, 0]
+    expect(serializeForLLM(p, marks)).toBe(
+      [
+        'Nonogram 3×3',
+        'Legend: # = filled, x = marked empty, . = unknown',
+        '',
+        'Column clues (top→bottom), c1…c3:',
+        '  c1: 2 | c2: 1 | c3: 1 1',
+        '',
+        'Board — each row shows its current cells then its clue (left→right):',
+        '    123',
+        'r1: #x.  (1 1)',
+        'r2: ...  (2)',
+        'r3: ...  (1)',
+      ].join('\n'),
+    )
+  })
+
+  it('reflects the marks, not the solution (empty board stays all dots)', () => {
+    const text = serializeForLLM(p, new Array(9).fill(0))
+    // r1 is `# . #` in the solution but untouched by the player → shown blank.
+    expect(text).toContain('r1: ...  (1 1)')
+  })
+
+  it('adds a tens/ones column ruler past 9 columns', () => {
+    const wide = generateNonogram(10, 10, 'ruler')
+    expect(serializeForLLM(wide, new Array(100).fill(0))).toContain('1234567890')
   })
 })
 

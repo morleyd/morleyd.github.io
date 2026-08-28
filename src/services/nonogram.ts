@@ -172,6 +172,50 @@ const FILLED = 1
 const CROSS = 2
 
 /**
+ * Encode the puzzle and the player's current progress as plain text a human —
+ * or an LLM being asked for help — can read unambiguously: numbered row/column
+ * clues plus a ruler-labelled board (`#` filled, `x` marked-empty, `.` unknown,
+ * with a tens/ones column ruler so any cell is countable at a glance). The
+ * solution is deliberately omitted so a helper reasons from the same
+ * information the player has, and gives hints rather than the answer.
+ */
+export function serializeForLLM(puzzle: Nonogram, marks: readonly number[]): string {
+  const { rows, cols, rowClues, colClues } = puzzle
+  const glyph = (c: number): string => (c === FILLED ? '#' : c === CROSS ? 'x' : '.')
+  const clueText = (clue: number[]): string =>
+    clue.length === 1 && clue[0] === 0 ? '0' : clue.join(' ')
+
+  const rowDigits = String(rows).length
+  const label = (n: number): string => `r${String(n).padStart(rowDigits)}: `
+  const pad = ' '.repeat(1 + rowDigits + 2) // gutter width of `r{n}: `
+
+  // Column ruler: tens over ones, so column N is found by reading down.
+  const nums = Array.from({ length: cols }, (_, i) => i + 1)
+  const tens = nums.map((n) => (n >= 10 ? String(Math.floor(n / 10)) : ' ')).join('')
+  const ones = nums.map((n) => String(n % 10)).join('')
+  const ruler = cols >= 10 ? [pad + tens, pad + ones] : [pad + ones]
+
+  const colLine = colClues.map((clue, c) => `c${c + 1}: ${clueText(clue)}`).join(' | ')
+
+  const board = rowClues.map((clue, r) => {
+    const cells = Array.from({ length: cols }, (_, c) => glyph(marks[r * cols + c] ?? EMPTY)).join('')
+    return `${label(r + 1)}${cells}  (${clueText(clue)})`
+  })
+
+  return [
+    `Nonogram ${rows}×${cols}`,
+    'Legend: # = filled, x = marked empty, . = unknown',
+    '',
+    `Column clues (top→bottom), c1…c${cols}:`,
+    `  ${colLine}`,
+    '',
+    'Board — each row shows its current cells then its clue (left→right):',
+    ...ruler,
+    ...board,
+  ].join('\n')
+}
+
+/**
  * Lock clue entries from the left: walk the line matching completed filled runs
  * to clue entries in order, stopping at the first ambiguity. A run counts as
  * matched only when it is genuinely closed — its far side is the line edge or an
@@ -307,6 +351,28 @@ function linePlacements(state: SolveState[], runs: number[]): { or: number; and:
   }
   rec(0, 0, 0)
   return any ? { or, and } : null
+}
+
+/**
+ * Which cells a single line's clue forces given the player's current marks, by
+ * intersecting every clue-compatible arrangement (the overlap / line-solving
+ * technique). A cell is `fill` when every arrangement fills it, `empty` when
+ * none does; cells the marks leave undecided fall in neither. Returns null when
+ * the marks already contradict the clue. The hint engine runs this per line to
+ * find the next logically-forced square. Marks map to solver state: an X-mark is
+ * known-empty, an unpainted cell is unknown (NOT known-empty).
+ */
+export function forcedCells(
+  cells: Cell[],
+  clue: number[],
+): { fill: boolean[]; empty: boolean[] } | null {
+  const runs = clue.length === 1 && clue[0] === 0 ? [] : clue
+  const state: SolveState[] = cells.map((c) => (c === FILLED ? 1 : c === CROSS ? 0 : -1))
+  const res = linePlacements(state, runs)
+  if (!res) return null
+  const fill = cells.map((_, k) => Boolean(res.and & (1 << k)))
+  const empty = cells.map((_, k) => !(res.or & (1 << k)))
+  return { fill, empty }
 }
 
 /**

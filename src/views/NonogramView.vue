@@ -20,9 +20,11 @@ import {
   lineCorrect,
   nonogramFromPattern,
   satisfiedClues,
+  serializeForLLM,
   type Cell,
   type Nonogram,
 } from '@/services/nonogram'
+import { findHint, type Hint } from '@/services/nonogramHints'
 import { patternById, patternsForSize, randomPatternForSize } from '@/services/nonogramPatterns'
 import { recordSolvedPattern, solvedPatternIds } from '@/services/nonogramProgress'
 
@@ -52,6 +54,34 @@ const puzzle = ref<Nonogram>(nonogramFromPattern(patternsForSize(10)[0]))
 const marks = ref<number[]>([]) // 0 empty · 1 filled · 2 X-marked
 const mode = ref<'fill' | 'mark'>('fill')
 const snackbar = ref(false)
+const copySnack = ref(false)
+
+// Progressive hint: level 0 idle · 1 spotlight the line · 2 pinpoint the square ·
+// 3 say (and apply) what to do. Computed once when it starts and held steady;
+// any board edit clears it. Mirrors the Tango hint UX.
+const hint = ref<Hint | null>(null)
+const hintLevel = ref(0)
+const noHint = ref(false)
+const clearHint = () => {
+  hint.value = null
+  hintLevel.value = 0
+  noHint.value = false
+}
+const hintRegion = computed(() =>
+  hint.value && hintLevel.value >= 1 ? new Set(hint.value.region) : new Set<number>(),
+)
+const hintCell = computed(() => (hint.value && hintLevel.value >= 2 ? hint.value.cell : null))
+const hintColor = computed(() =>
+  noHint.value ? 'success' : hint.value?.kind === 'mistake' ? 'warning' : 'info',
+)
+const hintMessage = computed(() => {
+  if (noHint.value) return 'Nothing left to deduce — you’re all caught up!'
+  const h = hint.value
+  if (!h) return ''
+  if (hintLevel.value === 1) return `${h.reason} (Hint again to pinpoint the square.)`
+  if (hintLevel.value === 2) return 'Here’s the exact square. Hint again to see what to do.'
+  return h.reveal
+})
 
 // Which pictures this player has already solved (persisted across visits), so
 // "New puzzle" can serve fresh ones and the picker can show what's done.
@@ -134,6 +164,7 @@ const onVisibility = () => {
 // the picture so future "New puzzle" rolls skip it.
 watch(solved, (v) => {
   if (v) {
+    clearHint() // clear any spotlight so the solve animation reads cleanly
     stopTimer()
     burstConfetti({ count: 110 })
     if (currentPatternId.value) {
@@ -189,6 +220,7 @@ const colBad = ref<boolean[]>([])
 const rowGood = ref<boolean[]>([])
 const colGood = ref<boolean[]>([])
 const validate = () => {
+  clearHint() // Check supersedes any pending hint spotlight
   rowGood.value = puzzle.value.rowClues.map((_, r) => lineCorrect(rowCells(r), solutionRow(r)))
   colGood.value = puzzle.value.colClues.map((_, c) => lineCorrect(colCells(c), solutionCol(c)))
   rowBad.value = puzzle.value.rowClues.map(
@@ -206,6 +238,33 @@ const clearValidation = () => {
   rowGood.value = []
   colGood.value = []
 }
+
+// Step the hint through its reveal levels: compute on first press, then
+// spotlight → pinpoint → apply. A press after the final level moves to the next
+// deduction. Hint and Check don't co-exist, so asking for one clears the other.
+const nextHint = () => {
+  if (solved.value) return
+  clearValidation()
+  if (!hint.value) {
+    const found = findHint(marks.value, puzzle.value)
+    if (!found) {
+      noHint.value = true
+      return
+    }
+    hint.value = found
+    hintLevel.value = 1
+    return
+  }
+  if (hintLevel.value < 3) {
+    hintLevel.value += 1
+    // On the last level apply the mark directly (not via paint), so the reveal
+    // message and spotlight stay on screen instead of being cleared by the edit.
+    if (hintLevel.value === 3) marks.value[hint.value.cell] = hint.value.apply
+    return
+  }
+  clearHint()
+  nextHint()
+}
 // A square at index i sits on one row and one column — clear only their flags.
 const clearLineValidation = (i: number) => {
   const r = Math.floor(i / cols.value)
@@ -219,6 +278,7 @@ const clearLineValidation = (i: number) => {
 const reset = () => {
   marks.value = new Array(size.value * size.value).fill(0)
   clearValidation()
+  clearHint()
   resetTimer()
 }
 const build = () => {
@@ -301,7 +361,10 @@ const applyPaint = (i: number) => {
   } else if (cur === 2) {
     marks.value[i] = 0
   }
-  if (marks.value[i] !== cur) clearLineValidation(i)
+  if (marks.value[i] !== cur) {
+    clearLineValidation(i)
+    clearHint() // the board changed — any pending hint is stale
+  }
 }
 
 const startPaint = (i: number, e: PointerEvent) => {
@@ -331,12 +394,20 @@ const toggleX = (i: number) => {
   if (solved.value) return
   marks.value[i] = marks.value[i] === 2 ? 0 : 2
   clearLineValidation(i)
+  clearHint()
 }
 
 const share = async () => {
   const url = window.location.origin + route.fullPath
   await copyToClipboard(`Try this ${size.value}×${size.value} Nonogram:\n${url}`)
   snackbar.value = true
+}
+
+// Copy the puzzle + current progress as plain text — paste into an AI chat to
+// ask for a hint without it having to read a screenshot. Solution is omitted.
+const copyForLLM = async () => {
+  await copyToClipboard(serializeForLLM(puzzle.value, marks.value))
+  copySnack.value = true
 }
 
 onMounted(() => {
@@ -424,7 +495,7 @@ onBeforeUnmount(() => {
 
     <!-- Mode toggle: the active button takes the picked fill color, so what
          you're painting with is always visible right on the control. -->
-    <div class="d-flex align-center ga-2 mb-3">
+    <div class="d-flex align-center flex-wrap ga-2 mb-3">
       <v-btn-toggle v-model="mode" mandatory density="comfortable" variant="outlined" divided :color="themeFill">
         <v-btn value="fill" size="small" prepend-icon="mdi-square"> Fill </v-btn>
         <v-btn value="mark" size="small" prepend-icon="mdi-close"> Mark </v-btn>
@@ -437,6 +508,22 @@ onBeforeUnmount(() => {
         @click="validate"
         >Check</v-btn
       >
+      <v-btn
+        variant="outlined"
+        size="small"
+        prepend-icon="mdi-lightbulb-on-outline"
+        :disabled="solved"
+        @click="nextHint"
+        >Hint</v-btn
+      >
+      <v-btn
+        variant="outlined"
+        size="small"
+        icon="mdi-clipboard-text-outline"
+        title="Copy puzzle as text — paste into an AI chat to ask for a hint"
+        aria-label="Copy puzzle as text for AI help"
+        @click="copyForLLM"
+      />
       <v-spacer />
       <div class="text-body-2 text-medium-emphasis mr-1" aria-label="Elapsed time">
         <v-icon icon="mdi-clock-outline" size="small" /> {{ timeLabel }}
@@ -476,6 +563,8 @@ onBeforeUnmount(() => {
               'ncell--x': marks[idx(r - 1, c - 1)] === 2,
               'ncell--r5': (c - 1) % 5 === 0,
               'ncell--b5': (r - 1) % 5 === 0,
+              'ncell--hint-region': hintRegion.has(idx(r - 1, c - 1)) && hintCell !== idx(r - 1, c - 1),
+              'ncell--hint-cell': hintCell === idx(r - 1, c - 1),
             }"
             @pointerdown.prevent="startPaint(idx(r - 1, c - 1), $event)"
             @pointerenter="enterPaint(idx(r - 1, c - 1))"
@@ -487,6 +576,16 @@ onBeforeUnmount(() => {
       </div>
 
     </div>
+
+    <v-alert
+      v-if="hintMessage"
+      class="mt-4"
+      density="comfortable"
+      variant="tonal"
+      :color="hintColor"
+      icon="mdi-lightbulb-on-outline"
+      >{{ hintMessage }}</v-alert
+    >
 
     <!-- On solve: keep the finished picture on show (clues + X-marks fade on the
          board itself) and celebrate with a compact banner below it, so the
@@ -503,6 +602,7 @@ onBeforeUnmount(() => {
     </v-expand-transition>
 
     <v-snackbar v-model="snackbar" :timeout="2600" color="secondary">Puzzle link copied — share it!</v-snackbar>
+    <v-snackbar v-model="copySnack" :timeout="2600" color="secondary">Puzzle copied as text — paste it to an AI for a hint.</v-snackbar>
     <v-snackbar v-model="repeatSnack" :timeout="4200" color="warning">{{ repeatNotice }}</v-snackbar>
   </v-container>
 </template>
@@ -582,6 +682,20 @@ onBeforeUnmount(() => {
   box-shadow: inset 0 0 0 1px var(--nono-fill, #7c3aed);
 }
 .ncell--x { color: rgba(148, 163, 184, 0.7); }
+/* Hint spotlight: a translucent flood (a huge inset shadow) tints the cell over
+   whatever's beneath — filled, X, or empty — so a highlighted row/column reads as
+   a band. The exact square gets a stronger tint, a bright ring, and a soft pulse. */
+.ncell--hint-region {
+  box-shadow: inset 0 0 0 999px rgba(96, 165, 250, 0.16);
+}
+.ncell--hint-cell {
+  box-shadow: inset 0 0 0 999px rgba(96, 165, 250, 0.32), inset 0 0 0 2px #60a5fa;
+  animation: nono-hint 1.1s ease-in-out infinite;
+}
+@keyframes nono-hint {
+  0%, 100% { box-shadow: inset 0 0 0 999px rgba(96, 165, 250, 0.26), inset 0 0 0 2px #60a5fa; }
+  50% { box-shadow: inset 0 0 0 999px rgba(96, 165, 250, 0.46), inset 0 0 0 2px #93c5fd; }
+}
 .swatch {
   display: inline-block;
   width: 16px;
