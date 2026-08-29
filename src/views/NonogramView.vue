@@ -6,6 +6,7 @@
  * Clue derivation and checking live in services/nonogram.
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useDisplay } from 'vuetify'
 import { useRoute, useRouter } from 'vue-router'
 import GameToolbar from '@/components/GameToolbar.vue'
 import { copyToClipboard } from '@/services/share'
@@ -32,6 +33,7 @@ const { el: boardEl, px: boardPx } = useSquareFit(72)
 
 const route = useRoute()
 const router = useRouter()
+const { mobile } = useDisplay()
 
 const SIZES = [5, 10, 15]
 
@@ -67,21 +69,29 @@ const clearHint = () => {
   hintLevel.value = 0
   noHint.value = false
 }
+// L1 spotlights the whole line; the exact square is held back until L3, so L2 is
+// the teaching step where the player works it out themselves.
 const hintRegion = computed(() =>
   hint.value && hintLevel.value >= 1 ? new Set(hint.value.region) : new Set<number>(),
 )
-const hintCell = computed(() => (hint.value && hintLevel.value >= 2 ? hint.value.cell : null))
+const hintCell = computed(() => (hint.value && hintLevel.value >= 3 ? hint.value.cell : null))
 const hintColor = computed(() =>
-  noHint.value ? 'success' : hint.value?.kind === 'mistake' ? 'warning' : 'info',
+  noHint.value ? 'success' : hint.value?.kind === 'mistake' ? 'warning' : 'primary',
 )
-const hintMessage = computed(() => {
+const hintText = computed(() => {
   if (noHint.value) return 'Nothing left to deduce — you’re all caught up!'
   const h = hint.value
   if (!h) return ''
-  if (hintLevel.value === 1) return `${h.reason} (Hint again to pinpoint the square.)`
-  if (hintLevel.value === 2) return 'Here’s the exact square. Hint again to see what to do.'
+  if (hintLevel.value === 1) return h.nudge
+  if (hintLevel.value === 2) return h.lesson
   return h.reveal
 })
+// The far-left / far-right packing diagram is the teaching payload — show it once
+// the reasoning is on screen (L2), and keep it through the reveal (L3).
+const hintPacking = computed(() =>
+  hint.value && hintLevel.value >= 2 ? hint.value.packing : [],
+)
+const hintMore = computed(() => Boolean(hint.value) && hintLevel.value < 3)
 
 // Which pictures this player has already solved (persisted across visits), so
 // "New puzzle" can serve fresh ones and the picker can show what's done.
@@ -442,6 +452,16 @@ onBeforeUnmount(() => {
         Fill the cells so each row and column matches its run-length clues — the numbers count
         consecutive filled squares. A hidden picture emerges. Drag to paint; right-click to mark X.
       </template>
+      <template #actions>
+        <v-btn
+          icon="mdi-clipboard-text-outline"
+          variant="text"
+          :density="mobile ? 'comfortable' : undefined"
+          title="Copy puzzle as text — paste into an AI chat to ask for a hint"
+          aria-label="Copy puzzle as text for AI help"
+          @click="copyForLLM"
+        />
+      </template>
       <template #settings>
         <div class="d-flex flex-column ga-4">
           <div>
@@ -501,7 +521,7 @@ onBeforeUnmount(() => {
         <v-btn value="mark" size="small" prepend-icon="mdi-close"> Mark </v-btn>
       </v-btn-toggle>
       <v-btn
-        variant="outlined"
+        variant="tonal"
         size="small"
         prepend-icon="mdi-check-decagram"
         :disabled="solved"
@@ -509,21 +529,14 @@ onBeforeUnmount(() => {
         >Check</v-btn
       >
       <v-btn
-        variant="outlined"
+        variant="tonal"
         size="small"
+        color="secondary"
         prepend-icon="mdi-lightbulb-on-outline"
         :disabled="solved"
         @click="nextHint"
         >Hint</v-btn
       >
-      <v-btn
-        variant="outlined"
-        size="small"
-        icon="mdi-clipboard-text-outline"
-        title="Copy puzzle as text — paste into an AI chat to ask for a hint"
-        aria-label="Copy puzzle as text for AI help"
-        @click="copyForLLM"
-      />
       <v-spacer />
       <div class="text-body-2 text-medium-emphasis mr-1" aria-label="Elapsed time">
         <v-icon icon="mdi-clock-outline" size="small" /> {{ timeLabel }}
@@ -578,14 +591,19 @@ onBeforeUnmount(() => {
     </div>
 
     <v-alert
-      v-if="hintMessage"
+      v-if="hintText"
       class="mt-4"
       density="comfortable"
       variant="tonal"
       :color="hintColor"
       icon="mdi-lightbulb-on-outline"
-      >{{ hintMessage }}</v-alert
     >
+      <div>{{ hintText }}</div>
+      <pre v-if="hintPacking.length" class="nono-packing">{{ hintPacking.join('\n') }}</pre>
+      <div v-if="hintMore" class="text-caption text-medium-emphasis mt-1">
+        Hint again to {{ hintLevel === 1 ? 'see how to work it out' : 'reveal the exact square' }}.
+      </div>
+    </v-alert>
 
     <!-- On solve: keep the finished picture on show (clues + X-marks fade on the
          board itself) and celebrate with a compact banner below it, so the
@@ -684,17 +702,31 @@ onBeforeUnmount(() => {
 .ncell--x { color: rgba(148, 163, 184, 0.7); }
 /* Hint spotlight: a translucent flood (a huge inset shadow) tints the cell over
    whatever's beneath — filled, X, or empty — so a highlighted row/column reads as
-   a band. The exact square gets a stronger tint, a bright ring, and a soft pulse. */
+   a band. On-theme purple (the app's primary). The exact square (only at the final
+   reveal) gets a stronger tint, a bright ring, and a soft pulse. */
 .ncell--hint-region {
-  box-shadow: inset 0 0 0 999px rgba(96, 165, 250, 0.16);
+  box-shadow: inset 0 0 0 999px rgba(192, 132, 252, 0.16);
 }
 .ncell--hint-cell {
-  box-shadow: inset 0 0 0 999px rgba(96, 165, 250, 0.32), inset 0 0 0 2px #60a5fa;
+  box-shadow: inset 0 0 0 999px rgba(192, 132, 252, 0.34), inset 0 0 0 2px #c084fc;
   animation: nono-hint 1.1s ease-in-out infinite;
 }
 @keyframes nono-hint {
-  0%, 100% { box-shadow: inset 0 0 0 999px rgba(96, 165, 250, 0.26), inset 0 0 0 2px #60a5fa; }
-  50% { box-shadow: inset 0 0 0 999px rgba(96, 165, 250, 0.46), inset 0 0 0 2px #93c5fd; }
+  0%, 100% { box-shadow: inset 0 0 0 999px rgba(192, 132, 252, 0.28), inset 0 0 0 2px #c084fc; }
+  50% { box-shadow: inset 0 0 0 999px rgba(192, 132, 252, 0.5), inset 0 0 0 2px #d8b4fe; }
+}
+/* The far-left / far-right packing diagram in the hint alert. */
+.nono-packing {
+  margin: 8px 0 2px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(2, 6, 23, 0.55);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82em;
+  line-height: 1.5;
+  letter-spacing: 0.08em;
+  overflow-x: auto;
+  white-space: pre;
 }
 .swatch {
   display: inline-block;

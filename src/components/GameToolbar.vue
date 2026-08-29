@@ -22,6 +22,7 @@ const infoOpen = ref(false)
   <div v-if="mobile" class="d-flex align-center ga-1 mb-3">
     <v-btn icon="mdi-arrow-left" variant="text" density="comfortable" @click="router.push({ name: 'games' })" />
     <h1 class="page-title page-title--flush mb-0 flex-grow-1 text-truncate">{{ title }}</h1>
+    <slot name="actions" />
     <v-btn v-if="$slots.info" icon="mdi-information-outline" variant="text" density="comfortable" @click="infoOpen = true" />
     <v-btn v-if="shareable" icon="mdi-share-variant" variant="text" density="comfortable" @click="emit('share')" />
     <v-menu v-if="$slots.settings" location="bottom end" :close-on-content-click="false">
@@ -40,6 +41,7 @@ const infoOpen = ref(false)
     <div class="d-flex align-center ga-2">
       <h1 class="page-title mb-0">{{ title }}</h1>
       <v-spacer />
+      <slot name="actions" />
       <v-btn v-if="$slots.info" icon="mdi-information-outline" variant="text" @click="infoOpen = true" />
       <v-btn v-if="shareable" icon="mdi-share-variant" variant="text" @click="emit('share')" />
       <v-menu v-if="$slots.settings" location="bottom end" :close-on-content-click="false">
