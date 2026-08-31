@@ -33,6 +33,22 @@ const REACH = make(2, 3, [T, F, F, F, F, T], [[1], [1]], [[1], [0], [1]])
 // 2×2 diagonal — every line is a lone [1], so no single line settles anything.
 const DIAG = make(2, 2, [T, F, F, T], [[1], [1]], [[1], [1]])
 
+// A 5×5 that single-line solving can't finish: after propagating from empty it
+// stalls (STALL = that fixpoint), yet a one-step probe forces a square — the
+// cross-referencing case. Uniquely solvable, so the probe's verdict is sound.
+//   #....  /  #..#.  /  .##..  /  .##.#  /  .#..#
+const STALL_SOL = [
+  T, F, F, F, F, T, F, F, T, F, F, T, T, F, F, F, T, T, F, T, F, T, F, F, T,
+]
+const STALL = make(
+  5,
+  5,
+  STALL_SOL,
+  [[1], [1, 1], [2], [2, 1], [1, 1]],
+  [[2], [3], [2], [1], [2]],
+)
+const STALL_MARKS = [0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 2, 2, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0]
+
 const nonEmpty = (s: string) => typeof s === 'string' && s.length > 0
 
 describe('findHint', () => {
@@ -78,6 +94,28 @@ describe('findHint', () => {
   it('reveals a true square when no single-line step exists', () => {
     const h = findHint([0, 0, 0, 0], DIAG)!
     expect(h).toMatchObject({ kind: 'reveal', cell: 0, apply: 1 })
+  })
+
+  it('cross-references a stalled board: probes a keystone square and teaches the technique', () => {
+    const h = findHint(STALL_MARKS, STALL)!
+    expect(h.kind).toBe('crossref')
+    // The probe's verdict must agree with the (unique) solution, not just reveal it.
+    expect(h.apply === 1).toBe(STALL_SOL[h.cell])
+    expect(h.apply).not.toBe(0)
+    // It surfaces the keystone — the square whose value unblocks further solving.
+    expect(h.lesson).toMatch(/probing|what-if|contradiction/i)
+    expect(nonEmpty(h.nudge) && nonEmpty(h.lesson) && nonEmpty(h.reveal)).toBe(true)
+  })
+
+  it('the cross-reference hint points at a genuinely unblocking square', () => {
+    // Applying the hint's square, single-line solving should make fresh progress.
+    const h = findHint(STALL_MARKS, STALL)!
+    const after = STALL_MARKS.slice()
+    after[h.cell] = h.apply
+    const next = findHint(after, STALL)!
+    // Not stuck on the same square, and no mistake introduced.
+    expect(next.cell === h.cell && next.kind === h.kind).toBe(false)
+    expect(next.kind).not.toBe('mistake')
   })
 
   it('returns null once every square is decided', () => {

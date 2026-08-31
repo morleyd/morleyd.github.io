@@ -18,12 +18,16 @@
  *   cap      — a completed run must have a blank on each side.
  *   reach    — a square no run can cover in any arrangement, so it's blank.
  *   mistake  — a filled/emptied square that can't match the picture (shown first).
- *   reveal   — last resort: no single-line step exists, so reveal one true square.
+ *   crossref — no single line moves, but a "what-if" probe on one square dead-ends,
+ *              so its value is forced by the row and column together (teaches the
+ *              probing technique and points at the most unblocking square).
+ *   reveal   — last resort: even a probe can't settle a square, so reveal one true
+ *              square (the most unblocking one) to restart progress.
  */
 
 import { forcedCells, type Cell, type Nonogram } from './nonogram'
 
-export type HintKind = 'mistake' | 'complete' | 'overlap' | 'cap' | 'reach' | 'reveal'
+export type HintKind = 'mistake' | 'complete' | 'overlap' | 'cap' | 'reach' | 'crossref' | 'reveal'
 
 export interface Hint {
   /** Row-major index of the square the hint is about. */
@@ -45,6 +49,13 @@ export interface Hint {
 }
 
 type State = -1 | 0 | 1 // solver view: unknown · known-empty · known-filled
+
+/** A row or column: its cell indices, clue, and display label (`row 3`). */
+interface LineRef {
+  idxs: number[]
+  clue: number[]
+  label: string
+}
 
 const toRuns = (clue: number[]): number[] => (clue.length === 1 && clue[0] === 0 ? [] : clue)
 const minSpan = (runs: number[]): number =>
@@ -104,7 +115,7 @@ const strip = (label: string, fill: boolean[]): string =>
   `${label.padEnd(12)}${fill.map((f) => (f ? '█' : '·')).join('')}`
 
 /** Priority of each technique — higher is surfaced first (fills before X's). */
-const SCORE: Record<Exclude<HintKind, 'mistake' | 'reveal'>, number> = {
+const SCORE: Record<Exclude<HintKind, 'mistake' | 'crossref' | 'reveal'>, number> = {
   complete: 6,
   overlap: 5,
   cap: 3,
@@ -171,7 +182,7 @@ export function findHint(marks: readonly number[], puzzle: Nonogram): Hint | nul
       const doFill = forced.fill[k]
       if (!doFill && !forced.empty[k]) continue
 
-      let kind: Exclude<HintKind, 'mistake' | 'reveal'>
+      let kind: Exclude<HintKind, 'mistake' | 'crossref' | 'reveal'>
       if (doFill) kind = whole ? 'complete' : 'overlap'
       else if ((k > 0 && cells[k - 1] === 1) || (k < idxs.length - 1 && cells[k + 1] === 1)) kind = 'cap'
       else kind = 'reach'
@@ -183,31 +194,167 @@ export function findHint(marks: readonly number[], puzzle: Nonogram): Hint | nul
   }
   if (best) return best
 
-  // 3) No single-line step remains — reveal one true square to break the stall.
-  for (let i = 0; i < marks.length; i += 1) {
-    if ((marks[i] ?? 0) !== 0) continue
-    const r = Math.floor(i / cols)
-    return {
-      cell: i,
-      region: rowIdx(r),
-      kind: 'reveal',
-      apply: solution[i] ? 1 : 2,
-      nudge: `No single-line deduction is left from here — the next step needs comparing a row and a column together.`,
-      lesson: `When one line alone can't settle anything, a filled square you place in a column often unlocks the row it crosses (and vice-versa). Here's one true square in row ${r + 1} to get that going again.`,
-      packing: [],
-      reveal: solution[i]
-        ? 'In the solution this square is filled.'
-        : 'In the solution this square is empty — mark it with an X.',
+  // 3) Single-line solving has stalled — no unpainted square is forced by any one
+  // line on its own. Teach the cross-referencing (probe) step: try each square
+  // both ways and propagate along the lines it touches; the value that dead-ends
+  // some line is impossible, so the other is forced. Among all squares a probe
+  // settles, surface the one whose correct value then unblocks the MOST further
+  // line-solving — the keystone — so the hint points at a square that matters, not
+  // whichever comes first top-left.
+  const base: State[] = marks.map((m) => (m === 1 ? 1 : m === 2 ? 0 : -1)) as State[]
+  const withCell = (i: number, v: State): State[] => {
+    const b = base.slice()
+    b[i] = v
+    return b
+  }
+  let probe: { i: number; apply: Cell; unlock: number; dead: LineRef } | null = null
+  let reveal: { i: number; apply: Cell; unlock: number } | null = null
+  for (let i = 0; i < base.length; i += 1) {
+    if (base[i] !== -1) continue
+    const fillRes = propagateBoard(withCell(i, 1), lines)
+    const emptyRes = propagateBoard(withCell(i, 0), lines)
+    // Any real slip was caught in step 1, so `base` agrees with the solution and
+    // the true value never dead-ends — track the most unblocking true square as a
+    // last resort for genuinely deep puzzles no single probe can crack.
+    const correct = solution[i] ? fillRes : emptyRes
+    if (!reveal || correct.decided > reveal.unlock) {
+      reveal = { i, apply: solution[i] ? 1 : 2, unlock: correct.decided }
+    }
+    // Provably settled by the probe when exactly one assignment dead-ends. Keep
+    // the survivor with the largest downstream unlock.
+    if (fillRes.dead && !emptyRes.dead) {
+      if (!probe || emptyRes.decided > probe.unlock)
+        probe = { i, apply: 2, unlock: emptyRes.decided, dead: fillRes.dead }
+    } else if (emptyRes.dead && !fillRes.dead) {
+      if (!probe || fillRes.decided > probe.unlock)
+        probe = { i, apply: 1, unlock: fillRes.decided, dead: emptyRes.dead }
     }
   }
+  if (probe) return buildProbeHint(probe, base, lines, cols)
+  if (reveal) return buildRevealHint(reveal, base, lines, cols)
   return null
+}
+
+/** Whole-board single-line propagation to a fixpoint from a seeded state grid,
+ * used by the cross-referencing probe. Applies each line's forced fills/empties
+ * (via `forcedCells`) round-robin until nothing new is decided. Returns how many
+ * unknown cells it settled and, if a line ran out of room, that dead line. */
+function propagateBoard(board: State[], lines: LineRef[]): { decided: number; dead: LineRef | null } {
+  let decided = 0
+  for (;;) {
+    let changed = false
+    for (const line of lines) {
+      const forced = forcedCells(cellsFromState(board, line.idxs), line.clue)
+      if (!forced) return { decided, dead: line }
+      for (let k = 0; k < line.idxs.length; k += 1) {
+        const gi = line.idxs[k]
+        if (board[gi] !== -1) continue
+        if (forced.fill[k]) {
+          board[gi] = 1
+          decided += 1
+          changed = true
+        } else if (forced.empty[k]) {
+          board[gi] = 0
+          decided += 1
+          changed = true
+        }
+      }
+    }
+    if (!changed) break
+  }
+  return { decided, dead: null }
+}
+
+/** Read a line out of the solver's state grid as painted cells for `forcedCells`
+ * (known-filled → filled, known-empty → X, unknown → blank). */
+const cellsFromState = (board: State[], idxs: number[]): Cell[] =>
+  idxs.map((i) => (board[i] === 1 ? 1 : board[i] === 0 ? 2 : 0)) as Cell[]
+
+/** Which crossing line (the square's own row or column) a placement immediately
+ * opens up, and by how much — the line the player should watch "unlock". */
+function beneficiary(base: State[], i: number, v: State, lines: LineRef[], cols: number): LineRef {
+  const placed = base.slice()
+  placed[i] = v
+  const rows = base.length / cols
+  const rowLine = lines[Math.floor(i / cols)] // `lines` is rows first, then columns
+  const colLine = lines[rows + (i % cols)]
+  const gained = (line: LineRef): number => {
+    const forced = forcedCells(cellsFromState(placed, line.idxs), line.clue)
+    if (!forced) return 0
+    let n = 0
+    for (let k = 0; k < line.idxs.length; k += 1) {
+      if (placed[line.idxs[k]] === -1 && (forced.fill[k] || forced.empty[k])) n += 1
+    }
+    return n
+  }
+  return gained(colLine) > gained(rowLine) ? colLine : rowLine
+}
+
+function buildProbeHint(
+  p: { i: number; apply: Cell; unlock: number; dead: LineRef },
+  base: State[],
+  lines: LineRef[],
+  cols: number,
+): Hint {
+  const r = Math.floor(p.i / cols)
+  const c = (p.i % cols) + 1
+  const forcedEmpty = p.apply === 2
+  const wrong = forcedEmpty ? 'filled' : 'empty'
+  const right = forcedEmpty ? 'empty' : 'filled'
+  const ben = beneficiary(base, p.i, forcedEmpty ? 0 : 1, lines, cols)
+  const plural = p.unlock === 1 ? '' : 's'
+  const unlocks =
+    p.unlock > 0
+      ? ` And it pays off: placing it lets single-line solving settle ${p.unlock} more square${plural}.`
+      : ''
+  return {
+    cell: p.i,
+    region: ben.idxs,
+    kind: 'crossref',
+    apply: p.apply,
+    nudge: `No row or column can move on its own now — this is a cross-referencing step. Watch ${ben.label}: one of its squares can be pinned down by testing a "what-if" against the lines that cross it.`,
+    lesson: `The probing trick, for when every line stalls: take the square at row ${r + 1}, column ${c}, pencil it in as ${wrong}, and follow the knock-on fills and X's along the lines it touches. It snowballs into a contradiction — ${cap(p.dead.label)} is left with no room for its clue (${clueText(p.dead.clue)}). Since ${wrong} is impossible, the square must be ${right}.${unlocks}`,
+    packing: [],
+    reveal: forcedEmpty
+      ? `So this square is empty — mark it with an X, then re-scan ${ben.label}.`
+      : `So this square is filled — fill it in, then re-scan ${ben.label}.`,
+  }
+}
+
+function buildRevealHint(
+  reveal: { i: number; apply: Cell; unlock: number },
+  base: State[],
+  lines: LineRef[],
+  cols: number,
+): Hint {
+  const r = Math.floor(reveal.i / cols)
+  const c = (reveal.i % cols) + 1
+  const filled = reveal.apply === 1
+  const ben = beneficiary(base, reveal.i, filled ? 1 : 0, lines, cols)
+  const plural = reveal.unlock === 1 ? '' : 's'
+  const opens =
+    reveal.unlock > 0
+      ? ` Placing it reopens ${reveal.unlock} square${plural} of ordinary line-solving, so try to spot how it lets ${ben.label} and its crossing lines advance again.`
+      : ` Place it, then look for how it lets ${ben.label} and its crossing lines start moving again.`
+  return {
+    cell: reveal.i,
+    region: ben.idxs,
+    kind: 'reveal',
+    apply: reveal.apply,
+    nudge: `This is a genuinely hard spot — no single line moves, and no one "what-if" settles a square outright either. Deep puzzles like this need weighing two or three lines at once. Watch ${ben.label} for the way forward.`,
+    lesson: `To keep you moving, here's one square that's true in the finished picture — at row ${r + 1}, column ${c}.${opens}`,
+    packing: [],
+    reveal: filled
+      ? `In the solution this square is filled — fill it in.`
+      : `In the solution this square is empty — mark it with an X.`,
+  }
 }
 
 const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1)
 const clueText = (clue: number[]): string => (clue.length === 1 && clue[0] === 0 ? '0' : clue.join(' '))
 
 function buildForcedHint(
-  kind: Exclude<HintKind, 'mistake' | 'reveal'>,
+  kind: Exclude<HintKind, 'mistake' | 'crossref' | 'reveal'>,
   idxs: number[],
   k: number,
   clue: number[],
