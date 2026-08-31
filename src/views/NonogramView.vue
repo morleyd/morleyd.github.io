@@ -86,7 +86,7 @@ const hintText = computed(() => {
   if (hintLevel.value === 2) return h.lesson
   return h.reveal
 })
-// The far-left / far-right packing diagram is the teaching payload — show it once
+// The far-ends packing diagram is the teaching payload — show it once
 // the reasoning is on screen (L2), and keep it through the reveal (L3).
 const hintPacking = computed(() =>
   hint.value && hintLevel.value >= 2 ? hint.value.packing : [],
@@ -715,7 +715,7 @@ onBeforeUnmount(() => {
   0%, 100% { box-shadow: inset 0 0 0 999px rgba(192, 132, 252, 0.28), inset 0 0 0 2px #c084fc; }
   50% { box-shadow: inset 0 0 0 999px rgba(192, 132, 252, 0.5), inset 0 0 0 2px #d8b4fe; }
 }
-/* The far-left / far-right packing diagram in the hint alert. */
+/* The far-ends packing diagram in the hint alert (rows horizontal, columns vertical). */
 .nono-packing {
   margin: 8px 0 2px;
   padding: 8px 10px;

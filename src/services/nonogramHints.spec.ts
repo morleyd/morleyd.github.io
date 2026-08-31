@@ -24,6 +24,16 @@ const OVERLAP = make(
   [[0], [1], [1], [1], [0]],
 )
 
+// OVERLAP transposed: a run of 3 in COLUMN 1 overlaps itself — the same trick,
+// but vertical, so the hint must talk top↔bottom, not left↔right.
+const OVERLAP_COL = make(
+  5,
+  2,
+  [F, F, T, F, T, F, T, F, F, F],
+  [[0], [1], [1], [1], [0]],
+  [[3], [0]],
+)
+
 // 2×4: two rows of a completed run of 2, so their tails must be X.
 const CAP = make(2, 4, [T, T, F, F, F, F, T, T], [[2], [2]], [[1], [1], [1], [1]])
 
@@ -88,7 +98,26 @@ describe('findHint', () => {
   it('marks an unreachable square empty via "reach"', () => {
     const h = findHint(new Array(6).fill(0), REACH)!
     expect(h).toMatchObject({ kind: 'reach', cell: 1, apply: 2 })
-    expect(h.packing).toHaveLength(2)
+    // The unreachable square sits in a COLUMN, so the diagram is a vertical
+    // transpose: a header line plus one glyph per cell down the 2-cell column.
+    expect(h.packing).toHaveLength(3)
+  })
+
+  it('orients the packing diagram to the line — rows left↔right, columns top↔bottom', () => {
+    const rowH = findHint(new Array(10).fill(0), OVERLAP)!
+    expect(rowH.kind).toBe('overlap')
+    expect(rowH.lesson.toLowerCase()).toMatch(/left|right/)
+    expect(rowH.lesson.toLowerCase()).not.toMatch(/\b(top|bottom|up|down)\b/)
+    // Row diagram: three horizontal strips (far-left / far-right / overlap).
+    expect(rowH.packing).toHaveLength(3)
+
+    const colH = findHint(new Array(10).fill(0), OVERLAP_COL)!
+    expect(colH.kind).toBe('overlap')
+    expect(colH.lesson.toLowerCase()).not.toMatch(/left|right/)
+    expect(colH.lesson.toLowerCase()).toMatch(/top|bottom|up|down|high|low/)
+    // Column diagram: a header plus one line per cell (1 + 5), read top→bottom.
+    expect(colH.packing).toHaveLength(6)
+    expect(colH.packing[0].toLowerCase()).toContain('top')
   })
 
   it('reveals a true square when no single-line step exists', () => {

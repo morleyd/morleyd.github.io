@@ -3,7 +3,7 @@
  * point. Given the player's marks and the puzzle it finds the single most
  * instructive next step, names the technique behind it, and explains the
  * reasoning with the line's real clue numbers (and, where it helps, a little
- * far-left / far-right packing diagram) so the player can learn to spot it
+ * far-ends packing diagram, oriented to the row or column) so the player can spot it
  * themselves. The view reveals it in three steps:
  *
  *   L1 `nudge`  — which line to look at and which idea applies (no square).
@@ -42,7 +42,8 @@ export interface Hint {
   nudge: string
   /** L2 — the reasoning that lets the player find the square themselves. */
   lesson: string
-  /** L2 — optional monospace diagram (far-left / far-right packings). */
+  /** L2 — optional monospace diagram (far-ends packings; horizontal for a row,
+   *  a vertical transpose for a column so it matches the board). */
   packing: string[]
   /** L3 — the exact square and what to do with it. */
   reveal: string
@@ -111,8 +112,32 @@ const rightmostFill = (state: State[], runs: number[]): boolean[] | null => {
   return s && fillFromStarts(s, [...runs].reverse(), state.length).reverse()
 }
 
-const strip = (label: string, fill: boolean[]): string =>
-  `${label.padEnd(12)}${fill.map((f) => (f ? '█' : '·')).join('')}`
+const glyph = (f: boolean): string => (f ? '█' : '·')
+
+/**
+ * Render the far-ends packing arrangements as a monospace diagram oriented like
+ * the board: horizontal strips for a row, and a vertical transpose for a column
+ * so its runs read top→bottom — matching the highlighted column — instead of
+ * being rotated onto a misleading left→right strip. Each column arrangement gets
+ * a centred header and one glyph per cell down the line.
+ */
+function packingDiagram(
+  vertical: boolean,
+  arrangements: { label: string; fill: boolean[] }[],
+): string[] {
+  if (!arrangements.length) return []
+  if (!vertical) return arrangements.map((a) => `${a.label.padEnd(12)}${a.fill.map(glyph).join('')}`)
+  const n = arrangements[0].fill.length
+  const w = Math.max(...arrangements.map((a) => a.label.length))
+  const center = (s: string): string => {
+    const gap = w - s.length
+    const left = Math.floor(gap / 2)
+    return ' '.repeat(left) + s + ' '.repeat(gap - left)
+  }
+  const lines = [arrangements.map((a) => center(a.label)).join('  ')]
+  for (let k = 0; k < n; k += 1) lines.push(arrangements.map((a) => center(glyph(a.fill[k]))).join('  '))
+  return lines
+}
 
 /** Priority of each technique — higher is surfaced first (fills before X's). */
 const SCORE: Record<Exclude<HintKind, 'mistake' | 'crossref' | 'reveal'>, number> = {
@@ -367,7 +392,19 @@ function buildForcedHint(
   const cell = idxs[k]
   const region = idxs
   const clueStr = clueText(clue)
-  const both = lf && rf ? [strip('far-left', lf), strip('far-right', rf), strip('overlap', forcedFill)] : []
+  // Orient the wording and the diagram to the line: a run in a row slides
+  // left↔right, a run in a column slides top↔bottom.
+  const col = label.startsWith('column')
+  const nearLabel = col ? 'top' : 'far-left'
+  const farLabel = col ? 'bottom' : 'far-right'
+  const both =
+    lf && rf
+      ? packingDiagram(col, [
+          { label: nearLabel, fill: lf },
+          { label: farLabel, fill: rf },
+          { label: 'overlap', fill: forcedFill },
+        ])
+      : []
 
   if (kind === 'complete') {
     return {
@@ -377,7 +414,7 @@ function buildForcedHint(
       apply: 1,
       nudge: `${cap(label)} is fully pinned down — its clue (${clueStr}) only fits one way in ${idxs.length} squares.`,
       lesson: `Add the runs plus the single gaps they need between them: ${runs.join(' + ')}${runs.length > 1 ? ` + ${runs.length - 1} gap${runs.length > 2 ? 's' : ''}` : ''} = ${idxs.length}, exactly the length. With no slack there's only one arrangement, so every square in the line is decided.`,
-      packing: lf ? [strip('the one fit', lf)] : [],
+      packing: lf ? packingDiagram(col, [{ label: 'the one fit', fill: lf }]) : [],
       reveal: 'This square is filled in that one arrangement — fill it in.',
     }
   }
@@ -388,9 +425,9 @@ function buildForcedHint(
       kind,
       apply: 1,
       nudge: `Look at ${label}. A run in its clue (${clueStr}) is long enough to overlap itself — some squares stay filled however it slides.`,
-      lesson: `Push the runs as far left as they'll go, then as far right. Any square filled in BOTH extremes is locked in no matter what happens between. Compare the two, and take the overlap:`,
+      lesson: `Push the runs as ${col ? 'high up the column as they go, then as low' : "far left as they'll go, then as far right"}. Any square filled in BOTH extremes is locked in no matter what happens between. Compare the two, and take the overlap:`,
       packing: both,
-      reveal: 'This square is filled in both the far-left and far-right fit — fill it in.',
+      reveal: `This square is filled in both the ${nearLabel} and ${farLabel} fit — fill it in.`,
     }
   }
   if (kind === 'cap') {
@@ -412,8 +449,14 @@ function buildForcedHint(
     kind,
     apply: 2,
     nudge: `In ${label}, no run can reach this square.`,
-    lesson: `Try fitting the clue (${clueStr}) every which way — hard left, hard right, everywhere between. This square comes up blank in all of them, so nothing can ever fill it:`,
-    packing: lf && rf ? [strip('far-left', lf), strip('far-right', rf)] : [],
+    lesson: `Try fitting the clue (${clueStr}) every which way — ${col ? 'hard to the top, hard to the bottom' : 'hard left, hard right'}, everywhere between. This square comes up blank in all of them, so nothing can ever fill it:`,
+    packing:
+      lf && rf
+        ? packingDiagram(col, [
+            { label: nearLabel, fill: lf },
+            { label: farLabel, fill: rf },
+          ])
+        : [],
     reveal: 'This square must be empty — mark it with an X.',
   }
 }
