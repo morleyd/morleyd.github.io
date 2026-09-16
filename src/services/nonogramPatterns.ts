@@ -2216,6 +2216,106 @@ const P15_BATCH2: NonogramPattern[] = [
   },
 ]
 
+/** 10×10 batch two — hand-drawn animals & objects, each verified unique
+ *  via countSolutions. Includes designs by David. */
+const P10_BATCH2: NonogramPattern[] = [
+  {
+    id: 'chick10',
+    name: 'Chick',
+    size: 10,
+    rows: [
+      '.####.....',
+      '##.##.....',
+      '.####...#.',
+      '..##...##.',
+      '..#######.',
+      '..######..',
+      '#.#####...',
+      '######....',
+      '....#.....',
+      '...##.....',
+    ],
+  },
+  {
+    id: 'rabbit10',
+    name: 'Rabbit',
+    size: 10,
+    rows: [
+      '####......',
+      '#.##..####',
+      '..##..##.#',
+      '..##..##..',
+      '.########.',
+      '##########',
+      '##.####.##',
+      '##.####.##',
+      '.###..###.',
+      '..######..',
+    ],
+  },
+  {
+    id: 'bird10',
+    name: 'Bird',
+    size: 10,
+    rows: [
+      '...#####..',
+      '..##...##.',
+      '..#.#.#.#.',
+      '..#.....#.',
+      '.#...#..##',
+      '.#.......#',
+      '.#..###..#',
+      '.#..###..#',
+      '..#..#..#.',
+      '.###...###',
+    ],
+  },
+  {
+    id: 'anvil10',
+    name: 'Anvil',
+    size: 10,
+    rows: [
+      '..........',
+      '..........',
+      '..........',
+      '##########',
+      '.#######..',
+      '..#####...',
+      '...#.#....',
+      '..#####...',
+      '..........',
+      '..........',
+    ],
+  },
+]
+
+/** 15×15 batch three — hand-drawn scenes, animals & objects, each verified
+ *  unique via countSolutions. Includes designs by David. */
+const P15_BATCH3: NonogramPattern[] = [
+  {
+    id: 'david15',
+    name: 'David',
+    size: 15,
+    rows: [
+      '.....######....',
+      '....########...',
+      '...##..#...##..',
+      '...#...##...#..',
+      '..#..........#.',
+      '..#..##..##..#.',
+      '..#..........#.',
+      '..#..##..##..#.',
+      '..#..........#.',
+      '..##........##.',
+      '...#.....#..#..',
+      '...##..###.##..',
+      '....#......#...',
+      '.....#....#....',
+      '......####.....',
+    ],
+  },
+]
+
 /** All bundled pictures, across every supported board size (legacy included). */
 export const NONOGRAM_PATTERNS: NonogramPattern[] = [
   ...P5,
@@ -2224,6 +2324,8 @@ export const NONOGRAM_PATTERNS: NonogramPattern[] = [
   ...P15,
   ...P15_KENNEY,
   ...P15_BATCH2,
+  ...P10_BATCH2,
+  ...P15_BATCH3,
   ...LEGACY,
 ]
 
