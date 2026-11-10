@@ -1,7 +1,19 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
+const DEFAULT_TITLE = 'David Morley — Applied Research Scientist'
+
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
+  // /work#salt etc. land on the case study, clear of the fixed app bar;
+  // back/forward restores the old position; a game rewriting its seed in the
+  // URL (same route, new params) keeps the scroll; everything else starts at
+  // the top.
+  scrollBehavior(to, from, savedPosition) {
+    if (savedPosition) return savedPosition
+    if (to.hash) return { el: to.hash, top: 80 }
+    if (to.name === from.name && to.path !== from.path) return false
+    return { top: 0 }
+  },
   routes: [
     {
       path: '/',
@@ -9,14 +21,24 @@ const router = createRouter({
       component: () => import('../views/HomeView.vue'),
     },
     {
-      path: '/contact',
-      name: 'contact',
-      component: () => import('../views/ContactView.vue'),
+      path: '/work',
+      name: 'work',
+      component: () => import('../views/WorkView.vue'),
+      meta: { title: 'Work' },
     },
+    {
+      path: '/about',
+      name: 'about',
+      component: () => import('../views/AboutView.vue'),
+      meta: { title: 'About' },
+    },
+    // Old links to /contact keep working.
+    { path: '/contact', redirect: { name: 'about' } },
     {
       path: '/games',
       name: 'games',
       component: () => import('../views/GamesView.vue'),
+      meta: { title: 'Playground' },
     },
     {
       path: '/wordle/:hash?',
@@ -172,6 +194,10 @@ const router = createRouter({
       component: () => import('../views/NotFoundView.vue'),
     },
   ],
+})
+
+router.afterEach((to) => {
+  document.title = to.meta.title ? `${to.meta.title} · David Morley` : DEFAULT_TITLE
 })
 
 export default router
