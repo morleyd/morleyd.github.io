@@ -28,6 +28,9 @@ coverage
 
 .eslintcache
 
+# Claude Code: local worktrees and session state
+.claude/
+
 # Cypress
 /cypress/videos/
 /cypress/screenshots/

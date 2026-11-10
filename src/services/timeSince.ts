@@ -41,9 +41,6 @@ export const calendarDiff = (from: Date, to: Date): CalendarDiff => {
   }
 
   const cursor = new Date(from.getTime())
-  let years = 0
-  let months = 0
-  let days = 0
 
   const advanceWhile = (step: (d: Date) => void): number => {
     let count = 0
@@ -59,9 +56,10 @@ export const calendarDiff = (from: Date, to: Date): CalendarDiff => {
     }
   }
 
-  years = advanceWhile((d) => d.setFullYear(d.getFullYear() + 1))
-  months = advanceWhile((d) => d.setMonth(d.getMonth() + 1))
-  days = advanceWhile((d) => d.setDate(d.getDate() + 1))
+  // Order matters: each step advances the shared cursor before the next.
+  const years = advanceWhile((d) => d.setFullYear(d.getFullYear() + 1))
+  const months = advanceWhile((d) => d.setMonth(d.getMonth() + 1))
+  const days = advanceWhile((d) => d.setDate(d.getDate() + 1))
 
   let remainder = to.getTime() - cursor.getTime()
   const hours = Math.floor(remainder / HOUR)
