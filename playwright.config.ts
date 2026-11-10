@@ -1,8 +1,11 @@
 import { defineConfig, devices } from '@playwright/test'
 
 /**
- * End-to-end tests. Playwright boots the Vite dev server itself (fixed port) and
- * drives a real Chromium against it. Run with `npm run test:e2e`.
+ * End-to-end tests. Playwright builds the site and serves it with `vite preview`
+ * (fixed port), then drives a real Chromium against it. Run with `npm run test:e2e`.
+ *
+ * Not the dev server: on a cold cache it discovers auto-imported Vuetify
+ * components mid-run and reloads the page, which drops clicks in flight.
  */
 export default defineConfig({
   testDir: './e2e',
@@ -16,9 +19,9 @@ export default defineConfig({
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
-    command: 'npm run dev -- --port 5199 --strictPort',
+    command: 'npm run build && npm run preview -- --port 5199 --strictPort',
     url: 'http://localhost:5199',
     reuseExistingServer: !process.env.CI,
-    timeout: 60_000,
+    timeout: 120_000,
   },
 })

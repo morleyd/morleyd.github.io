@@ -7,7 +7,8 @@ export default mergeConfig(
   defineConfig({
     test: {
       environment: 'jsdom',
-      exclude: [...configDefaults.exclude, 'e2e/**'],
+      // .claude/ holds local Claude Code worktrees (full repo copies); skip them.
+      exclude: [...configDefaults.exclude, 'e2e/**', '.claude/**'],
       root: fileURLToPath(new URL('./', import.meta.url)),
     },
   }),
