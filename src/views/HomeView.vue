@@ -1,13 +1,15 @@
 <script setup>
+import HeroSection from '@/components/HeroSection.vue';
+import FeaturedWork from '@/components/FeaturedWork.vue';
+import SideProjects from '@/components/SideProjects.vue';
 import Timeline from '@/components/Timeline.vue';
-import Projects from '../components/Projects.vue';
-import Awards from '../components/Awards.vue';
-
 </script>
+
 <template>
-  <v-card flat class="bg-transparent fill-height">
+  <v-container max-width="1100" class="px-4 px-md-8">
+    <HeroSection />
+    <FeaturedWork />
+    <SideProjects />
     <Timeline />
-    <Projects />
-    <Awards />
-  </v-card>
+  </v-container>
 </template>

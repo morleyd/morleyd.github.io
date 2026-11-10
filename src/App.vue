@@ -1,11 +1,10 @@
 <script setup>
 import { computed, watchEffect } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { useDisplay } from 'vuetify'
 import AppBar from '@/components/AppBar.vue'
 
 const route = useRoute()
-const router = useRouter()
 const { mobile } = useDisplay()
 
 // Game pages suppress double-tap zoom and long-press selection (see .game-page
@@ -23,24 +22,45 @@ watchEffect(() => {
 const hideAppBar = computed(
   () => route.meta.hideAppBar || (route.meta.gamePage && mobile.value),
 )
-
-function navTo(value) {
-  router.push({ name: value })
-}
 </script>
 
 <template>
   <v-app>
+    <a href="#main" class="skip-link">Skip to content</a>
     <AppBar v-if="!hideAppBar" />
 
-    <v-main>
+    <v-main id="main" tabindex="-1">
       <router-view />
     </v-main>
 
     <v-footer color="purple-darken-4 px-12" class="text-white" style="max-height: 40px; height: 40px">
       <span> &copy; {{ new Date().getFullYear() }} &ndash; David C. Morley </span>
       <v-spacer></v-spacer>
-      <span class="cursor-pointer" @click="navTo('contact')">Contact</span>
+      <router-link :to="{ name: 'about' }" class="footer-link">Contact</router-link>
     </v-footer>
   </v-app>
 </template>
+
+<style scoped>
+.footer-link {
+  color: inherit;
+}
+
+/* Hidden until a keyboard user tabs to it, then pinned top-left above the app bar. */
+.skip-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 2000;
+  padding: 8px 14px;
+  border-radius: 6px;
+  background: #fbbf24;
+  color: #1a1300;
+  font-weight: 700;
+  transform: translateY(-200%);
+}
+
+.skip-link:focus {
+  transform: none;
+}
+</style>

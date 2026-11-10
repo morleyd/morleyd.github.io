@@ -239,6 +239,14 @@ const games: GameCard[] = [
     to: '/time-since',
     gradient: 'linear-gradient(135deg, rgba(142, 36, 170, 0.42), rgba(59, 130, 246, 0.22))',
   },
+  {
+    key: 'artwork',
+    title: 'My Artwork',
+    description: "A gallery of art I've made since 2021.",
+    icon: 'mdi-palette',
+    to: '/gallery',
+    gradient: 'linear-gradient(135deg, rgba(244, 114, 182, 0.34), rgba(251, 191, 36, 0.26))',
+  },
 ]
 
 // Easter egg: the Konami code (↑↑↓↓←→←→BA) rains confetti on the arcade.
@@ -270,9 +278,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKonamiKey))
 <template>
   <v-container class="py-6" max-width="1100">
     <div class="mb-6">
-      <h1 class="page-title">Games</h1>
+      <h1 class="page-title">Playground</h1>
       <p class="text-body-1 text-medium-emphasis">
-        A small collection of games and tools. More on the way.
+        Games and small tools I've built for fun, plus some of my artwork.
         <span v-if="konamiFound"> 🎮 Cheat code accepted — you found the arcade’s secret.</span>
       </p>
     </div>
