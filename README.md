@@ -1,17 +1,19 @@
 # morleyd.github.io
 
-David Morley's personal site — a portfolio plus a small arcade of browser games.
-Live at **[morleyd.github.io](https://morleyd.github.io)**.
+David Morley's personal site — a research-scientist portfolio plus a small arcade
+of browser games. Live at **[morleyd.github.io](https://morleyd.github.io)**.
 
-Single-page app built with **Vue 3**, **Vuetify 3**, and **Vite**, deployed to
+Single-page app built with **Vue 3**, **Vuetify 4**, and **Vite**, deployed to
 GitHub Pages automatically on every push to `master`.
 
 ## What's here
 
-**Portfolio** — home, projects, timeline, gallery, awards, a "time since" widget,
-and contact.
+**Portfolio**: Home (headline, featured work, timeline), `/work` (case studies,
+earlier projects, archive), `/about` (`/contact` redirects there), and the
+résumé PDF. All portfolio copy lives in
+[`src/data/portfolio.ts`](src/data/portfolio.ts); the components only render it.
 
-**Games** (all under `/games`):
+**Playground** (`/games`, URL unchanged): the games below, plus the art gallery.
 
 | Game | Route | Notes |
 |------|-------|-------|
@@ -44,6 +46,21 @@ npm run dev        # Vite dev server on http://localhost:3000
 | `npm run test:e2e` | Playwright end-to-end tests. |
 | `npm run lint` | ESLint (flat config) with `--fix`. |
 | `npm run format` | Prettier over `src/`. |
+
+## Refreshing the résumé
+
+`public/David-Morley-Resume.pdf` is the public web copy of the résumé: the same
+one page, without the phone number. It's built outside this repo, from the
+résumé's Markdown source, by `build.sh` (pandoc + headless Chrome), which writes
+both `resume.pdf` and `resume-web.pdf`. To refresh it:
+
+1. Edit the résumé source and run `sh build.sh` next to it.
+2. Copy `resume-web.pdf` over `public/David-Morley-Resume.pdf`.
+3. If a headline number changed, update `src/data/portfolio.ts` to match: the
+   site and the PDF must say the same thing.
+
+The link-preview image (`public/og-image.png`, 1200×630) is a static render of
+the name and headline; regenerate it if the headline changes.
 
 ## Deployment
 
